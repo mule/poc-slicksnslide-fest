@@ -51,3 +51,17 @@ Final-frame RED (exit 1 after the maneuver first reached contact):
   ERROR: Last generated video frame does not show the real wall contact
 GREEN (exit 0):
   Saved issue #4 gameplay evidence: contacts=1 final_speed=0.77 center_y=386.97
+
+Review finding discrimination RED / GREEN
+Commands:
+  godot --headless --path . --script res://tests/issue_4_vehicle_maneuvers.gd -- --break-countersteer
+  godot --headless --path . --script res://tests/issue_4_vehicle_maneuvers.gd -- --break-proportional-steering
+  godot --headless --path . --script res://tests/issue_4_vehicle_maneuvers.gd -- --break-surface-recovery
+RED mutations (each exits 1):
+  FAIL: counter-steer meaningfully reduces slip (0.21 -> 0.93)
+  FAIL: half steering produces proportional rotation (half 1.06, full 1.06 rad)
+  FAIL: reduced off-track grip takes at least 15 more ticks to recover (dirt 32, off-track 32)
+GREEN behavior:
+  PASS: counter-steer meaningfully reduces slip (0.21 -> 0.14)
+  PASS: half steering produces proportional rotation (half 0.62, full 1.06 rad)
+  PASS: reduced off-track grip takes at least 15 more ticks to recover (dirt 32, off-track 115)

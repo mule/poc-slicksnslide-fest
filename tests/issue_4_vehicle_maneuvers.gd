@@ -23,6 +23,18 @@ func _run() -> void:
 	if vehicle_scene == null or tuning == null:
 		_finish()
 		return
+	if "--break-countersteer" in OS.get_cmdline_user_args():
+		await _test_constant_steering_and_countersteer(vehicle_scene, tuning)
+		_finish()
+		return
+	if "--break-proportional-steering" in OS.get_cmdline_user_args():
+		await _test_proportional_steering_response(vehicle_scene, tuning)
+		_finish()
+		return
+	if "--break-surface-recovery" in OS.get_cmdline_user_args():
+		await _test_surface_transition_changes_recovery(vehicle_scene, tuning)
+		_finish()
+		return
 	if "--surface-only" in OS.get_cmdline_user_args():
 		await _test_surface_transition_changes_recovery(vehicle_scene, tuning)
 		_finish()
@@ -40,6 +52,7 @@ func _run() -> void:
 
 	await _test_proportional_acceleration_and_no_hidden_drive(vehicle_scene, tuning)
 	await _test_service_brake_and_reverse(vehicle_scene, tuning)
+	await _test_proportional_steering_response(vehicle_scene, tuning)
 	await _test_constant_steering_and_countersteer(vehicle_scene, tuning)
 	await _test_handbrake_rotation_is_useful_and_bounded(vehicle_scene, tuning)
 	await _test_surface_transition_changes_recovery(vehicle_scene, tuning)
@@ -89,6 +102,14 @@ func _test_service_brake_and_reverse(scene: PackedScene, tuning: VehicleTuning) 
 	await _dispose_fixture(fixture)
 
 
+func _test_proportional_steering_response(scene: PackedScene, tuning: VehicleTuning) -> void:
+	var full_rotation := await _run_rotation_maneuver(scene, tuning, 0.0, 0.8)
+	var half_steer := 0.8 if "--break-proportional-steering" in OS.get_cmdline_user_args() else 0.4
+	var half_rotation := await _run_rotation_maneuver(scene, tuning, 0.0, half_steer)
+	_check(full_rotation >= 0.65, "full steering creates a meaningful one-second rotation (%.2f rad)" % full_rotation)
+	_check(half_rotation >= full_rotation * 0.35 and half_rotation <= full_rotation * 0.65, "half steering produces proportional rotation (half %.2f, full %.2f rad)" % [half_rotation, full_rotation])
+
+
 func _test_constant_steering_and_countersteer(scene: PackedScene, tuning: VehicleTuning) -> void:
 	var fixture := await _spawn_vehicle(scene, tuning)
 	var car = fixture.car
@@ -99,18 +120,21 @@ func _test_constant_steering_and_countersteer(scene: PackedScene, tuning: Vehicl
 	await _simulate_seconds(1.5)
 	var turned_radians: float = absf(car.rotation)
 	var slip_before: float = car.get_slip_ratio()
-	controls.set_controls(-0.65, 0.25, 0.0, 0.0)
+	if "--break-countersteer" in OS.get_cmdline_user_args():
+		controls.set_controls(0.65, 0.75, 0.0, 1.0)
+	else:
+		controls.set_controls(-0.65, 0.25, 0.0, 0.0)
 	await _simulate_seconds(1.5)
 	var slip_after: float = car.get_slip_ratio()
 	_check(turned_radians >= 0.35 and turned_radians <= 2.4, "constant analog steering creates a progressive turn (%.2f rad)" % turned_radians)
 	_check(absf(car.angular_velocity) <= tuning.max_angular_speed + 0.01, "steering angular speed remains bounded (%.2f rad/s)" % absf(car.angular_velocity))
-	_check(slip_after <= slip_before + 0.12, "counter-steer recovers rather than amplifies slip (%.2f -> %.2f)" % [slip_before, slip_after])
+	_check(slip_after <= slip_before - 0.03, "counter-steer meaningfully reduces slip (%.2f -> %.2f)" % [slip_before, slip_after])
 	await _dispose_fixture(fixture)
 
 
 func _test_handbrake_rotation_is_useful_and_bounded(scene: PackedScene, tuning: VehicleTuning) -> void:
-	var normal_rotation := await _run_rotation_maneuver(scene, tuning, 0.0)
-	var handbrake_rotation := await _run_rotation_maneuver(scene, tuning, 1.0)
+	var normal_rotation := await _run_rotation_maneuver(scene, tuning, 0.0, 0.8)
+	var handbrake_rotation := await _run_rotation_maneuver(scene, tuning, 1.0, 0.8)
 	_check(handbrake_rotation >= normal_rotation + 0.18, "handbrake adds useful rotation (normal %.2f, handbrake %.2f rad)" % [normal_rotation, handbrake_rotation])
 	_check(handbrake_rotation <= 2.8, "one-second handbrake input cannot snap or spin indefinitely (%.2f rad)" % handbrake_rotation)
 
@@ -124,6 +148,19 @@ func _test_surface_transition_changes_recovery(scene: PackedScene, tuning: Vehic
 	var grass_result := await _run_surface_maneuver(scene, tuning, grass)
 	_check(grass_result.visited_off_track, "local provider crosses the dirt/off-track boundary")
 	_check(grass_result.speed <= dirt_result.speed * 0.88, "off-track drag measurably lowers speed (dirt %.2f, grass %.2f)" % [dirt_result.speed, grass_result.speed])
+
+	var recovery_tuning := tuning
+	if "--break-surface-recovery" in OS.get_cmdline_user_args():
+		recovery_tuning = tuning.duplicate(true) as VehicleTuning
+		recovery_tuning.off_track_grip_multiplier = recovery_tuning.dirt_grip_multiplier
+		recovery_tuning.off_track_drag_multiplier = recovery_tuning.dirt_drag_multiplier
+	var all_grass := Issue4TestSurfaceProvider.new()
+	all_grass.boundary_y = INF
+	var dirt_recovery := await _run_slip_recovery(scene, recovery_tuning, dirt)
+	var grass_recovery := await _run_slip_recovery(scene, recovery_tuning, all_grass)
+	_check(dirt_recovery.initial_slip >= 0.45 and grass_recovery.initial_slip >= 0.45, "surface recovery maneuvers begin with equivalent meaningful slip (dirt %.2f, off-track %.2f)" % [dirt_recovery.initial_slip, grass_recovery.initial_slip])
+	_check(dirt_recovery.recovered and grass_recovery.recovered, "both surfaces recover below 0.12 slip within four seconds")
+	_check(grass_recovery.ticks >= dirt_recovery.ticks + 15, "reduced off-track grip takes at least 15 more ticks to recover (dirt %d, off-track %d)" % [dirt_recovery.ticks, grass_recovery.ticks])
 
 
 func _test_wall_impact_does_not_tunnel_or_gain_energy(scene: PackedScene, tuning: VehicleTuning) -> void:
@@ -224,12 +261,12 @@ func _run_straight_acceleration(scene: PackedScene, tuning: VehicleTuning, throt
 	return result
 
 
-func _run_rotation_maneuver(scene: PackedScene, tuning: VehicleTuning, handbrake: float) -> float:
+func _run_rotation_maneuver(scene: PackedScene, tuning: VehicleTuning, handbrake: float, steer: float) -> float:
 	var fixture := await _spawn_vehicle(scene, tuning)
 	fixture.controls.set_controls(0.0, 1.0, 0.0, 0.0)
 	await _simulate_seconds(2.5)
 	var start_rotation: float = fixture.car.rotation
-	fixture.controls.set_controls(0.8, 0.55, 0.0, handbrake)
+	fixture.controls.set_controls(steer, 0.55, 0.0, handbrake)
 	await _simulate_seconds(1.0)
 	var rotation_delta := absf(wrapf(fixture.car.rotation - start_rotation, -PI, PI))
 	await _dispose_fixture(fixture)
@@ -245,6 +282,25 @@ func _run_surface_maneuver(scene: PackedScene, tuning: VehicleTuning, provider: 
 		"slip": fixture.car.get_slip_ratio(),
 		"surface": fixture.car.get_surface_type(),
 		"visited_off_track": fixture.car.has_method("has_visited_surface") and fixture.car.has_visited_surface(SurfaceQuery.SurfaceType.OFF_TRACK),
+	}
+	await _dispose_fixture(fixture)
+	return result
+
+
+func _run_slip_recovery(scene: PackedScene, tuning: VehicleTuning, provider: SurfaceQuery) -> Dictionary:
+	var fixture := await _spawn_vehicle(scene, tuning, false, provider)
+	fixture.controls.reset()
+	fixture.car.linear_velocity = Vector2(12.0, -18.0)
+	await physics_frame
+	var initial_slip: float = fixture.car.get_slip_ratio()
+	var ticks := 0
+	while fixture.car.get_slip_ratio() > 0.12 and ticks < 240:
+		await physics_frame
+		ticks += 1
+	var result := {
+		"initial_slip": initial_slip,
+		"ticks": ticks,
+		"recovered": fixture.car.get_slip_ratio() <= 0.12,
 	}
 	await _dispose_fixture(fixture)
 	return result

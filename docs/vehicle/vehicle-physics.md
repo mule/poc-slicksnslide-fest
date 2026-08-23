@@ -26,9 +26,10 @@ The checked default-tuning ranges are intentionally broad enough for solver port
 | --- | --- |
 | Straight acceleration | Full throttle reaches 20–34 units/s after 4 s; half throttle is 38–65% of full; 1 s coast loses at least 0.25 units/s. |
 | Brake/reverse | Approach speed is at least 17 units/s; after 1.5 s braking speed is at most 2.5; continued hold yields 5–17 units/s reverse. |
-| Constant steering | 0.65 steer for 1.5 s after acceleration turns 0.35–2.4 rad; yaw never exceeds 2.6 rad/s; counter-steer does not increase residual slip by more than 0.12. |
+| Analog steering | A one-second 0.8 input rotates at least 0.65 rad; a 0.4 input produces 35–65% of the full-input rotation. |
+| Constant steering | 0.65 steer for 1.5 s after acceleration turns 0.35–2.4 rad; yaw never exceeds 2.6 rad/s; counter-steer reduces residual slip by at least 0.03. |
 | Handbrake | One-second rotation exceeds the normal turn by at least 0.18 rad and remains below 2.8 rad. |
-| Surface transition | The deterministic boundary records off-track and final speed is at most 88% of the dirt-only run. |
+| Surface transition | The deterministic boundary records off-track and final speed is at most 88% of the dirt-only run. Identical meaningful-slip starts recover below 0.12 within four seconds, with off-track recovery taking at least 15 ticks longer than dirt. |
 | Wall impact | A real body contact occurs; the capsule remains on the approach side; peak speed stays at or below 48; post-impact speed does not exceed approach peak by more than 5% + 0.5. |
 | Reset | Transform is restored within 0.1 units / 0.01 rad, velocities clear, overlapping candidates are rejected, and stable dirt driving advances the checkpoint. |
 | Frame stability | Identical 180-tick inputs at 30 and 144 render FPS differ by at most 0.25 units/s and 0.75 world units. |
