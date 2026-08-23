@@ -14,7 +14,7 @@ From a clean checkout:
 godot --editor --path .
 ```
 
-Press **F6** in the editor or run the configured main scene directly:
+Press **F5** (**Run Project**) in the editor or run the configured main scene directly:
 
 ```sh
 godot --path .
