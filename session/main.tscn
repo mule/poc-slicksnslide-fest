@@ -1,17 +1,32 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://session/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://session/diagnostics_overlay.gd" id="2_overlay"]
 [ext_resource type="Resource" path="res://data/default_session_settings.tres" id="3_session"]
 [ext_resource type="Resource" path="res://data/default_vehicle_tuning.tres" id="4_tuning"]
 
+[sub_resource type="StyleBoxFlat" id="StyleBox_focus"]
+draw_center = false
+border_width_left = 3
+border_width_top = 3
+border_width_right = 3
+border_width_bottom = 3
+border_color = Color(0.980392, 0.756863, 0.25098, 1)
+corner_radius_top_left = 5
+corner_radius_top_right = 5
+corner_radius_bottom_right = 5
+corner_radius_bottom_left = 5
+
 [node name="Main" type="Node"]
+process_mode = 3
 script = ExtResource("1_main")
 session_settings = ExtResource("3_session")
 vehicle_tuning = ExtResource("4_tuning")
 
-[node name="Background" type="ColorRect" parent="."]
-layout_mode = 1
+[node name="BackgroundLayer" type="CanvasLayer" parent="."]
+layer = -10
+
+[node name="Background" type="ColorRect" parent="BackgroundLayer"]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -21,75 +36,163 @@ mouse_filter = 2
 color = Color(0.12549, 0.227451, 0.117647, 1)
 
 [node name="World" type="Node2D" parent="."]
+process_mode = 1
 
 [node name="TrackMount" type="Node2D" parent="World"]
 unique_name_in_owner = true
 
-[node name="PlaceholderTrack" type="Node2D" parent="World/TrackMount"]
-
-[node name="Shoulder" type="Line2D" parent="World/TrackMount/PlaceholderTrack"]
-points = PackedVector2Array(282, 548, 164, 430, 183, 249, 356, 142, 629, 134, 912, 167, 1095, 300, 1083, 470, 898, 574, 653, 555, 474, 459, 282, 548)
-width = 178.0
-default_color = Color(0.227451, 0.145098, 0.0745098, 1)
-joint_mode = 2
-begin_cap_mode = 2
-end_cap_mode = 2
-antialiased = true
-
-[node name="Dirt" type="Line2D" parent="World/TrackMount/PlaceholderTrack"]
-points = PackedVector2Array(282, 548, 164, 430, 183, 249, 356, 142, 629, 134, 912, 167, 1095, 300, 1083, 470, 898, 574, 653, 555, 474, 459, 282, 548)
-width = 148.0
-default_color = Color(0.482353, 0.305882, 0.14902, 1)
-joint_mode = 2
-begin_cap_mode = 2
-end_cap_mode = 2
-antialiased = true
-
-[node name="CenterGuide" type="Line2D" parent="World/TrackMount/PlaceholderTrack"]
-points = PackedVector2Array(282, 548, 164, 430, 183, 249, 356, 142, 629, 134, 912, 167, 1095, 300, 1083, 470, 898, 574, 653, 555, 474, 459, 282, 548)
-width = 3.0
-default_color = Color(0.909804, 0.717647, 0.384314, 0.45)
-joint_mode = 2
-begin_cap_mode = 2
-end_cap_mode = 2
-antialiased = true
-
-[node name="StartLine" type="Line2D" parent="World/TrackMount/PlaceholderTrack"]
-points = PackedVector2Array(238, 493, 329, 582)
-width = 8.0
-default_color = Color(0.94902, 0.92549, 0.788235, 1)
-
 [node name="VehicleMount" type="Node2D" parent="World"]
 unique_name_in_owner = true
 
-[node name="PlaceholderVehicle" type="Node2D" parent="World/VehicleMount"]
-position = Vector2(291, 541)
-rotation = 2.35619
+[node name="SessionUI" type="CanvasLayer" parent="."]
+layer = 5
 
-[node name="Shadow" type="Polygon2D" parent="World/VehicleMount/PlaceholderVehicle"]
-position = Vector2(5, 6)
-polygon = PackedVector2Array(-13, -24, 13, -24, 17, 18, 0, 27, -17, 18)
-color = Color(0.027451, 0.0392157, 0.0235294, 0.45)
+[node name="SessionHud" type="PanelContainer" parent="SessionUI"]
+unique_name_in_owner = true
+offset_left = 24.0
+offset_top = 20.0
+offset_right = 584.0
+offset_bottom = 82.0
+mouse_filter = 2
 
-[node name="Body" type="Polygon2D" parent="World/VehicleMount/PlaceholderVehicle"]
-polygon = PackedVector2Array(-13, -24, 13, -24, 17, 18, 0, 27, -17, 18)
-color = Color(0.85098, 0.152941, 0.0941176, 1)
+[node name="HudMargin" type="MarginContainer" parent="SessionUI/SessionHud"]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 10
 
-[node name="Windshield" type="Polygon2D" parent="World/VehicleMount/PlaceholderVehicle"]
-polygon = PackedVector2Array(-9, -13, 9, -13, 11, 2, -11, 2)
-color = Color(0.109804, 0.184314, 0.2, 1)
+[node name="HudRow" type="HBoxContainer" parent="SessionUI/SessionHud/HudMargin"]
+layout_mode = 2
+theme_override_constants/separation = 24
 
-[node name="Title" type="Label" parent="."]
-offset_left = 32.0
-offset_top = 650.0
-offset_right = 590.0
-offset_bottom = 700.0
+[node name="SeedLabel" type="Label" parent="SessionUI/SessionHud/HudMargin/HudRow"]
+unique_name_in_owner = true
+layout_mode = 2
 theme_override_colors/font_color = Color(0.968627, 0.929412, 0.803922, 1)
-theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
-theme_override_constants/shadow_offset_x = 2
-theme_override_constants/shadow_offset_y = 2
-theme_override_font_sizes/font_size = 24
-text = "SLICKS 'N SLIDE FEST  ·  FOUNDATION PLACEHOLDER"
+theme_override_font_sizes/font_size = 20
+text = "SEED  0"
+
+[node name="LapLabel" type="Label" parent="SessionUI/SessionHud/HudMargin/HudRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.968627, 0.929412, 0.803922, 1)
+theme_override_font_sizes/font_size = 20
+text = "LAP  1"
+
+[node name="TimeLabel" type="Label" parent="SessionUI/SessionHud/HudMargin/HudRow"]
+unique_name_in_owner = true
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(1, 0.768627, 0.27451, 1)
+theme_override_font_sizes/font_size = 20
+text = "TIME  00:00.000"
+
+[node name="StatusPanel" type="PanelContainer" parent="SessionUI"]
+unique_name_in_owner = true
+anchors_preset = 10
+anchor_right = 1.0
+offset_left = 360.0
+offset_top = 100.0
+offset_right = -360.0
+offset_bottom = 146.0
+grow_horizontal = 2
+mouse_filter = 2
+
+[node name="StatusLabel" type="Label" parent="SessionUI/StatusPanel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.968627, 0.929412, 0.803922, 1)
+theme_override_font_sizes/font_size = 17
+text = "Keyboard controls active"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="PauseOverlay" type="ColorRect" parent="SessionUI"]
+unique_name_in_owner = true
+visible = false
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.0196078, 0.027451, 0.0196078, 0.78)
+
+[node name="PauseCenter" type="CenterContainer" parent="SessionUI/PauseOverlay"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="PausePanel" type="PanelContainer" parent="SessionUI/PauseOverlay/PauseCenter"]
+custom_minimum_size = Vector2(420, 0)
+layout_mode = 2
+
+[node name="PauseMargin" type="MarginContainer" parent="SessionUI/PauseOverlay/PauseCenter/PausePanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 32
+theme_override_constants/margin_top = 28
+theme_override_constants/margin_right = 32
+theme_override_constants/margin_bottom = 28
+
+[node name="PauseContent" type="VBoxContainer" parent="SessionUI/PauseOverlay/PauseCenter/PausePanel/PauseMargin"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="PauseTitle" type="Label" parent="SessionUI/PauseOverlay/PauseCenter/PausePanel/PauseMargin/PauseContent"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.768627, 0.27451, 1)
+theme_override_font_sizes/font_size = 30
+text = "TIME TRIAL PAUSED"
+horizontal_alignment = 1
+
+[node name="PauseHint" type="Label" parent="SessionUI/PauseOverlay/PauseCenter/PausePanel/PauseMargin/PauseContent"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.780392, 0.8, 0.729412, 1)
+theme_override_font_sizes/font_size = 16
+text = "D-pad / stick to focus  ·  Confirm / Enter to select"
+horizontal_alignment = 1
+
+[node name="Spacer" type="Control" parent="SessionUI/PauseOverlay/PauseCenter/PausePanel/PauseMargin/PauseContent"]
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="ResumeButton" type="Button" parent="SessionUI/PauseOverlay/PauseCenter/PausePanel/PauseMargin/PauseContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+focus_mode = 2
+theme_override_font_sizes/font_size = 19
+theme_override_styles/focus = SubResource("StyleBox_focus")
+text = "Resume"
+
+[node name="RestartButton" type="Button" parent="SessionUI/PauseOverlay/PauseCenter/PausePanel/PauseMargin/PauseContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+focus_mode = 2
+theme_override_font_sizes/font_size = 19
+theme_override_styles/focus = SubResource("StyleBox_focus")
+text = "Restart same seed"
+
+[node name="NextSeedButton" type="Button" parent="SessionUI/PauseOverlay/PauseCenter/PausePanel/PauseMargin/PauseContent"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+focus_mode = 2
+theme_override_font_sizes/font_size = 19
+theme_override_styles/focus = SubResource("StyleBox_focus")
+text = "Regenerate next seed"
+
+[node name="ControlsHint" type="Label" parent="SessionUI/PauseOverlay/PauseCenter/PausePanel/PauseMargin/PauseContent"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.780392, 0.8, 0.729412, 1)
+theme_override_font_sizes/font_size = 14
+text = "Drive: left stick + triggers  ·  Handbrake and reset: face buttons"
+horizontal_alignment = 1
 
 [node name="DiagnosticsOverlay" type="CanvasLayer" parent="."]
 unique_name_in_owner = true
@@ -98,9 +201,9 @@ script = ExtResource("2_overlay")
 
 [node name="Panel" type="PanelContainer" parent="DiagnosticsOverlay"]
 offset_left = 24.0
-offset_top = 24.0
+offset_top = 166.0
 offset_right = 330.0
-offset_bottom = 128.0
+offset_bottom = 270.0
 modulate = Color(1, 1, 1, 0.88)
 
 [node name="MetricsLabel" type="Label" parent="DiagnosticsOverlay/Panel"]
@@ -110,4 +213,4 @@ theme_override_colors/font_color = Color(0.92549, 0.945098, 0.866667, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 4
 theme_override_font_sizes/font_size = 16
-text = "DEV  F3 diagnostics\nFPS: 0   frame: 0.00 ms\nseed: 0   speed: 0.0 km/h\nsurface: placeholder   slip: 0.00"
+text = "DEV  F3 diagnostics\nFPS: 0   frame: 0.00 ms\nseed: 0   speed: 0.0 km/h\nsurface: unknown   slip: 0.00"

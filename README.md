@@ -1,6 +1,6 @@
 # Slicks 'n Slide Fest
 
-A Godot proof of concept for a single-viewport, top-down dirt-racing game. The current foundation launches a placeholder circuit and establishes the contracts that runtime track generation, vehicle physics, shared input, and target-platform adapters build upon.
+A Godot proof of concept for a single-viewport, top-down dirt-racing game. It now launches directly into a deterministic generated circuit with a force-based car, controller-first input, ordered lap timing, safe reset, pause, and seed restart.
 
 ## Required Godot version
 
@@ -20,7 +20,9 @@ Press **F5** (**Run Project**) in the editor or run the configured main scene di
 godot --path .
 ```
 
-The project opens one full-screen gameplay canvas containing placeholder track and vehicle geometry. Press **F3** to toggle the development diagnostics overlay. The overlay is forcibly hidden in release exports.
+The project opens one full-screen gameplay canvas. Drive with a left stick and triggers or WASD/arrow keys, use the handbrake with a face button or Space, reset with a separate face button or R, and pause with Menu/Start or Esc. The pause menu can resume, restart the same seed, or generate the next seed without a mouse.
+
+Press **F3** to toggle the development diagnostics overlay. The overlay is forcibly hidden in release exports. See [Controller-first time trial](docs/controller-time-trial.md) for the complete mapping and tuning contract.
 
 ## Verification
 
@@ -38,20 +40,27 @@ godot --headless --path . --script res://tests/headless_smoke.gd
 
 The smoke check loads and instantiates the configured main scene, exercises its interchangeable track/vehicle mount points, verifies normalized vehicle input behavior, checks release diagnostics visibility, and loads the default seed and vehicle-tuning resources.
 
-Refresh the checked-in 1280×720 placeholder-scene evidence using a graphical Godot session:
+Run the issue #5 input/session and integrated-scene checks:
 
 ```sh
-godot --path . --script res://tests/capture_foundation.gd
+godot --headless --path . --script res://tests/issue_5_input_session_test.gd
+godot --headless --path . --script res://tests/issue_5_main_session_test.gd
+```
+
+Refresh the checked-in 1280×720 gameplay and 1280×800 pause-menu evidence using a graphical Godot session:
+
+```sh
+godot --path . --script res://tests/capture_issue_5_session.gd
 ```
 
 ## Project boundaries
 
 | Directory | Responsibility |
 | --- | --- |
-| `track/` | Generated track data and surface-query contracts; generator/rendering/collision follows in issue #3 |
-| `vehicle/` | Vehicle tuning resource and future dynamics scene from issue #4 |
-| `input/` | Hardware-independent normalized vehicle input; InputMap/device mapping follows in issue #5 |
-| `session/` | Root scene, interchangeable mounts, session settings, and development diagnostics |
+| `track/` | Deterministic generated track data, runtime geometry/collision, lap order, and surface queries |
+| `vehicle/` | Tunable force-based car dynamics, reset safety, feedback, and diagnostics |
+| `input/` | InputMap polling, deadzone processing, and hardware-independent normalized vehicle input |
+| `session/` | Integrated time trial, checkpoint crossing, pause/restart flow, HUD, and diagnostics |
 | `platform/` | Small Android or Linux/Steam Deck adapters only |
 | `data/` | Versioned/default seed and physics tuning resources |
 | `tests/` | Headless project, contract, and future deterministic behavior checks |
