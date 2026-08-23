@@ -20,6 +20,7 @@ func _ready() -> void:
 	_build_line("Dirt", definition.track_width, DIRT_COLOR, -2)
 	_build_boundary_line("LeftEdge", definition.left_boundary)
 	_build_boundary_line("RightEdge", definition.right_boundary)
+	_build_start_finish_line()
 	_build_collision()
 
 
@@ -45,6 +46,25 @@ func _build_boundary_line(line_name: String, points: PackedVector2Array) -> void
 	line.default_color = EDGE_COLOR
 	line.antialiased = true
 	line.z_index = -1
+	add_child(line)
+
+
+func _build_start_finish_line() -> void:
+	if definition.checkpoints.is_empty():
+		return
+	var checkpoint: Transform2D = definition.checkpoints[0]
+	var lateral := checkpoint.y.normalized()
+	var half_width: float = definition.track_width * 0.5
+	var line := Line2D.new()
+	line.name = "StartFinishLine"
+	line.points = PackedVector2Array([
+		checkpoint.origin - lateral * half_width,
+		checkpoint.origin + lateral * half_width,
+	])
+	line.width = 5.0
+	line.default_color = Color("f4edc9")
+	line.antialiased = true
+	line.z_index = 0
 	add_child(line)
 
 
