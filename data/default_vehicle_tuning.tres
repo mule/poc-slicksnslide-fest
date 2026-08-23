@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="VehicleTuning" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://vehicle/vehicle_tuning.gd" id="1_tuning"]
+
+[resource]
+script = ExtResource("1_tuning")
+mass_kg = 1100.0
+engine_force = 8500.0
+brake_force = 12000.0
+rolling_drag = 0.8
+aerodynamic_drag = 0.025
+steering_response = 2.6
+lateral_grip = 8.0
+handbrake_grip_multiplier = 0.35
+dirt_grip_multiplier = 1.0
+off_track_grip_multiplier = 0.55
+off_track_drag_multiplier = 2.0
