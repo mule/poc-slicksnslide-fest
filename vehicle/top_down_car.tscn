@@ -1,0 +1,76 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://vehicle/top_down_car.gd" id="1_car"]
+[ext_resource type="Resource" path="res://data/default_vehicle_tuning.tres" id="2_tuning"]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape_car"]
+radius = 15.0
+height = 52.0
+
+[sub_resource type="PhysicsMaterial" id="PhysicsMaterial_car"]
+friction = 0.25
+bounce = 0.05
+
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcess_dust"]
+particle_flag_disable_z = true
+direction = Vector3(0, 1, 0)
+spread = 30.0
+initial_velocity_min = 7.0
+initial_velocity_max = 15.0
+gravity = Vector3(0, 3, 0)
+scale_min = 1.0
+scale_max = 2.4
+color = Color(0.58, 0.38, 0.19, 0.55)
+
+[node name="TopDownCar" type="RigidBody2D"]
+mass = 1100.0
+physics_material_override = SubResource("PhysicsMaterial_car")
+gravity_scale = 0.0
+custom_integrator = true
+continuous_cd = 1
+contact_monitor = true
+max_contacts_reported = 8
+can_sleep = false
+script = ExtResource("1_car")
+tuning = ExtResource("2_tuning")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CapsuleShape_car")
+
+[node name="Shadow" type="Polygon2D" parent="."]
+position = Vector2(4, 6)
+polygon = PackedVector2Array(-13, -24, 13, -24, 17, 18, 0, 27, -17, 18)
+color = Color(0.02, 0.03, 0.02, 0.42)
+
+[node name="Body" type="Polygon2D" parent="."]
+polygon = PackedVector2Array(-13, -24, 13, -24, 17, 18, 0, 27, -17, 18)
+color = Color(0.88, 0.18, 0.07, 1)
+
+[node name="Windshield" type="Polygon2D" parent="."]
+polygon = PackedVector2Array(-9, -13, 9, -13, 11, 2, -11, 2)
+color = Color(0.08, 0.16, 0.19, 1)
+
+[node name="DirectionMark" type="Polygon2D" parent="."]
+polygon = PackedVector2Array(-4, -21, 4, -21, 0, -28)
+color = Color(1, 0.83, 0.35, 1)
+
+[node name="SkidFeedback" type="Line2D" parent="."]
+position = Vector2(0, 21)
+points = PackedVector2Array(-10, 0, 10, 0)
+width = 5.0
+default_color = Color(0.08, 0.06, 0.04, 0.75)
+visible = false
+
+[node name="Dust" type="CPUParticles2D" parent="."]
+position = Vector2(0, 25)
+emitting = false
+amount = 20
+lifetime = 0.7
+local_coords = false
+process_material = SubResource("ParticleProcess_dust")
+
+[node name="FollowCamera" type="Camera2D" parent="."]
+top_level = true
+position_smoothing_enabled = true
+position_smoothing_speed = 7.0
+ignore_rotation = true

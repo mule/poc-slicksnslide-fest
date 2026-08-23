@@ -1,0 +1,67 @@
+GitHub issue #4 strict TDD evidence (Godot 4.7.1)
+
+Initial RED
+Command: godot --headless --path . --script res://tests/issue_4_vehicle_maneuvers.gd
+Expected failure before production code:
+  FAIL: top-down RigidBody2D vehicle scene loads
+  PASS: default issue #4 tuning loads
+  Issue #4 maneuvers failed: 1/2 checks
+
+Safety RED / GREEN
+Command: godot --headless --path . --script res://tests/issue_4_vehicle_maneuvers.gd -- --reset-only
+RED:
+  FAIL: dirt driving advances the latest valid reset checkpoint
+  FAIL: automatic reset checkpoint remains near the latest stable track pose
+  Issue #4 maneuvers failed: 2/9 checks
+GREEN:
+  PASS: reset rejects a candidate pose overlapping a boundary
+  PASS: rejected reset candidate preserves the previous safe pose
+  PASS: dirt driving advances the latest valid reset checkpoint
+  PASS: automatic reset checkpoint remains near the latest stable track pose
+  Issue #4 maneuvers passed: 9 checks
+
+Surface history RED / GREEN
+Command: godot --headless --path . --script res://tests/issue_4_vehicle_maneuvers.gd -- --surface-only
+RED:
+  FAIL: local provider crosses the dirt/off-track boundary
+  PASS: off-track drag measurably lowers speed (dirt 18.64, grass 9.41)
+  Issue #4 maneuvers failed: 1/4 checks
+GREEN:
+  PASS: local provider crosses the dirt/off-track boundary
+  PASS: off-track drag measurably lowers speed (dirt 18.64, grass 9.41)
+  Issue #4 maneuvers passed: 4 checks
+
+Full GREEN
+Command: godot --headless --path . --script res://tests/issue_4_vehicle_maneuvers.gd
+Result (exit 0):
+  PASS: full throttle reaches 20..34 world units/s after 4 s (got 23.80)
+  PASS: service brake stops without overshoot jitter (got 0.22)
+  PASS: counter-steer recovers rather than amplifies slip (0.21 -> 0.14)
+  PASS: handbrake adds useful rotation (normal 1.06, handbrake 1.35 rad)
+  PASS: off-track drag measurably lowers speed (dirt 18.64, grass 9.41)
+  PASS: wall maneuver starts at the documented maximum expected speed (48.00)
+  PASS: fixed-tick trajectory is render-frame-rate stable (delta 0.000)
+  Issue #4 maneuvers passed: 33 checks
+
+Visual-review capture regression RED / GREEN
+Command: godot --headless --path . --script res://tests/capture_issue_4_gameplay.gd
+RED (exit 1):
+  ERROR: Evidence capture ended before a real wall contact
+Final-frame RED (exit 1 after the maneuver first reached contact):
+  ERROR: Last generated video frame does not show the real wall contact
+GREEN (exit 0):
+  Saved issue #4 gameplay evidence: contacts=1 final_speed=0.77 center_y=386.97
+
+Review finding discrimination RED / GREEN
+Commands:
+  godot --headless --path . --script res://tests/issue_4_vehicle_maneuvers.gd -- --break-countersteer
+  godot --headless --path . --script res://tests/issue_4_vehicle_maneuvers.gd -- --break-proportional-steering
+  godot --headless --path . --script res://tests/issue_4_vehicle_maneuvers.gd -- --break-surface-recovery
+RED mutations (each exits 1):
+  FAIL: counter-steer meaningfully reduces slip (0.21 -> 0.93)
+  FAIL: half steering produces proportional rotation (half 1.06, full 1.06 rad)
+  FAIL: reduced off-track grip takes at least 15 more ticks to recover (dirt 32, off-track 32)
+GREEN behavior:
+  PASS: counter-steer meaningfully reduces slip (0.21 -> 0.14)
+  PASS: half steering produces proportional rotation (half 0.62, full 1.06 rad)
+  PASS: reduced off-track grip takes at least 15 more ticks to recover (dirt 32, off-track 115)
