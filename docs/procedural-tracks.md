@@ -13,7 +13,7 @@
 | Target centerline sample spacing | 10 world units |
 | Deterministic validation attempts | At most 6 |
 
-The start/spawn transform is the first centerline sample and faces the first segment. Eight transforms are placed in lap order at equal sample-index intervals. The finish checkpoint is index 0; `LapProgressTracker` accepts only positive-direction crossings in the sequence `1..7, 0`, so repeated or reverse finish crossings cannot increment the lap.
+The start/spawn transform is the first centerline sample and rotates the vehicle-local `-Y` forward axis to face the first segment. Eight transforms are placed in lap order at equal sample-index intervals. The finish checkpoint is index 0; `LapProgressTracker` accepts only positive-direction crossings in the sequence `1..7, 0`, so repeated or reverse finish crossings cannot increment the lap.
 
 Each candidate is checked against the configured bounds and for non-adjacent centerline/edge intersections and left/right edge overlap. Rejected candidates consume the next deterministic RNG values. If the bounded attempts are exhausted, generation returns a fixed, validated stadium while retaining the requested seed and reporting `retry_exhausted:<last reason>; fallback=known_valid_stadium`.
 

@@ -56,7 +56,7 @@ func _build_definition(requested_seed: int, half_straight: float, radius: float,
 	definition.max_curvature = _measure_max_curvature(definition.centerline)
 	definition.start_straight_length = half_straight * 2.0
 	definition.forward_direction = (definition.centerline[1] - definition.centerline[0]).normalized()
-	definition.spawn_transform = Transform2D(definition.forward_direction.angle(), definition.centerline[0])
+	definition.spawn_transform = Transform2D(definition.forward_direction.angle() + PI * 0.5, definition.centerline[0])
 	definition.checkpoints = _build_checkpoints(definition.centerline)
 	definition.bounds = _combined_bounds(definition.left_boundary, definition.right_boundary)
 	definition.geometry_fingerprint = _fingerprint(definition)

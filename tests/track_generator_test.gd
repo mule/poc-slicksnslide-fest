@@ -79,7 +79,7 @@ func _verify_driveable_definition(definition, seed: int) -> void:
 	_check(not _has_self_intersection(definition.right_boundary), "seed %d right boundary does not self-intersect" % seed)
 	_check(not _boundaries_intersect(definition.left_boundary, definition.right_boundary), "seed %d boundaries do not overlap" % seed)
 	_check(definition.spawn_transform.origin.is_equal_approx(definition.centerline[0]), "seed %d spawn is on the start line" % seed)
-	_check(definition.spawn_transform.x.normalized().dot(definition.forward_direction.normalized()) > 0.999, "seed %d spawn faces forward" % seed)
+	_check((-definition.spawn_transform.y).normalized().dot(definition.forward_direction.normalized()) > 0.999, "seed %d vehicle-local forward axis faces the first segment" % seed)
 	_check(definition.checkpoints.size() == 8, "seed %d supplies eight ordered checkpoints" % seed)
 	for checkpoint_index in range(definition.checkpoints.size()):
 		var expected_sample := int(round(float(checkpoint_index) * float(definition.centerline.size() - 1) / float(definition.checkpoints.size())))
