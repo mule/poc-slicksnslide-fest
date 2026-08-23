@@ -1,0 +1,12 @@
+# Godot editor and import cache
+.godot/
+
+# Local exports and generated platform projects
+builds/
+android/build/
+
+# Local editor and operating-system files
+*.tmp
+*.translation
+.DS_Store
+Thumbs.db

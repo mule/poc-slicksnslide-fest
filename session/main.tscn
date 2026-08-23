@@ -1,0 +1,113 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://session/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://session/diagnostics_overlay.gd" id="2_overlay"]
+[ext_resource type="Resource" path="res://data/default_session_settings.tres" id="3_session"]
+[ext_resource type="Resource" path="res://data/default_vehicle_tuning.tres" id="4_tuning"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1_main")
+session_settings = ExtResource("3_session")
+vehicle_tuning = ExtResource("4_tuning")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.12549, 0.227451, 0.117647, 1)
+
+[node name="World" type="Node2D" parent="."]
+
+[node name="TrackMount" type="Node2D" parent="World"]
+unique_name_in_owner = true
+
+[node name="PlaceholderTrack" type="Node2D" parent="World/TrackMount"]
+
+[node name="Shoulder" type="Line2D" parent="World/TrackMount/PlaceholderTrack"]
+points = PackedVector2Array(282, 548, 164, 430, 183, 249, 356, 142, 629, 134, 912, 167, 1095, 300, 1083, 470, 898, 574, 653, 555, 474, 459, 282, 548)
+width = 178.0
+default_color = Color(0.227451, 0.145098, 0.0745098, 1)
+joint_mode = 2
+begin_cap_mode = 2
+end_cap_mode = 2
+antialiased = true
+
+[node name="Dirt" type="Line2D" parent="World/TrackMount/PlaceholderTrack"]
+points = PackedVector2Array(282, 548, 164, 430, 183, 249, 356, 142, 629, 134, 912, 167, 1095, 300, 1083, 470, 898, 574, 653, 555, 474, 459, 282, 548)
+width = 148.0
+default_color = Color(0.482353, 0.305882, 0.14902, 1)
+joint_mode = 2
+begin_cap_mode = 2
+end_cap_mode = 2
+antialiased = true
+
+[node name="CenterGuide" type="Line2D" parent="World/TrackMount/PlaceholderTrack"]
+points = PackedVector2Array(282, 548, 164, 430, 183, 249, 356, 142, 629, 134, 912, 167, 1095, 300, 1083, 470, 898, 574, 653, 555, 474, 459, 282, 548)
+width = 3.0
+default_color = Color(0.909804, 0.717647, 0.384314, 0.45)
+joint_mode = 2
+begin_cap_mode = 2
+end_cap_mode = 2
+antialiased = true
+
+[node name="StartLine" type="Line2D" parent="World/TrackMount/PlaceholderTrack"]
+points = PackedVector2Array(238, 493, 329, 582)
+width = 8.0
+default_color = Color(0.94902, 0.92549, 0.788235, 1)
+
+[node name="VehicleMount" type="Node2D" parent="World"]
+unique_name_in_owner = true
+
+[node name="PlaceholderVehicle" type="Node2D" parent="World/VehicleMount"]
+position = Vector2(291, 541)
+rotation = 2.35619
+
+[node name="Shadow" type="Polygon2D" parent="World/VehicleMount/PlaceholderVehicle"]
+position = Vector2(5, 6)
+polygon = PackedVector2Array(-13, -24, 13, -24, 17, 18, 0, 27, -17, 18)
+color = Color(0.027451, 0.0392157, 0.0235294, 0.45)
+
+[node name="Body" type="Polygon2D" parent="World/VehicleMount/PlaceholderVehicle"]
+polygon = PackedVector2Array(-13, -24, 13, -24, 17, 18, 0, 27, -17, 18)
+color = Color(0.85098, 0.152941, 0.0941176, 1)
+
+[node name="Windshield" type="Polygon2D" parent="World/VehicleMount/PlaceholderVehicle"]
+polygon = PackedVector2Array(-9, -13, 9, -13, 11, 2, -11, 2)
+color = Color(0.109804, 0.184314, 0.2, 1)
+
+[node name="Title" type="Label" parent="."]
+offset_left = 32.0
+offset_top = 650.0
+offset_right = 590.0
+offset_bottom = 700.0
+theme_override_colors/font_color = Color(0.968627, 0.929412, 0.803922, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.8)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_font_sizes/font_size = 24
+text = "SLICKS 'N SLIDE FEST  ·  FOUNDATION PLACEHOLDER"
+
+[node name="DiagnosticsOverlay" type="CanvasLayer" parent="."]
+unique_name_in_owner = true
+layer = 10
+script = ExtResource("2_overlay")
+
+[node name="Panel" type="PanelContainer" parent="DiagnosticsOverlay"]
+offset_left = 24.0
+offset_top = 24.0
+offset_right = 330.0
+offset_bottom = 128.0
+modulate = Color(1, 1, 1, 0.88)
+
+[node name="MetricsLabel" type="Label" parent="DiagnosticsOverlay/Panel"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.92549, 0.945098, 0.866667, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
+theme_override_font_sizes/font_size = 16
+text = "DEV  F3 diagnostics\nFPS: 0   frame: 0.00 ms\nseed: 0   speed: 0.0 km/h\nsurface: placeholder   slip: 0.00"
