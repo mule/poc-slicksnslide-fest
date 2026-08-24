@@ -24,6 +24,7 @@ var _status_hide_at_msec := 0
 @onready var _resume_button: Button = %ResumeButton
 @onready var _restart_button: Button = %RestartButton
 @onready var _next_seed_button: Button = %NextSeedButton
+@onready var _application_lifecycle: Node = %ApplicationLifecycle
 
 
 func _ready() -> void:
@@ -40,6 +41,8 @@ func _ready() -> void:
 	_resume_button.pressed.connect(_on_resume_pressed)
 	_restart_button.pressed.connect(_on_restart_pressed)
 	_next_seed_button.pressed.connect(_on_next_seed_pressed)
+	_application_lifecycle.suspension_requested.connect(_on_application_suspension_requested)
+	_application_lifecycle.resume_observed.connect(_on_application_resume_observed)
 	Input.joy_connection_changed.connect(_on_joy_connection_changed)
 	_diagnostics_overlay.visible = bool(session_settings.get("diagnostics_visible_in_debug"))
 	_diagnostics_overlay.call("set_release_mode", OS.has_feature("release"))
@@ -174,6 +177,10 @@ func _refresh_diagnostics() -> void:
 		float(metrics.get("speed_kph", 0.0)),
 		str(metrics.get("surface", "unknown")),
 		float(metrics.get("slip", 0.0)),
+		float(metrics.get("steering", 0.0)),
+		float(metrics.get("throttle", 0.0)),
+		float(metrics.get("brake", 0.0)),
+		float(metrics.get("handbrake", 0.0)),
 	)
 
 
@@ -200,6 +207,16 @@ func _on_joy_connection_changed(device: int, connected: bool) -> void:
 		_show_status("Controller connected%s" % ("  ·  %s" % device_name if not device_name.is_empty() else ""), 4.0)
 	else:
 		_show_status("Controller disconnected  ·  keyboard remains active", 4.0)
+
+
+func _on_application_suspension_requested(reason: String) -> void:
+	set_session_paused(true)
+	_show_status("%s  ·  controls neutralized" % reason.capitalize(), 4.0)
+
+
+func _on_application_resume_observed() -> void:
+	if _trial != null and _trial.paused:
+		_show_status("Application resumed  ·  confirm Resume when ready", 4.0)
 
 
 func _on_resume_pressed() -> void:
