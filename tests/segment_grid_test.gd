@@ -1,6 +1,8 @@
 extends SceneTree
 
 const SEGMENT_GRID_PATH := "res://world/segment_grid.gd"
+const SURFACE_MAP_PATH := "res://track/track_surface_map.gd"
+const TRACK_GENERATOR_PATH := "res://track/track_generator.gd"
 
 var _failures: Array[String] = []
 var _checks := 0
@@ -18,6 +20,7 @@ func _run() -> void:
 		_verify_pairs_cover_every_real_intersection()
 		_verify_overlapping_matches_brute_force()
 		_verify_degenerate_inputs_are_safe()
+		_verify_surface_map_agrees_with_brute_force()
 	_finish()
 
 
@@ -112,6 +115,43 @@ func _brute_force_near(points: PackedVector2Array, query: Vector2, radius: float
 		if query.distance_to(closest) <= radius:
 			found.append(index)
 	return found
+
+
+func _verify_surface_map_agrees_with_brute_force() -> void:
+	var generator_script := load(TRACK_GENERATOR_PATH) as GDScript
+	var surface_script := load(SURFACE_MAP_PATH) as GDScript
+	_check(generator_script != null and surface_script != null, "generator and surface map scripts load")
+	if generator_script == null or surface_script == null:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 4242
+	var generator = generator_script.new()
+	var disagreements := 0
+	var on_track_hits := 0
+	for seed in range(3):
+		var definition = generator.generate(seed)
+		var surface_map = surface_script.new(definition)
+		var half_width: float = definition.track_width * 0.5
+		for probe in range(400):
+			# Probe near the centerline so both on-track and off-track cases occur.
+			var anchor: Vector2 = definition.centerline[rng.randi_range(0, definition.centerline.size() - 2)]
+			var query := anchor + Vector2(rng.randf_range(-half_width * 3.0, half_width * 3.0), rng.randf_range(-half_width * 3.0, half_width * 3.0))
+			var expected_on_track := _brute_force_distance(definition.centerline, query) <= half_width
+			var actual_on_track: bool = surface_map.sample_at(query).surface_type == SurfaceQuery.SurfaceType.DIRT
+			if expected_on_track:
+				on_track_hits += 1
+			if expected_on_track != actual_on_track:
+				disagreements += 1
+	_check(on_track_hits > 0, "the probe actually covered on-track positions (%d hits)" % on_track_hits)
+	_check(disagreements == 0, "indexed surface lookup agrees with brute force everywhere (%d disagreements)" % disagreements)
+
+
+func _brute_force_distance(points: PackedVector2Array, query: Vector2) -> float:
+	var nearest := INF
+	for index in range(points.size() - 1):
+		var closest := Geometry2D.get_closest_point_to_segment(query, points[index], points[index + 1])
+		nearest = minf(nearest, query.distance_to(closest))
+	return nearest
 
 
 func _check(condition: bool, message: String) -> void:
