@@ -13,6 +13,7 @@ The playable slice consumes only named Godot InputMap actions. `MainSession` pol
 | `reset_car` | North face button | R |
 | `pause_back` | Menu/Start | Esc |
 | `confirm` | South face button | Enter |
+| `toggle_diagnostics` | Back/View button | F3 |
 
 The UI uses generic control names because face-button letters differ between controller families. Godot's SDL-backed standard joypad mapping presents XInput-compatible controllers and Steam Deck controls as the same left-stick, separate-trigger, and face-button layout. Keyboard and controller inputs share the actions, so either can take over during a running session.
 
@@ -41,7 +42,7 @@ Pause, seed restart, and controller disconnect clear the shared vehicle input st
 | Path | Mapping/logic | Manual hardware | Notes |
 | --- | --- | --- | --- |
 | Keyboard | Automated | Pending graphical pass | WASD, arrows, Space, R, Esc, and Enter are mapped. |
-| XInput-compatible external controller | Automated | Not run: no connected controller in the implementation environment | Left stick, separate triggers, face buttons, Menu/Start, hot-switch, disconnect neutralization. |
+| XInput-compatible external controller | Automated | Required by issue #6 Android validation | Left stick, separate triggers, face buttons, Menu/Start, Back/View diagnostics, hot-switch, disconnect neutralization. |
 | Steam Deck built-in controls | Automated mapping path | Deferred to issue #7 hardware validation | Uses the same standard Godot joypad actions; no device-specific gameplay branch. |
 
 Automated coverage lives in `tests/issue_5_input_session_test.gd` and `tests/issue_5_main_session_test.gd`. A hardware pass should drive at analog half/full values, switch to keyboard and back, disconnect while holding throttle/steer, navigate the paused menu without a pointer, and verify held reset/restart inputs do not repeat.

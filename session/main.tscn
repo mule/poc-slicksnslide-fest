@@ -1,9 +1,10 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://session/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://session/diagnostics_overlay.gd" id="2_overlay"]
 [ext_resource type="Resource" path="res://data/default_session_settings.tres" id="3_session"]
 [ext_resource type="Resource" path="res://data/default_vehicle_tuning.tres" id="4_tuning"]
+[ext_resource type="Script" path="res://platform/application_lifecycle.gd" id="5_lifecycle"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBox_focus"]
 draw_center = false
@@ -22,6 +23,11 @@ process_mode = 3
 script = ExtResource("1_main")
 session_settings = ExtResource("3_session")
 vehicle_tuning = ExtResource("4_tuning")
+
+[node name="ApplicationLifecycle" type="Node" parent="."]
+unique_name_in_owner = true
+process_mode = 3
+script = ExtResource("5_lifecycle")
 
 [node name="BackgroundLayer" type="CanvasLayer" parent="."]
 layer = -10
@@ -202,8 +208,8 @@ script = ExtResource("2_overlay")
 [node name="Panel" type="PanelContainer" parent="DiagnosticsOverlay"]
 offset_left = 24.0
 offset_top = 166.0
-offset_right = 330.0
-offset_bottom = 270.0
+offset_right = 450.0
+offset_bottom = 326.0
 modulate = Color(1, 1, 1, 0.88)
 
 [node name="MetricsLabel" type="Label" parent="DiagnosticsOverlay/Panel"]
@@ -213,4 +219,4 @@ theme_override_colors/font_color = Color(0.92549, 0.945098, 0.866667, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 1)
 theme_override_constants/outline_size = 4
 theme_override_font_sizes/font_size = 16
-text = "DEV  F3 diagnostics\nFPS: 0   frame: 0.00 ms\nseed: 0   speed: 0.0 km/h\nsurface: unknown   slip: 0.00"
+text = "DEV  Back/View or F3 diagnostics\nFPS: 0   frame: 0.00 ms\nmemory: 0.0 MiB   peak: 0.0 MiB\nseed: 0   speed: 0.0 km/h\nsurface: unknown   slip: 0.00\nsteer: 0.00   throttle: 0.00\nbrake: 0.00   handbrake: 0.00"

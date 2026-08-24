@@ -22,7 +22,7 @@ godot --path .
 
 The project opens one full-screen gameplay canvas. Drive with a left stick and triggers or WASD/arrow keys, use the handbrake with a face button or Space, reset with a separate face button or R, and pause with Menu/Start or Esc. The pause menu can resume, restart the same seed, or generate the next seed without a mouse.
 
-Press **F3** to toggle the development diagnostics overlay. The overlay is forcibly hidden in release exports. See [Controller-first time trial](docs/controller-time-trial.md) for the complete mapping and tuning contract.
+Press **F3** or controller **Back/View** to toggle the development diagnostics overlay. It reports FPS/frame time, current and peak memory, seed, vehicle state, and normalized inputs, and is forcibly hidden in release exports. See [Controller-first time trial](docs/controller-time-trial.md) for the complete mapping and tuning contract.
 
 ## Verification
 
@@ -53,6 +53,12 @@ Refresh the checked-in 1280×720 gameplay and 1280×800 pause-menu evidence usin
 godot --path . --script res://tests/capture_issue_5_session.gd
 ```
 
+Run the Android lifecycle/diagnostics checks:
+
+```sh
+godot --headless --path . --script res://tests/issue_6_android_test.gd
+```
+
 ## Project boundaries
 
 | Directory | Responsibility |
@@ -69,11 +75,11 @@ godot --path . --script res://tests/capture_issue_5_session.gd
 
 The session owns `TrackMount` and `VehicleMount` integration points. Track and vehicle scenes are installed as opaque scene roots, so neither side needs hard-coded paths into the other's internals.
 
-## Export placeholders
+## Platform exports
 
-`export_presets.cfg` contains shared, credential-free placeholders for:
+`export_presets.cfg` contains shared, credential-free presets for:
 
-- `Android Debug`, producing `builds/android/slicksnslide-fest-debug.apk` once issue #6 supplies and validates the Android toolchain;
+- `Android Debug`, producing the ARM64 APK at `builds/android/slicksnslide-fest-debug.apk`; follow the [Android export and physical-device validation guide](docs/android-export.md);
 - `Linux x86_64`, producing `builds/linux/slicksnslide-fest.x86_64` once issue #7 validates the Steam Deck package.
 
-No SDK paths, signing material, generated binaries, or local credentials belong in the repository. Platform-specific build and physical-device validation are intentionally deferred to issues #6 and #7.
+No SDK paths, signing material, generated binaries, or local credentials belong in the repository. Android and Steam Deck completion still require their issue-specific physical-hardware evidence.
