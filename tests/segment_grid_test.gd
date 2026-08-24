@@ -16,6 +16,7 @@ func _run() -> void:
 	if script != null:
 		_verify_proximity_matches_brute_force()
 		_verify_pairs_cover_every_real_intersection()
+		_verify_overlapping_matches_brute_force()
 		_verify_degenerate_inputs_are_safe()
 	_finish()
 
@@ -58,6 +59,30 @@ func _verify_pairs_cover_every_real_intersection() -> void:
 				if not offered.has(Vector2i(first, second)):
 					misses += 1
 		_check(misses == 0, "trial %d: candidate pairs cover every real intersection (%d misses)" % [trial, misses])
+
+
+func _verify_overlapping_matches_brute_force() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 771144
+	for trial in range(6):
+		var points := _random_polyline(rng, 160, 3000.0)
+		var grid := SegmentGrid.new(points, 180.0)
+		var misses := 0
+		var crossings := 0
+		for probe in range(40):
+			var from := Vector2(rng.randf_range(-1500.0, 1500.0), rng.randf_range(-1500.0, 1500.0))
+			var to := from + Vector2(rng.randf_range(-900.0, 900.0), rng.randf_range(-900.0, 900.0))
+			var offered := {}
+			for index in grid.segments_overlapping(from, to):
+				offered[index] = true
+			for index in range(points.size() - 1):
+				if Geometry2D.segment_intersects_segment(points[index], points[index + 1], from, to) == null:
+					continue
+				crossings += 1
+				if not offered.has(index):
+					misses += 1
+		_check(crossings > 0, "trial %d: probe segments actually crossed the polyline (%d crossings)" % [trial, crossings])
+		_check(misses == 0, "trial %d: segments_overlapping returns every real crossing (%d misses)" % [trial, misses])
 
 
 func _verify_degenerate_inputs_are_safe() -> void:
