@@ -5,13 +5,13 @@ const SURFACE_MAP_PATH := "res://track/track_surface_map.gd"
 const LAP_TRACKER_PATH := "res://track/lap_progress_tracker.gd"
 const TRACK_RUNTIME_PATH := "res://track/track_runtime.gd"
 
-const EXPECTED_MIN_WIDTH := 40.0
-const EXPECTED_MAX_WIDTH := 56.0
-const EXPECTED_MIN_LAP_LENGTH := 1100.0
-const EXPECTED_MAX_LAP_LENGTH := 1900.0
-const EXPECTED_MAX_CURVATURE := 0.02
-const EXPECTED_MIN_START_STRAIGHT := 160.0
-const EXPECTED_MAX_SAMPLE_GAP := 12.0
+const EXPECTED_MIN_WIDTH := 125.0
+const EXPECTED_MAX_WIDTH := 175.0
+const EXPECTED_MIN_LAP_LENGTH := 25000.0
+const EXPECTED_MAX_LAP_LENGTH := 37500.0
+const EXPECTED_MAX_CURVATURE := 0.005
+const EXPECTED_MIN_START_STRAIGHT := 1875.0
+const EXPECTED_MAX_SAMPLE_GAP := 30.0
 
 var _failures: Array[String] = []
 var _checks := 0
@@ -38,10 +38,12 @@ func _run() -> void:
 		_verify_driveable_definition(definition, seed)
 		if definition != null:
 			fingerprints[definition.geometry_fingerprint] = true
-			print("seed=%d fingerprint=%s generation_usec=%d" % [
+			print("seed=%d fingerprint=%s generation_usec=%d attempts=%d fallback=%s" % [
 				seed,
 				definition.geometry_fingerprint,
 				definition.generation_usec,
+				definition.generation_attempts,
+				definition.used_fallback,
 			])
 	_check(fingerprints.size() == 10, "seeds 0 through 9 produce distinct geometry")
 
@@ -64,6 +66,7 @@ func _verify_driveable_definition(definition, seed: int) -> void:
 	_check(definition.lap_length >= EXPECTED_MIN_LAP_LENGTH and definition.lap_length <= EXPECTED_MAX_LAP_LENGTH, "seed %d lap length is within bounds" % seed)
 	_check(definition.max_curvature <= EXPECTED_MAX_CURVATURE, "seed %d curvature is bounded" % seed)
 	_check(definition.start_straight_length >= EXPECTED_MIN_START_STRAIGHT, "seed %d has an adequate start straight" % seed)
+	_verify_world_exceeds_one_screen(definition, seed)
 	_check(definition.geometry_fingerprint.length() == 64, "seed %d has a SHA-256 geometry fingerprint" % seed)
 	_check(definition.centerline.size() >= 64, "seed %d is sampled densely" % seed)
 	_check(definition.left_boundary.size() == definition.centerline.size(), "seed %d left boundary matches centerline sampling" % seed)
@@ -84,6 +87,11 @@ func _verify_driveable_definition(definition, seed: int) -> void:
 	for checkpoint_index in range(definition.checkpoints.size()):
 		var expected_sample := int(round(float(checkpoint_index) * float(definition.centerline.size() - 1) / float(definition.checkpoints.size())))
 		_check(definition.checkpoints[checkpoint_index].origin.distance_to(definition.centerline[expected_sample]) < EXPECTED_MAX_SAMPLE_GAP, "seed %d checkpoint %d follows centerline order" % [seed, checkpoint_index])
+
+
+func _verify_world_exceeds_one_screen(definition, seed: int) -> void:
+	_check(definition.bounds.size.x >= 5000.0, "seed %d spans several screens horizontally (%.0f px)" % [seed, definition.bounds.size.x])
+	_check(definition.bounds.size.y >= 5000.0, "seed %d spans several screens vertically (%.0f px)" % [seed, definition.bounds.size.y])
 
 
 func _verify_determinism(generator, originals: Array) -> void:

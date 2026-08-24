@@ -4,18 +4,24 @@ extends RefCounted
 const TrackDefinitionScript := preload("res://track/track_definition.gd")
 
 const DEFAULT_MAX_ATTEMPTS := 6
-const SAMPLE_SPACING := 10.0
+const SAMPLE_SPACING := 25.0
 const CHECKPOINT_COUNT := 8
-const MIN_WIDTH := 40.0
-const MAX_WIDTH := 56.0
-const MIN_LAP_LENGTH := 1100.0
-const MAX_LAP_LENGTH := 1900.0
-const MAX_CURVATURE := 0.02
-const MIN_START_STRAIGHT := 160.0
+const MIN_WIDTH := 125.0
+const MAX_WIDTH := 175.0
+const MIN_LAP_LENGTH := 25000.0
+const MAX_LAP_LENGTH := 37500.0
+const MAX_CURVATURE := 0.005
+const MIN_START_STRAIGHT := 1875.0
 
-const FALLBACK_HALF_STRAIGHT := 210.0
-const FALLBACK_RADIUS := 115.0
-const FALLBACK_WIDTH := 48.0
+const CONTROL_POINT_COUNT := 14
+const RADIUS_JITTER_MIN := 0.72
+const RADIUS_JITTER_MAX := 1.0
+const SPLINE_SAMPLES_PER_SPAN := 24
+const STRAIGHT_CURVATURE := 0.0005
+
+const FALLBACK_HALF_STRAIGHT := 3728.0
+const FALLBACK_RADIUS := 2600.0
+const FALLBACK_WIDTH := 150.0
 
 
 func generate(requested_seed: int, limit_overrides: Dictionary = {}):
@@ -25,10 +31,10 @@ func generate(requested_seed: int, limit_overrides: Dictionary = {}):
 	rng.seed = requested_seed
 	var last_reason := "candidate_not_generated"
 	for attempt in range(1, maximum_attempts + 1):
-		var half_straight := float(rng.randi_range(180, 240))
-		var radius := float(rng.randi_range(100, 135))
-		var width := float(rng.randi_range(20, 28) * 2)
-		var candidate = _build_definition(requested_seed, half_straight, radius, width)
+		var target_lap_length := rng.randf_range(MIN_LAP_LENGTH, MAX_LAP_LENGTH)
+		var width := float(rng.randi_range(25, 35) * 5)
+		var centerline := _sample_loop(rng, target_lap_length)
+		var candidate = _build_definition(requested_seed, centerline, width)
 		candidate.generation_attempts = attempt
 		last_reason = _validation_reason(candidate, limit_overrides)
 		if last_reason.is_empty():
@@ -36,7 +42,7 @@ func generate(requested_seed: int, limit_overrides: Dictionary = {}):
 			candidate.generation_usec = Time.get_ticks_usec() - started_usec
 			return candidate
 
-	var fallback = _build_definition(requested_seed, FALLBACK_HALF_STRAIGHT, FALLBACK_RADIUS, FALLBACK_WIDTH)
+	var fallback = _build_definition(requested_seed, _sample_stadium(FALLBACK_HALF_STRAIGHT, FALLBACK_RADIUS), FALLBACK_WIDTH)
 	fallback.generation_attempts = maximum_attempts
 	fallback.used_fallback = true
 	fallback.diagnostic_reason = "retry_exhausted:%s; fallback=known_valid_stadium" % last_reason
@@ -44,23 +50,107 @@ func generate(requested_seed: int, limit_overrides: Dictionary = {}):
 	return fallback
 
 
-func _build_definition(requested_seed: int, half_straight: float, radius: float, width: float):
+func _build_definition(requested_seed: int, centerline: PackedVector2Array, width: float):
 	var definition = TrackDefinitionScript.new()
 	definition.seed = requested_seed
 	definition.track_width = width
-	definition.centerline = _sample_stadium(half_straight, radius)
+	definition.centerline = centerline
 	var boundaries := _derive_boundaries(definition.centerline, width)
 	definition.left_boundary = boundaries.left
 	definition.right_boundary = boundaries.right
 	definition.lap_length = _polyline_length(definition.centerline)
 	definition.max_curvature = _measure_max_curvature(definition.centerline)
-	definition.start_straight_length = half_straight * 2.0
+	definition.start_straight_length = _straight_run_length(definition.centerline, 0)
 	definition.forward_direction = (definition.centerline[1] - definition.centerline[0]).normalized()
 	definition.spawn_transform = Transform2D(definition.forward_direction.angle() + PI * 0.5, definition.centerline[0])
 	definition.checkpoints = _build_checkpoints(definition.centerline)
 	definition.bounds = _combined_bounds(definition.left_boundary, definition.right_boundary)
 	definition.geometry_fingerprint = _fingerprint(definition)
 	return definition
+
+
+func _sample_loop(rng: RandomNumberGenerator, target_lap_length: float) -> PackedVector2Array:
+	var base_radius := target_lap_length / TAU
+	var radii := []
+	for index in range(CONTROL_POINT_COUNT):
+		radii.append(base_radius * rng.randf_range(RADIUS_JITTER_MIN, RADIUS_JITTER_MAX))
+	# Pin three consecutive control points to the nominal radius so at least one
+	# gentle span exists. Without this the start-straight constraint would be a
+	# gamble on the jitter, and most seeds would fall back to the stadium.
+	radii[0] = base_radius
+	radii[1] = base_radius
+	radii[CONTROL_POINT_COUNT - 1] = base_radius
+
+	var controls := PackedVector2Array()
+	for index in range(CONTROL_POINT_COUNT):
+		var angle := TAU * float(index) / float(CONTROL_POINT_COUNT)
+		controls.append(Vector2(cos(angle), sin(angle)) * radii[index])
+
+	var loop := _catmull_rom_closed(controls)
+	# Scale before resampling, not after. The spec lists resample-then-scale,
+	# but scaling a uniformly-spaced polyline multiplies its spacing too, which
+	# would leave samples SAMPLE_SPACING * factor apart instead of
+	# SAMPLE_SPACING. Scaling first makes the spacing correct at final size.
+	loop = _scale_to_lap_length(loop, target_lap_length)
+	loop = _resample_uniform(loop, SAMPLE_SPACING)
+	return _rotate_to_start_straight(loop)
+
+
+func _catmull_rom_closed(controls: PackedVector2Array) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	var count := controls.size()
+	for index in range(count):
+		var p0 := controls[(index - 1 + count) % count]
+		var p1 := controls[index]
+		var p2 := controls[(index + 1) % count]
+		var p3 := controls[(index + 2) % count]
+		for step in range(SPLINE_SAMPLES_PER_SPAN):
+			var t := float(step) / float(SPLINE_SAMPLES_PER_SPAN)
+			var t2 := t * t
+			var t3 := t2 * t
+			points.append(0.5 * (
+				2.0 * p1
+				+ (-p0 + p2) * t
+				+ (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+				+ (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3
+			))
+	points.append(points[0])
+	return points
+
+
+func _scale_to_lap_length(points: PackedVector2Array, target_length: float) -> PackedVector2Array:
+	var current := _polyline_length(points)
+	if current <= 0.0:
+		return points
+	var factor := target_length / current
+	var scaled := PackedVector2Array()
+	for point in points:
+		scaled.append(point * factor)
+	return scaled
+
+
+func _resample_uniform(points: PackedVector2Array, spacing: float) -> PackedVector2Array:
+	var total := _polyline_length(points)
+	var target_count := maxi(int(round(total / spacing)), 8)
+	var step := total / float(target_count)
+	var resampled := PackedVector2Array([points[0]])
+	var travelled := 0.0
+	var next_mark := step
+	var index := 0
+	while index < points.size() - 1 and resampled.size() < target_count:
+		var segment_length := points[index].distance_to(points[index + 1])
+		if segment_length <= 0.0:
+			index += 1
+			continue
+		if travelled + segment_length >= next_mark:
+			var ratio := (next_mark - travelled) / segment_length
+			resampled.append(points[index].lerp(points[index + 1], ratio))
+			next_mark += step
+		else:
+			travelled += segment_length
+			index += 1
+	resampled.append(resampled[0])
+	return resampled
 
 
 func _sample_stadium(half_straight: float, radius: float) -> PackedVector2Array:
@@ -151,14 +241,62 @@ func _polyline_length(points: PackedVector2Array) -> float:
 
 func _measure_max_curvature(points: PackedVector2Array) -> float:
 	var maximum := 0.0
-	var unique_count := points.size() - 1
-	for index in range(unique_count):
-		var incoming := points[index] - points[(index - 1 + unique_count) % unique_count]
-		var outgoing := points[(index + 1) % unique_count] - points[index]
-		var distance := (incoming.length() + outgoing.length()) * 0.5
-		if distance > 0.0:
-			maximum = maxf(maximum, absf(incoming.angle_to(outgoing)) / distance)
+	for index in range(points.size() - 1):
+		maximum = maxf(maximum, _curvature_at(points, index))
 	return maximum
+
+
+func _curvature_at(points: PackedVector2Array, index: int) -> float:
+	var unique_count := points.size() - 1
+	var incoming := points[index] - points[(index - 1 + unique_count) % unique_count]
+	var outgoing := points[(index + 1) % unique_count] - points[index]
+	var distance := (incoming.length() + outgoing.length()) * 0.5
+	if distance <= 0.0:
+		return 0.0
+	return absf(incoming.angle_to(outgoing)) / distance
+
+
+func _straight_run_length(points: PackedVector2Array, start: int) -> float:
+	var unique_count := points.size() - 1
+	var length := 0.0
+	for offset in range(unique_count):
+		var index := (start + offset) % unique_count
+		if _curvature_at(points, index) > STRAIGHT_CURVATURE:
+			break
+		length += points[index].distance_to(points[(index + 1) % unique_count])
+	return length
+
+
+func _rotate_to_start_straight(points: PackedVector2Array) -> PackedVector2Array:
+	var unique_count := points.size() - 1
+	# Precompute curvature once, then find the longest gentle run in a single
+	# wrapped pass. Calling _straight_run_length from every index would be
+	# O(n^2) over ~1250 samples.
+	var gentle := []
+	for index in range(unique_count):
+		gentle.append(_curvature_at(points, index) <= STRAIGHT_CURVATURE)
+	var best_start := 0
+	var best_length := -1.0
+	var run_start := -1
+	var run_length := 0.0
+	for offset in range(unique_count * 2):
+		var index := offset % unique_count
+		if not gentle[index]:
+			run_start = -1
+			run_length = 0.0
+			continue
+		if run_start < 0:
+			run_start = index
+			run_length = 0.0
+		run_length += points[index].distance_to(points[(index + 1) % unique_count])
+		if run_length > best_length:
+			best_length = run_length
+			best_start = run_start
+	var rotated := PackedVector2Array()
+	for offset in range(unique_count):
+		rotated.append(points[(best_start + offset) % unique_count])
+	rotated.append(rotated[0])
+	return rotated
 
 
 func _combined_bounds(left: PackedVector2Array, right: PackedVector2Array) -> Rect2:
@@ -183,20 +321,23 @@ func _fingerprint(definition) -> String:
 
 func _has_self_intersection(points: PackedVector2Array) -> bool:
 	var segment_count := points.size() - 1
-	for first in range(segment_count):
-		for second in range(first + 1, segment_count):
-			if abs(first - second) <= 1:
-				continue
-			if first == 0 and second == segment_count - 1:
-				continue
-			if Geometry2D.segment_intersects_segment(points[first], points[first + 1], points[second], points[second + 1]) != null:
-				return true
+	var grid := SegmentGrid.new(points, SAMPLE_SPACING * 4.0)
+	for pair in grid.candidate_pairs():
+		var first: int = mini(pair.x, pair.y)
+		var second: int = maxi(pair.x, pair.y)
+		if second - first <= 1:
+			continue
+		if first == 0 and second == segment_count - 1:
+			continue
+		if Geometry2D.segment_intersects_segment(points[first], points[first + 1], points[second], points[second + 1]) != null:
+			return true
 	return false
 
 
 func _boundaries_intersect(left: PackedVector2Array, right: PackedVector2Array) -> bool:
-	for left_index in range(left.size() - 1):
-		for right_index in range(right.size() - 1):
+	var grid := SegmentGrid.new(left, SAMPLE_SPACING * 4.0)
+	for right_index in range(right.size() - 1):
+		for left_index in grid.segments_overlapping(right[right_index], right[right_index + 1]):
 			if Geometry2D.segment_intersects_segment(left[left_index], left[left_index + 1], right[right_index], right[right_index + 1]) != null:
 				return true
 	return false
