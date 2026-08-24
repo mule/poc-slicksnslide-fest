@@ -36,6 +36,7 @@ func _ready() -> void:
 	_safe_reset_pose = global_transform
 	_has_safe_reset_pose = true
 	_follow_camera.top_level = true
+	_follow_camera.zoom = Vector2.ONE * tuning.camera_zoom
 	_follow_camera.global_position = global_position
 	body_entered.connect(_on_body_entered)
 
@@ -49,7 +50,7 @@ func _process(delta: float) -> void:
 	var camera_blend := 1.0 - exp(-tuning.camera_follow_response * delta)
 	_follow_camera.global_position = _follow_camera.global_position.lerp(target_camera_position, camera_blend)
 	var on_dirt := _surface_type == SurfaceQuery.SurfaceType.DIRT
-	_dust.emitting = on_dirt and get_speed() > 4.0
+	_dust.emitting = on_dirt and get_speed() > WorldScale.metres(4.0)
 	_skid_feedback.visible = _slip_ratio >= tuning.feedback_slip_threshold or _input_state.handbrake > 0.25
 	_skid_feedback.modulate.a = clampf((_slip_ratio - tuning.feedback_slip_threshold) * 2.5 + _input_state.handbrake * 0.7, 0.0, 0.85)
 
@@ -68,7 +69,7 @@ func _integrate_forces(state: PhysicsDirectBodyState2D) -> void:
 	var forward_speed := -_local_velocity.y
 	var lateral_speed := _local_velocity.x
 	var speed := world_velocity.length()
-	_slip_ratio = absf(lateral_speed) / maxf(speed, 1.0)
+	_slip_ratio = absf(lateral_speed) / maxf(speed, WorldScale.metres(1.0))
 
 	var forward := -state.transform.y.normalized()
 	var lateral := state.transform.x.normalized()
@@ -103,7 +104,7 @@ func _integrate_forces(state: PhysicsDirectBodyState2D) -> void:
 	desired_lateral_change = clampf(desired_lateral_change, -lateral_change_limit, lateral_change_limit)
 	world_velocity += lateral * desired_lateral_change
 
-	if speed < 2.0 and _input_state.throttle == 0.0 and _input_state.brake == 0.0:
+	if speed < WorldScale.metres(2.0) and _input_state.throttle == 0.0 and _input_state.brake == 0.0:
 		world_velocity = world_velocity.move_toward(Vector2.ZERO, tuning.low_speed_stabilization * delta)
 
 	var steering_speed_factor := clampf(absf(updated_forward_speed) / maxf(tuning.steering_full_speed, 0.01), 0.12, 1.0)
@@ -119,7 +120,7 @@ func _integrate_forces(state: PhysicsDirectBodyState2D) -> void:
 	state.linear_velocity = world_velocity.limit_length(tuning.max_safe_speed)
 	_peak_speed = maxf(_peak_speed, state.linear_velocity.length())
 	_local_velocity = state.transform.basis_xform_inv(state.linear_velocity)
-	_slip_ratio = absf(_local_velocity.x) / maxf(state.linear_velocity.length(), 1.0)
+	_slip_ratio = absf(_local_velocity.x) / maxf(state.linear_velocity.length(), WorldScale.metres(1.0))
 	_update_safe_pose_checkpoint(state, delta)
 
 
@@ -175,7 +176,7 @@ func has_visited_surface(surface_type: SurfaceQuery.SurfaceType) -> bool:
 
 func get_diagnostics() -> Dictionary:
 	return {
-		"speed_kph": get_speed() * 3.6,
+		"speed_kph": WorldScale.to_kph(get_speed()),
 		"local_longitudinal": -_local_velocity.y,
 		"local_lateral": _local_velocity.x,
 		"slip": _slip_ratio,
