@@ -44,6 +44,6 @@ extends Resource
 @export_group("Presentation")
 @export_range(0.0, 1.0, 0.01) var camera_lead_seconds: float = 0.38
 @export_range(0.2, 2.0, 0.01) var camera_zoom: float = 0.8
-@export_range(0.0, 500.0, 1.0) var camera_max_lead: float = 110.0
+@export_range(0.0, 500.0, 1.0) var camera_max_lead: float = 250.0
 @export_range(0.0, 20.0, 0.1) var camera_follow_response: float = 6.0
 @export_range(0.0, 2.0, 0.01) var feedback_slip_threshold: float = 0.14

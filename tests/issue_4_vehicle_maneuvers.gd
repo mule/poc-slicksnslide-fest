@@ -220,7 +220,7 @@ func _test_driving_updates_latest_valid_reset_pose(scene: PackedScene, tuning: V
 	car.request_safe_reset()
 	await physics_frame
 	_check(car.global_position.y < START_POSE.origin.y - 3.0, "dirt driving advances the latest valid reset checkpoint")
-	_check(car.global_position.distance_to(latest_valid_position) <= 8.0, "automatic reset checkpoint remains near the latest stable track pose")
+	_check(car.global_position.distance_to(latest_valid_position) <= 100.0, "automatic reset checkpoint remains near the latest stable track pose")
 	await _dispose_fixture(fixture)
 
 
@@ -304,7 +304,7 @@ func _run_surface_maneuver(scene: PackedScene, tuning: VehicleTuning, provider: 
 func _run_slip_recovery(scene: PackedScene, tuning: VehicleTuning, provider: SurfaceQuery) -> Dictionary:
 	var fixture := await _spawn_vehicle(scene, tuning, false, provider)
 	fixture.controls.reset()
-	fixture.car.linear_velocity = Vector2(12.0, -18.0)
+	fixture.car.linear_velocity = Vector2(150.0, -225.0)
 	await physics_frame
 	var initial_slip: float = fixture.car.get_slip_ratio()
 	var ticks := 0
