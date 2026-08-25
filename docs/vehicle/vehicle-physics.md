@@ -30,9 +30,9 @@ The checked default-tuning ranges are intentionally broad enough for solver port
 | Constant steering | 0.65 steer for 1.5 s after acceleration turns 0.35–2.4 rad; yaw never exceeds 2.6 rad/s; counter-steer reduces residual slip by at least 0.03. |
 | Handbrake | One-second rotation exceeds the normal turn by at least 0.18 rad and remains below 2.8 rad. |
 | Surface transition | The deterministic boundary records off-track and final speed is at most 88% of the dirt-only run. Identical meaningful-slip starts recover below 0.12 within four seconds, with off-track recovery taking at least 15 ticks longer than dirt. |
-| Wall impact | A real body contact occurs; the capsule remains on the approach side; peak speed stays at or below the 640 px/s safe-speed bound; post-impact speed does not exceed approach peak by more than 5% + 6.25 px/s. |
+| Wall impact | A real body contact occurs; the capsule remains on the approach side; post-impact speed does not exceed the sampled pre-impact approach speed by more than 1 px/s, i.e. the `bounce = 0.05` collision does not rebound faster than the car was traveling. |
 | Reset | Transform is restored within 0.1 units / 0.01 rad, velocities clear, overlapping candidates are rejected, and stable dirt driving advances the checkpoint. |
-| Frame stability | Identical 180-tick inputs at 30 and 144 render FPS differ by at most 3.1 px/s and 0.75 world units. |
+| Frame stability | Identical 180-tick inputs at 30 and 144 render FPS differ by at most 0.25 px/s and 0.75 world units. |
 
 ## Evidence
 
@@ -46,6 +46,6 @@ gst-launch-1.0 -q multifilesrc location='/tmp/issue-4-gameplay-frames/frame_%03d
 gst-discoverer-1.0 docs/vehicle/evidence/issue-4-gameplay-capture.webm
 ```
 
-The deterministic capture must finish with at least one `TopDownCar.get_collision_count()` contact and speed at or below 2 px/s; otherwise the script exits nonzero. The packaged media is 1280×720 VP8 WebM at 15 FPS with a ten-second duration.
+The deterministic capture must finish with at least one `TopDownCar.get_collision_count()` contact and speed at or below `WorldScale.metres(2.0)` (25 px/s, i.e. 2 m/s); otherwise the script exits nonzero. The packaged media is 1280×720 VP8 WebM at 15 FPS with a ten-second duration.
 
 Limitations: brake doubles as reverse after a deliberate 0.4-second near-stop hold; there is no drivetrain, wheel-by-wheel suspension, damage, production audio, or persistent tire-mark system. The default main scene is intentionally untouched, so integration installs `vehicle/top_down_car.tscn` through the existing session vehicle mount in follow-up composition work.

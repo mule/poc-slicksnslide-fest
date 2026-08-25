@@ -170,13 +170,31 @@ func _test_wall_impact_does_not_tunnel_or_gain_energy(scene: PackedScene, tuning
 	var controls: VehicleInputState = fixture.controls
 	controls.reset()
 	car.linear_velocity = Vector2(0.0, -tuning.max_safe_speed)
-	var pre_impact_peak: float = car.get_speed()
-	await _simulate_seconds(3.0)
+
+	# `_integrate_forces` re-clamps `state.linear_velocity` to `tuning.max_safe_speed` on every
+	# tick, so sampling `get_speed()`/`get_peak_speed()` only right before or after that clamp
+	# can never observe an over-speed impact. To catch real energy injection we sample
+	# `car.get_speed()` from GDScript immediately after each `physics_frame` completes, which
+	# reflects the RigidBody's velocity right after the engine's own collision response for that
+	# step — before the *next* tick's `_integrate_forces` call re-clamps it.
+	var approach_speed := -1.0
+	var post_impact_peak_speed := 0.0
+	var previous_collision_count: int = car.get_collision_count()
+	var total_ticks := roundi(3.0 * TEST_TICKS_PER_SECOND)
+	for _tick in total_ticks:
+		var speed_before_tick: float = car.get_speed()
+		await physics_frame
+		var collision_count: int = car.get_collision_count()
+		if approach_speed < 0.0 and collision_count > previous_collision_count:
+			approach_speed = speed_before_tick
+		previous_collision_count = collision_count
+		if approach_speed >= 0.0:
+			post_impact_peak_speed = maxf(post_impact_peak_speed, car.get_speed())
+
 	_check(car.has_method("get_collision_count") and car.get_collision_count() >= 1, "wall maneuver records a real collision")
 	_check(car.global_position.y >= 450.0, "continuous collision detection prevents tunneling through the wall (y %.2f)" % car.global_position.y)
-	_check(car.get_peak_speed() <= tuning.max_safe_speed + 0.01, "impact cannot exceed configured safe speed (peak %.2f)" % car.get_peak_speed())
-	_check(pre_impact_peak >= tuning.max_safe_speed - 0.1, "wall maneuver starts at the documented maximum expected speed (%.2f)" % pre_impact_peak)
-	_check(car.get_speed() <= pre_impact_peak * 1.05 + 6.25, "wall impact injects no unbounded energy (before %.2f, after %.2f)" % [pre_impact_peak, car.get_speed()])
+	_check(approach_speed >= 0.0, "captured a pre-impact approach speed before the wall collision (%.2f)" % approach_speed)
+	_check(post_impact_peak_speed <= approach_speed + 1.0, "wall impact (bounce=0.05) does not rebound faster than the approach speed (approach %.2f, post-impact peak %.2f)" % [approach_speed, post_impact_peak_speed])
 	await _dispose_fixture(fixture)
 
 
@@ -249,7 +267,7 @@ func _test_render_frame_rate_does_not_change_fixed_tick_result(scene: PackedScen
 	Engine.max_fps = 144
 	var high_fps := await _run_straight_acceleration(scene, tuning, 0.8, 180)
 	Engine.max_fps = old_max_fps
-	_check(absf(low_fps.speed - high_fps.speed) <= 3.1, "180 fixed ticks are render-frame-rate stable (30 FPS %.2f, 144 FPS %.2f)" % [low_fps.speed, high_fps.speed])
+	_check(absf(low_fps.speed - high_fps.speed) <= 0.25, "180 fixed ticks are render-frame-rate stable (30 FPS %.2f, 144 FPS %.2f)" % [low_fps.speed, high_fps.speed])
 	_check(low_fps.position.distance_to(high_fps.position) <= 0.75, "fixed-tick trajectory is render-frame-rate stable (delta %.3f)" % low_fps.position.distance_to(high_fps.position))
 
 

@@ -68,7 +68,7 @@ func _capture() -> void:
 	if _last_video_frame_collision_count < 1:
 		_capture_failed = true
 		push_error("Last generated video frame does not show the real wall contact")
-	if _car.get_collision_count() >= 1 and _car.get_speed() > 2.0:
+	if _car.get_collision_count() >= 1 and _car.get_speed() > WorldScale.metres(2.0):
 		_capture_failed = true
 		push_error("Evidence capture ended before the post-impact state settled")
 	_save_svg(CAPTURE_PATH, TOTAL_TICKS - 1)

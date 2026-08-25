@@ -21,6 +21,7 @@ func _run() -> void:
 		_verify_overlapping_matches_brute_force()
 		_verify_degenerate_inputs_are_safe()
 		_verify_surface_map_agrees_with_brute_force()
+		_verify_segments_near_actually_narrows_candidates()
 	_finish()
 
 
@@ -144,6 +145,35 @@ func _verify_surface_map_agrees_with_brute_force() -> void:
 				disagreements += 1
 	_check(on_track_hits > 0, "the probe actually covered on-track positions (%d hits)" % on_track_hits)
 	_check(disagreements == 0, "indexed surface lookup agrees with brute force everywhere (%d disagreements)" % disagreements)
+
+
+func _verify_segments_near_actually_narrows_candidates() -> void:
+	## The superset checks above would all still pass if `segments_near()` degenerately
+	## returned every segment for every query. This guards the one property the spatial
+	## index actually exists for: that it narrows the candidate set. Mirrors the real
+	## production usage in `track/track_surface_map.gd` (cell size = track width, query
+	## radius = half the track width) on a real generated circuit.
+	const MAX_CANDIDATE_FRACTION := 0.10
+	var generator_script := load(TRACK_GENERATOR_PATH) as GDScript
+	_check(generator_script != null, "generator script loads for the narrowing check")
+	if generator_script == null:
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 555222
+	var generator = generator_script.new()
+	var definition = generator.generate(0)
+	var segment_count: int = definition.centerline.size() - 1
+	var half_width: float = definition.track_width * 0.5
+	var grid := SegmentGrid.new(definition.centerline, maxf(definition.track_width, 1.0))
+	var total_candidates := 0
+	var probes := 200
+	for probe in range(probes):
+		var anchor: Vector2 = definition.centerline[rng.randi_range(0, segment_count - 1)]
+		var query := anchor + Vector2(rng.randf_range(-half_width, half_width), rng.randf_range(-half_width, half_width))
+		total_candidates += grid.segments_near(query, half_width).size()
+	var average_candidates := float(total_candidates) / float(probes)
+	var average_fraction := average_candidates / float(segment_count)
+	_check(average_fraction < MAX_CANDIDATE_FRACTION, "segments_near narrows candidates well below every segment (avg %.1f of %d segments = %.1f%%, threshold %.0f%%)" % [average_candidates, segment_count, average_fraction * 100.0, MAX_CANDIDATE_FRACTION * 100.0])
 
 
 func _brute_force_distance(points: PackedVector2Array, query: Vector2) -> float:
