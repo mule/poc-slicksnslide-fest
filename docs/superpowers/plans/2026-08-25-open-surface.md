@@ -455,7 +455,7 @@ git commit -m "feat: replace the track fence with a distant containment boundary
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: `SurfaceQuery.distance_to_centerline(world_position: Vector2) -> float`. Returns `0.0` from the base class. Task 5 calls this.
+- Produces: `SurfaceQuery.distance_to_centerline(world_position: Vector2, search_radius: float) -> float`. Returns `0.0` from the base class; the real provider returns `INF` beyond `search_radius`. Task 5 calls this with `tuning.auto_reset_lost_distance`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -471,7 +471,7 @@ func _verify_distance_agrees_with_surface_classification() -> void:
 
 	var centre: Vector2 = definition.centerline[10]
 	_check(
-		is_zero_approx(surface_map.distance_to_centerline(centre)) or surface_map.distance_to_centerline(centre) < 1.0,
+		surface_map.distance_to_centerline(centre, half_width) < 1.0,
 		"a point on the centerline reports a near-zero distance"
 	)
 
@@ -480,20 +480,25 @@ func _verify_distance_agrees_with_surface_classification() -> void:
 	var just_outside: Vector2 = centre + lateral * (half_width + 5.0)
 	_check(
 		surface_map.sample_at(just_inside).surface_type == SurfaceQuery.SurfaceType.DIRT
-			and surface_map.distance_to_centerline(just_inside) <= half_width,
+			and surface_map.distance_to_centerline(just_inside, half_width) <= half_width,
 		"a point inside the track is DIRT and within half a width of the line"
 	)
+	var far_distance: float = surface_map.distance_to_centerline(just_outside, half_width * 8.0)
 	_check(
 		surface_map.sample_at(just_outside).surface_type == SurfaceQuery.SurfaceType.OFF_TRACK
-			and surface_map.distance_to_centerline(just_outside) > half_width,
-		"a point outside the track is OFF_TRACK and beyond half a width of the line"
+			and far_distance > half_width and far_distance < half_width * 2.0,
+		"a point just outside the track is OFF_TRACK and reports a real distance, not INF"
+	)
+	_check(
+		is_inf(surface_map.distance_to_centerline(centre + lateral * (half_width * 20.0), half_width)),
+		"a point beyond the search radius saturates to INF rather than lying about the distance"
 	)
 
 
 func _verify_base_surface_query_never_reports_lost() -> void:
 	var base := SurfaceQuery.new()
 	_check(
-		is_zero_approx(base.distance_to_centerline(Vector2(9999.0, 9999.0))),
+		is_zero_approx(base.distance_to_centerline(Vector2(9999.0, 9999.0), 1000.0)),
 		"the base SurfaceQuery reports zero distance so providers without a centerline never read as lost"
 	)
 ```
@@ -510,12 +515,17 @@ Expected: FAIL — `Invalid call. Nonexistent function 'distance_to_centerline'`
 In `track/surface_query.gd`, after `sample_at()`:
 
 ```gdscript
-## Distance from a world position to the track centerline.
+## Distance from a world position to the track centerline, accurate out to search_radius.
+##
+## Beyond search_radius an implementation may return INF instead of a true distance. The real
+## provider answers from a spatial grid queried with exactly this radius, so a caller pays only
+## for the range it needs. Callers must pass the largest distance they care about and read INF as
+## "further away than that".
 ##
 ## The base implementation returns 0.0 rather than pushing an error: a provider with no notion of
-## a centerline should read as "on the line" so that distance-based rules never fire against it.
+## a centerline should read as "on the line" so distance-based rules never fire against it.
 ## Returning INF here would make every such provider permanently "lost".
-func distance_to_centerline(_world_position: Vector2) -> float:
+func distance_to_centerline(_world_position: Vector2, _search_radius: float) -> float:
 	return 0.0
 ```
 
@@ -525,17 +535,18 @@ In `track/track_surface_map.gd`, rename the private method to the public contrac
 
 ```gdscript
 func sample_at(world_position: Vector2) -> SurfaceSample:
-	if _definition != null and distance_to_centerline(world_position) <= _definition.track_width * 0.5:
-		return SurfaceSample.new(SurfaceType.DIRT, DIRT_GRIP, DIRT_DRAG)
+	if _definition != null:
+		var half_width: float = _definition.track_width * 0.5
+		if distance_to_centerline(world_position, half_width) <= half_width:
+			return SurfaceSample.new(SurfaceType.DIRT, DIRT_GRIP, DIRT_DRAG)
 	return SurfaceSample.new(SurfaceType.OFF_TRACK, GRASS_GRIP, GRASS_DRAG)
 
 
-func distance_to_centerline(world_position: Vector2) -> float:
+func distance_to_centerline(world_position: Vector2, search_radius: float) -> float:
 	if _grid == null:
 		return INF
-	var half_width: float = _definition.track_width * 0.5
 	var nearest_distance := INF
-	for index in _grid.segments_near(world_position, half_width):
+	for index in _grid.segments_near(world_position, search_radius):
 		var closest := Geometry2D.get_closest_point_to_segment(
 			world_position,
 			_definition.centerline[index],
@@ -545,9 +556,15 @@ func distance_to_centerline(world_position: Vector2) -> float:
 	return nearest_distance
 ```
 
-The body is unchanged from the existing `_distance_to_centerline`; only the name and visibility change.
+**The search radius is a parameter, not a fixed half-width, and this is load-bearing.** The original
+private method queried the grid with `half_width`, so *any* off-track position returned `INF` —
+there were no segments in range to measure against. Classification only ever asked "inside or
+outside", so that was sufficient. Task 5 asks "how far outside", and against a fixed half-width
+radius the answer would always be `INF`, firing the lost condition the instant the car left the
+track and making `auto_reset_lost_distance` meaningless.
 
-Note the returned value saturates: `segments_near` is queried with a radius of `half_width`, so any position further than half a width from the line returns `INF`, not its true distance. That is sufficient for the surface classification it was written for, and Task 5 depends on it — see that task's Step 4.
+`sample_at` keeps paying only for `half_width`, so the per-tick classification cost is unchanged.
+Task 5 passes the distance it actually cares about, and only while off-track.
 
 - [ ] **Step 5: Give the test provider a settable distance**
 
@@ -557,7 +574,7 @@ In `tests/issue_4_test_surface_provider.gd`, add the field and override so auto-
 var distance_from_line: float = 0.0
 
 
-func distance_to_centerline(_world_position: Vector2) -> float:
+func distance_to_centerline(_world_position: Vector2, _search_radius: float) -> float:
 	return distance_from_line
 ```
 
@@ -589,7 +606,7 @@ git commit -m "feat: promote centerline distance to the surface contract"
 - Create: `tests/open_surface_auto_reset_test.gd`
 
 **Interfaces:**
-- Consumes: `SurfaceQuery.distance_to_centerline()` (Task 4), `TrackGenerator.PLAY_AREA_MARGIN` (Task 1).
+- Consumes: `SurfaceQuery.distance_to_centerline(position, search_radius)` (Task 4), `TrackGenerator.PLAY_AREA_MARGIN` (Task 1). The car passes `tuning.auto_reset_lost_distance` as the search radius.
 - Produces: `TopDownCar.set_auto_reset_enabled(enabled: bool) -> void` and `TopDownCar.consume_auto_reset_notice() -> bool`, which returns `true` once after an automatic reset has fired and `false` thereafter.
 
 - [ ] **Step 1: Write the failing test**
@@ -817,10 +834,13 @@ Add the evaluator:
 ## Two conditions, either sufficient, evaluated only while off-track: the car has stopped, or it
 ## has strayed far from the racing line. Returning to dirt clears both.
 ##
-## The distance test is written as "not less than or equal" rather than "greater than" because
-## TrackSurfaceMap returns INF for anything beyond half a track width -- its proximity query is
-## only radius-accurate inside the track. INF compares correctly here, but a NAN from a degenerate
-## provider would not, and this ordering fails safe by not resetting.
+## The search radius passed below is the lost distance itself: TrackSurfaceMap answers from a grid
+## queried with exactly that radius, so anything further away returns INF -- which is precisely the
+## "lost" answer. Passing a smaller radius would report INF for every off-track position and fire
+## the reset the moment the car left the track.
+##
+## The comparison is written as "not less than or equal" rather than "greater than" so that INF
+## resolves correctly and a NAN from a degenerate provider fails safe by not resetting.
 func _update_auto_reset(state: PhysicsDirectBodyState2D, delta: float) -> void:
 	if not _auto_reset_enabled or _surface_type != SurfaceQuery.SurfaceType.OFF_TRACK:
 		_off_track_stopped_elapsed = 0.0
@@ -834,7 +854,7 @@ func _update_auto_reset(state: PhysicsDirectBodyState2D, delta: float) -> void:
 	var stuck := _off_track_stopped_elapsed >= tuning.auto_reset_stuck_seconds
 	var lost := false
 	if _surface_query != null:
-		var distance := _surface_query.distance_to_centerline(state.transform.origin)
+		var distance := _surface_query.distance_to_centerline(state.transform.origin, tuning.auto_reset_lost_distance)
 		lost = not (distance <= tuning.auto_reset_lost_distance)
 
 	if stuck or lost:
