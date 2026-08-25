@@ -23,6 +23,10 @@ const FALLBACK_HALF_STRAIGHT := 3728.0
 const FALLBACK_RADIUS := 2600.0
 const FALLBACK_WIDTH := 150.0
 
+## Runoff beyond the track's own bounds before the containment boundary. Sized so a car that
+## leaves the circuit has roughly 1.5 viewport widths to recover in before meeting anything solid.
+const PLAY_AREA_MARGIN := 2000.0
+
 
 func generate(requested_seed: int, limit_overrides: Dictionary = {}):
 	var started_usec := Time.get_ticks_usec()
@@ -65,6 +69,7 @@ func _build_definition(requested_seed: int, centerline: PackedVector2Array, widt
 	definition.spawn_transform = Transform2D(definition.forward_direction.angle() + PI * 0.5, definition.centerline[0])
 	definition.checkpoints = _build_checkpoints(definition.centerline)
 	definition.bounds = _combined_bounds(definition.left_boundary, definition.right_boundary)
+	definition.play_area = definition.bounds.grow(PLAY_AREA_MARGIN)
 	definition.geometry_fingerprint = _fingerprint(definition)
 	return definition
 

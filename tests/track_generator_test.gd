@@ -4,6 +4,7 @@ const TRACK_GENERATOR_PATH := "res://track/track_generator.gd"
 const SURFACE_MAP_PATH := "res://track/track_surface_map.gd"
 const LAP_TRACKER_PATH := "res://track/lap_progress_tracker.gd"
 const TRACK_RUNTIME_PATH := "res://track/track_runtime.gd"
+const TrackGeneratorScript := preload("res://track/track_generator.gd")
 
 const EXPECTED_MIN_WIDTH := 125.0
 const EXPECTED_MAX_WIDTH := 175.0
@@ -69,6 +70,18 @@ func _verify_driveable_definition(definition, seed: int) -> void:
 	_check(definition.seed == seed, "seed %d is retained" % seed)
 	_check(definition.generation_attempts >= 1 and definition.generation_attempts <= generator_attempt_limit(), "seed %d uses bounded attempts" % seed)
 	_check(definition.track_width >= EXPECTED_MIN_WIDTH and definition.track_width <= EXPECTED_MAX_WIDTH, "seed %d width is within the driveable bound" % seed)
+	var expected_margin: float = TrackGeneratorScript.PLAY_AREA_MARGIN
+	_check(definition.play_area.encloses(definition.bounds), "seed %d play area encloses the track bounds" % seed)
+	_check(
+		is_equal_approx(definition.play_area.position.x, definition.bounds.position.x - expected_margin)
+			and is_equal_approx(definition.play_area.position.y, definition.bounds.position.y - expected_margin),
+		"seed %d play area starts one margin outside the bounds" % seed
+	)
+	_check(
+		is_equal_approx(definition.play_area.size.x, definition.bounds.size.x + expected_margin * 2.0)
+			and is_equal_approx(definition.play_area.size.y, definition.bounds.size.y + expected_margin * 2.0),
+		"seed %d play area adds one margin on every side" % seed
+	)
 	_check(definition.lap_length >= EXPECTED_MIN_LAP_LENGTH and definition.lap_length <= EXPECTED_MAX_LAP_LENGTH, "seed %d lap length is within bounds" % seed)
 	_check(definition.max_curvature <= EXPECTED_MAX_CURVATURE, "seed %d curvature is bounded" % seed)
 	_check(definition.start_straight_length >= EXPECTED_MIN_START_STRAIGHT, "seed %d has an adequate start straight" % seed)
