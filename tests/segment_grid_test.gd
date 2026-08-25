@@ -22,6 +22,8 @@ func _run() -> void:
 		_verify_degenerate_inputs_are_safe()
 		_verify_surface_map_agrees_with_brute_force()
 		_verify_segments_near_actually_narrows_candidates()
+		_verify_distance_agrees_with_surface_classification()
+		_verify_base_surface_query_never_reports_lost()
 	_finish()
 
 
@@ -174,6 +176,47 @@ func _verify_segments_near_actually_narrows_candidates() -> void:
 	var average_candidates := float(total_candidates) / float(probes)
 	var average_fraction := average_candidates / float(segment_count)
 	_check(average_fraction < MAX_CANDIDATE_FRACTION, "segments_near narrows candidates well below every segment (avg %.1f of %d segments = %.1f%%, threshold %.0f%%)" % [average_candidates, segment_count, average_fraction * 100.0, MAX_CANDIDATE_FRACTION * 100.0])
+
+
+func _verify_distance_agrees_with_surface_classification() -> void:
+	var generator_script := load(TRACK_GENERATOR_PATH) as GDScript
+	var surface_map_script := load(SURFACE_MAP_PATH) as GDScript
+	var definition = generator_script.new().generate(0)
+	var surface_map = surface_map_script.new(definition)
+	var half_width: float = definition.track_width * 0.5
+
+	var centre: Vector2 = definition.centerline[10]
+	_check(
+		surface_map.distance_to_centerline(centre, half_width) < 1.0,
+		"a point on the centerline reports a near-zero distance"
+	)
+
+	var lateral: Vector2 = (definition.centerline[11] - definition.centerline[10]).normalized().orthogonal()
+	var just_inside: Vector2 = centre + lateral * (half_width - 5.0)
+	var just_outside: Vector2 = centre + lateral * (half_width + 5.0)
+	_check(
+		surface_map.sample_at(just_inside).surface_type == SurfaceQuery.SurfaceType.DIRT
+			and surface_map.distance_to_centerline(just_inside, half_width) <= half_width,
+		"a point inside the track is DIRT and within half a width of the line"
+	)
+	var far_distance: float = surface_map.distance_to_centerline(just_outside, half_width * 8.0)
+	_check(
+		surface_map.sample_at(just_outside).surface_type == SurfaceQuery.SurfaceType.OFF_TRACK
+			and far_distance > half_width and far_distance < half_width * 2.0,
+		"a point just outside the track is OFF_TRACK and reports a real distance, not INF"
+	)
+	_check(
+		is_inf(surface_map.distance_to_centerline(centre + lateral * (half_width * 20.0), half_width)),
+		"a point beyond the search radius saturates to INF rather than lying about the distance"
+	)
+
+
+func _verify_base_surface_query_never_reports_lost() -> void:
+	var base := SurfaceQuery.new()
+	_check(
+		is_zero_approx(base.distance_to_centerline(Vector2(9999.0, 9999.0), 1000.0)),
+		"the base SurfaceQuery reports zero distance so providers without a centerline never read as lost"
+	)
 
 
 func _brute_force_distance(points: PackedVector2Array, query: Vector2) -> float:

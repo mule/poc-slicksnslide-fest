@@ -31,3 +31,17 @@ class SurfaceSample:
 func sample_at(_world_position: Vector2) -> SurfaceSample:
 	push_error("SurfaceQuery.sample_at must be implemented by a track surface provider")
 	return SurfaceSample.new()
+
+
+## Distance from a world position to the track centerline, accurate out to search_radius.
+##
+## Beyond search_radius an implementation may return INF instead of a true distance. The real
+## provider answers from a spatial grid queried with exactly this radius, so a caller pays only
+## for the range it needs. Callers must pass the largest distance they care about and read INF as
+## "further away than that".
+##
+## The base implementation returns 0.0 rather than pushing an error: a provider with no notion of
+## a centerline should read as "on the line" so distance-based rules never fire against it.
+## Returning INF here would make every such provider permanently "lost".
+func distance_to_centerline(_world_position: Vector2, _search_radius: float) -> float:
+	return 0.0
