@@ -15,11 +15,11 @@ bounce = 0.05
 particle_flag_disable_z = true
 direction = Vector3(0, 1, 0)
 spread = 30.0
-initial_velocity_min = 7.0
-initial_velocity_max = 15.0
-gravity = Vector3(0, 3, 0)
-scale_min = 1.0
-scale_max = 2.4
+initial_velocity_min = 87.5
+initial_velocity_max = 187.5
+gravity = Vector3(0, 37.5, 0)
+scale_min = 12.5
+scale_max = 30.0
 color = Color(0.58, 0.38, 0.19, 0.55)
 
 [node name="TopDownCar" type="RigidBody2D"]

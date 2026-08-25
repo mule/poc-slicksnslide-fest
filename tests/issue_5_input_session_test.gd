@@ -151,7 +151,7 @@ func _verify_checkpoint_crossings() -> void:
 	if detector_script == null:
 		return
 	var definition := TrackDefinition.new()
-	definition.track_width = 40.0
+	definition.track_width = 150.0
 	definition.checkpoints = [Transform2D(0.0, Vector2(100.0, 50.0))]
 	var detector = detector_script.new(definition)
 	detector.reset(Vector2(95.0, 50.0))
@@ -162,8 +162,8 @@ func _verify_checkpoint_crossings() -> void:
 	detector.reset(Vector2(105.0, 50.0))
 	var reverse_crossing: Dictionary = detector.sample(Vector2(95.0, 50.0))
 	_check(reverse_crossing.is_empty(), "crossing the finish plane backward is ignored")
-	detector.reset(Vector2(95.0, 80.0))
-	var outside_gate: Dictionary = detector.sample(Vector2(105.0, 80.0))
+	detector.reset(Vector2(95.0, 180.0))
+	var outside_gate: Dictionary = detector.sample(Vector2(105.0, 180.0))
 	_check(outside_gate.is_empty(), "crossing outside the finite track-width gate is ignored")
 
 

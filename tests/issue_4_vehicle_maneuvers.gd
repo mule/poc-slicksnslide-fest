@@ -62,14 +62,15 @@ func _run() -> void:
 	await _test_driving_updates_latest_valid_reset_pose(vehicle_scene, tuning)
 	await _test_camera_feedback_and_diagnostics(vehicle_scene, tuning)
 	await _test_render_frame_rate_does_not_change_fixed_tick_result(vehicle_scene, tuning)
+	await _test_scale_contract(vehicle_scene, tuning)
 	_finish()
 
 
 func _test_proportional_acceleration_and_no_hidden_drive(scene: PackedScene, tuning: VehicleTuning) -> void:
 	var full := await _run_straight_acceleration(scene, tuning, 1.0)
 	var half := await _run_straight_acceleration(scene, tuning, 0.5)
-	_check(full.speed >= 20.0 and full.speed <= 34.0, "full throttle reaches 20..34 world units/s after 4 s (got %.2f)" % full.speed)
-	_check(half.speed >= full.speed * 0.38 and half.speed <= full.speed * 0.65, "half throttle produces proportional speed (half %.2f, full %.2f)" % [half.speed, full.speed])
+	_check(full.speed >= 450.0 and full.speed <= 550.0, "full throttle reaches 450..550 px/s after 4 s (got %.2f)" % full.speed)
+	_check(half.speed >= full.speed * 0.55 and half.speed <= full.speed * 0.80, "half throttle produces proportional speed (half %.2f, full %.2f)" % [half.speed, full.speed])
 
 	var fixture := await _spawn_vehicle(scene, tuning)
 	var car = fixture.car
@@ -80,7 +81,7 @@ func _test_proportional_acceleration_and_no_hidden_drive(scene: PackedScene, tun
 	controls.reset()
 	await _simulate_seconds(1.0)
 	var speed_after_release: float = car.get_speed()
-	_check(speed_after_release < speed_before_release - 0.25, "released controls add no hidden drive force (%.2f -> %.2f)" % [speed_before_release, speed_after_release])
+	_check(speed_after_release < speed_before_release - 3.1, "released controls add no hidden drive force (%.2f -> %.2f)" % [speed_before_release, speed_after_release])
 	await _dispose_fixture(fixture)
 
 
@@ -92,13 +93,13 @@ func _test_service_brake_and_reverse(scene: PackedScene, tuning: VehicleTuning) 
 	await _simulate_seconds(3.0)
 	var approach_speed: float = car.get_speed()
 	controls.set_controls(0.0, 0.0, 1.0, 0.0)
-	await _simulate_seconds(1.5)
+	await _simulate_seconds(2.5)
 	var stopped_speed: float = car.get_speed()
 	await _simulate_seconds(1.5)
 	var reverse_local: Vector2 = car.get_local_velocity()
-	_check(approach_speed >= 17.0, "braking maneuver has a meaningful approach speed (got %.2f)" % approach_speed)
-	_check(stopped_speed <= 2.5, "service brake stops without overshoot jitter (got %.2f)" % stopped_speed)
-	_check(reverse_local.y >= 5.0 and reverse_local.y <= 17.0, "held brake provides bounded reverse (local y %.2f)" % reverse_local.y)
+	_check(approach_speed >= 380.0, "braking maneuver has a meaningful approach speed (got %.2f)" % approach_speed)
+	_check(stopped_speed <= 31.0, "service brake stops without overshoot jitter (got %.2f)" % stopped_speed)
+	_check(reverse_local.y >= 62.5 and reverse_local.y <= 212.5, "held brake provides bounded reverse (local y %.2f)" % reverse_local.y)
 	await _dispose_fixture(fixture)
 
 
@@ -169,13 +170,31 @@ func _test_wall_impact_does_not_tunnel_or_gain_energy(scene: PackedScene, tuning
 	var controls: VehicleInputState = fixture.controls
 	controls.reset()
 	car.linear_velocity = Vector2(0.0, -tuning.max_safe_speed)
-	var pre_impact_peak: float = car.get_speed()
-	await _simulate_seconds(3.0)
+
+	# `_integrate_forces` re-clamps `state.linear_velocity` to `tuning.max_safe_speed` on every
+	# tick, so sampling `get_speed()`/`get_peak_speed()` only right before or after that clamp
+	# can never observe an over-speed impact. To catch real energy injection we sample
+	# `car.get_speed()` from GDScript immediately after each `physics_frame` completes, which
+	# reflects the RigidBody's velocity right after the engine's own collision response for that
+	# step — before the *next* tick's `_integrate_forces` call re-clamps it.
+	var approach_speed := -1.0
+	var post_impact_peak_speed := 0.0
+	var previous_collision_count: int = car.get_collision_count()
+	var total_ticks := roundi(3.0 * TEST_TICKS_PER_SECOND)
+	for _tick in total_ticks:
+		var speed_before_tick: float = car.get_speed()
+		await physics_frame
+		var collision_count: int = car.get_collision_count()
+		if approach_speed < 0.0 and collision_count > previous_collision_count:
+			approach_speed = speed_before_tick
+		previous_collision_count = collision_count
+		if approach_speed >= 0.0:
+			post_impact_peak_speed = maxf(post_impact_peak_speed, car.get_speed())
+
 	_check(car.has_method("get_collision_count") and car.get_collision_count() >= 1, "wall maneuver records a real collision")
 	_check(car.global_position.y >= 450.0, "continuous collision detection prevents tunneling through the wall (y %.2f)" % car.global_position.y)
-	_check(car.get_peak_speed() <= tuning.max_safe_speed + 0.01, "impact cannot exceed configured safe speed (peak %.2f)" % car.get_peak_speed())
-	_check(pre_impact_peak >= tuning.max_safe_speed - 0.1, "wall maneuver starts at the documented maximum expected speed (%.2f)" % pre_impact_peak)
-	_check(car.get_speed() <= pre_impact_peak * 1.05 + 0.5, "wall impact injects no unbounded energy (before %.2f, after %.2f)" % [pre_impact_peak, car.get_speed()])
+	_check(approach_speed >= 0.0, "captured a pre-impact approach speed before the wall collision (%.2f)" % approach_speed)
+	_check(post_impact_peak_speed <= approach_speed + 1.0, "wall impact (bounce=0.05) does not rebound faster than the approach speed (approach %.2f, post-impact peak %.2f)" % [approach_speed, post_impact_peak_speed])
 	await _dispose_fixture(fixture)
 
 
@@ -219,7 +238,7 @@ func _test_driving_updates_latest_valid_reset_pose(scene: PackedScene, tuning: V
 	car.request_safe_reset()
 	await physics_frame
 	_check(car.global_position.y < START_POSE.origin.y - 3.0, "dirt driving advances the latest valid reset checkpoint")
-	_check(car.global_position.distance_to(latest_valid_position) <= 8.0, "automatic reset checkpoint remains near the latest stable track pose")
+	_check(car.global_position.distance_to(latest_valid_position) <= 100.0, "automatic reset checkpoint remains near the latest stable track pose")
 	await _dispose_fixture(fixture)
 
 
@@ -250,6 +269,19 @@ func _test_render_frame_rate_does_not_change_fixed_tick_result(scene: PackedScen
 	Engine.max_fps = old_max_fps
 	_check(absf(low_fps.speed - high_fps.speed) <= 0.25, "180 fixed ticks are render-frame-rate stable (30 FPS %.2f, 144 FPS %.2f)" % [low_fps.speed, high_fps.speed])
 	_check(low_fps.position.distance_to(high_fps.position) <= 0.75, "fixed-tick trajectory is render-frame-rate stable (delta %.3f)" % low_fps.position.distance_to(high_fps.position))
+
+
+func _test_scale_contract(scene: PackedScene, tuning: VehicleTuning) -> void:
+	var fixture := await _spawn_vehicle(scene, tuning)
+	fixture.controls.set_controls(0.0, 1.0, 0.0, 0.0)
+	await _simulate_seconds(25.0)
+	var terminal: float = fixture.car.get_speed()
+	_check(terminal >= 570.0 and terminal <= 630.0, "sustained throttle settles at the designed 600 px/s terminal speed (got %.1f)" % terminal)
+	var viewport_width: float = 1280.0 / tuning.camera_zoom
+	var crossing_seconds := viewport_width / maxf(terminal, 0.001)
+	_check(crossing_seconds >= 2.5 and crossing_seconds <= 3.0, "the car crosses one viewport width in 2.5..3.0 s (got %.2f)" % crossing_seconds)
+	_check(WorldScale.to_kph(terminal) >= 160.0 and WorldScale.to_kph(terminal) <= 185.0, "the HUD reads a truthful ~173 km/h (got %.1f)" % WorldScale.to_kph(terminal))
+	await _dispose_fixture(fixture)
 
 
 func _run_straight_acceleration(scene: PackedScene, tuning: VehicleTuning, throttle: float, ticks := 240) -> Dictionary:
@@ -290,7 +322,7 @@ func _run_surface_maneuver(scene: PackedScene, tuning: VehicleTuning, provider: 
 func _run_slip_recovery(scene: PackedScene, tuning: VehicleTuning, provider: SurfaceQuery) -> Dictionary:
 	var fixture := await _spawn_vehicle(scene, tuning, false, provider)
 	fixture.controls.reset()
-	fixture.car.linear_velocity = Vector2(12.0, -18.0)
+	fixture.car.linear_velocity = Vector2(150.0, -225.0)
 	await physics_frame
 	var initial_slip: float = fixture.car.get_slip_ratio()
 	var ticks := 0

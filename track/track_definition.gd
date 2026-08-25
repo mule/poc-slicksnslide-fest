@@ -8,7 +8,7 @@ extends Resource
 @export var centerline: PackedVector2Array = PackedVector2Array()
 @export var left_boundary: PackedVector2Array = PackedVector2Array()
 @export var right_boundary: PackedVector2Array = PackedVector2Array()
-@export_range(1.0, 100.0, 0.5) var track_width: float = 14.0
+@export_range(1.0, 500.0, 0.5) var track_width: float = 150.0
 @export var bounds: Rect2 = Rect2()
 @export var spawn_transform: Transform2D = Transform2D.IDENTITY
 @export var forward_direction: Vector2 = Vector2.RIGHT
