@@ -68,20 +68,25 @@ func _build_start_finish_line() -> void:
 	add_child(line)
 
 
+## The circuit has no walls. A single rectangle far outside the track keeps the car recoverable
+## without turning the boundary line into a barrier. This also drops collision shapes per track
+## from roughly 2,500 to 4.
 func _build_collision() -> void:
 	var body := StaticBody2D.new()
-	body.name = "TrackEdges"
+	body.name = "PlayAreaBounds"
 	add_child(body)
-	_add_boundary_collision(body, definition.left_boundary, "Left")
-	_add_boundary_collision(body, definition.right_boundary, "Right")
-
-
-func _add_boundary_collision(body: StaticBody2D, points: PackedVector2Array, prefix: String) -> void:
-	for index in range(points.size() - 1):
+	var area: Rect2 = definition.play_area
+	var corners := [
+		area.position,
+		Vector2(area.end.x, area.position.y),
+		area.end,
+		Vector2(area.position.x, area.end.y),
+	]
+	for index in range(corners.size()):
 		var shape := SegmentShape2D.new()
-		shape.a = points[index]
-		shape.b = points[index + 1]
+		shape.a = corners[index]
+		shape.b = corners[(index + 1) % corners.size()]
 		var collision := CollisionShape2D.new()
-		collision.name = "%sEdge%03d" % [prefix, index]
+		collision.name = "Edge%d" % index
 		collision.shape = shape
 		body.add_child(collision)

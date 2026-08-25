@@ -94,8 +94,6 @@ func _verify_driveable_definition(definition, seed: int) -> void:
 	_check(definition.left_boundary[0].is_equal_approx(definition.left_boundary[-1]), "seed %d left boundary is continuous at closure" % seed)
 	_check(definition.right_boundary[0].is_equal_approx(definition.right_boundary[-1]), "seed %d right boundary is continuous at closure" % seed)
 	_check(_maximum_gap(definition.centerline) <= EXPECTED_MAX_SAMPLE_GAP, "seed %d centerline sampling has no escape-sized gaps" % seed)
-	_check(_maximum_gap(definition.left_boundary) <= EXPECTED_MAX_SAMPLE_GAP * 1.1, "seed %d left edge collision sampling is continuous" % seed)
-	_check(_maximum_gap(definition.right_boundary) <= EXPECTED_MAX_SAMPLE_GAP * 1.1, "seed %d right edge collision sampling is continuous" % seed)
 	_check(not _has_self_intersection(definition.centerline), "seed %d centerline does not self-intersect" % seed)
 	_check(not _has_self_intersection(definition.left_boundary), "seed %d left boundary does not self-intersect" % seed)
 	_check(not _has_self_intersection(definition.right_boundary), "seed %d right boundary does not self-intersect" % seed)
@@ -183,12 +181,10 @@ func _verify_runtime_geometry(definition) -> void:
 	root.add_child(runtime)
 	var dirt_line := runtime.get_node_or_null("Dirt") as Line2D
 	var grass_shoulder := runtime.get_node_or_null("GrassShoulder") as Line2D
-	var collision_body := runtime.get_node_or_null("TrackEdges") as StaticBody2D
+	var collision_body := runtime.get_node_or_null("PlayAreaBounds") as StaticBody2D
 	_check(dirt_line != null and dirt_line.points.size() == definition.centerline.size(), "prototype dirt rendering follows the generated circuit")
 	_check(grass_shoulder != null and grass_shoulder.width > dirt_line.width, "prototype grass shoulder distinguishes off-track")
-	_check(collision_body != null, "generated track owns static edge collision")
-	if collision_body != null:
-		_check(collision_body.get_child_count() == 2 * (definition.centerline.size() - 1), "both continuous boundaries receive static segment collision")
+	_check(collision_body != null and collision_body.get_child_count() == 4, "prototype track builds a four-segment containment boundary")
 	runtime.free()
 
 
