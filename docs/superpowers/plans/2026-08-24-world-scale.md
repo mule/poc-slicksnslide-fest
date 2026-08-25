@@ -64,7 +64,7 @@ Note on task ordering: **Tasks 2 and 5 each deliver one of the two reported symp
 - Consumes: nothing.
 - Produces: `WorldScale.PIXELS_PER_METRE: float`, `WorldScale.metres(value_m: float) -> float`, `WorldScale.to_metres(value_px: float) -> float`, `WorldScale.to_kph(px_per_second: float) -> float`. Tasks 2 and 5 use these.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/world_scale_contract_test.gd`:
 
@@ -117,12 +117,12 @@ func _finish() -> void:
 	quit(1)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `godot --headless --path . --script res://tests/world_scale_contract_test.gd`
 Expected: FAIL, non-zero exit. Note the failure mode: because the test references the global class `WorldScale`, GDScript cannot resolve the identifier and the script fails to **parse** — you will see `Identifier "WorldScale" not declared in the current scope`, not a failing `_check`. That is still a valid red state; do not "fix" it by removing the reference.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `world/world_scale.gd`:
 
@@ -151,17 +151,17 @@ static func to_kph(px_per_second: float) -> float:
 	return px_per_second / PIXELS_PER_METRE * 3.6
 ```
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `godot --headless --path . --script res://tests/world_scale_contract_test.gd`
 Expected: PASS, "World scale contract checks passed: 6 checks", exit code 0.
 
-- [ ] **Step 5: Run the full suite**
+- [x] **Step 5: Run the full suite**
 
 Run every command in the Global Constraints suite block except `segment_grid_test.gd` (not yet created).
 Expected: all exit 0. Nothing consumes `WorldScale` yet, so no existing test changes behaviour.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add world/world_scale.gd tests/world_scale_contract_test.gd
@@ -186,7 +186,7 @@ Delivers the first reported symptom: the car stops crawling. Terminal speed goes
 
 **Why the export ranges must widen first:** `vehicle_tuning.gd` declares `@export_range(0.0, 50000.0, 10.0) var engine_force`, but the new value is 212500. Worse, `aerodynamic_drag` is declared with a **step of 0.001** while the new value is **0.00043** — the Godot inspector would round that to 0.0 and silently delete all aerodynamic drag. Widen the ranges in the same task as the value change, never after.
 
-- [ ] **Step 1: Write the failing test — resource-level**
+- [x] **Step 1: Write the failing test — resource-level**
 
 Add to `tests/world_scale_contract_test.gd`. Add the constant at the top:
 
@@ -247,12 +247,12 @@ func _solve_terminal_speed(tuning: VehicleTuning) -> float:
 	return (-b + sqrt(b * b - 4.0 * a * c)) / (2.0 * a)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `godot --headless --path . --script res://tests/world_scale_contract_test.gd`
 Expected: FAIL, non-zero exit. `tuning` is typed as `VehicleTuning` and `camera_zoom` is not declared on it yet, so this fails to **parse** (`Invalid access to property or key 'camera_zoom'`) rather than failing a `_check`. Once Step 3 declares the property, the remaining old values fail as ordinary check failures.
 
-- [ ] **Step 3: Widen the export ranges and add `camera_zoom`**
+- [x] **Step 3: Widen the export ranges and add `camera_zoom`**
 
 In `vehicle/vehicle_tuning.gd`, replace these lines exactly:
 
@@ -280,7 +280,7 @@ In the `Presentation` group, add `camera_zoom` after `camera_lead_seconds`:
 
 Leave `mass_kg`, `reverse_engage_delay`, the whole `Safety` group, `steering_response`, `max_steering_rate`, `max_angular_speed`, `lateral_grip`, `slip_onset`, `full_slip`, every grip multiplier, the whole `Surfaces` group, `camera_lead_seconds`, `camera_follow_response`, and `feedback_slip_threshold` untouched — they are rates, angles, times, or dimensionless ratios.
 
-- [ ] **Step 4: Rescale the tuning resource**
+- [x] **Step 4: Rescale the tuning resource**
 
 In `data/default_vehicle_tuning.tres`, set these fields (leave every other line as-is):
 
@@ -299,19 +299,19 @@ camera_max_lead = 250.0
 camera_zoom = 0.8
 ```
 
-- [ ] **Step 5: Run the resource test to verify it passes**
+- [x] **Step 5: Run the resource test to verify it passes**
 
 Run: `godot --headless --path . --script res://tests/world_scale_contract_test.gd`
 Expected: PASS, exit code 0. If `aerodynamic_drag` reads back as `0.0`, the export step in Step 3 was not applied — fix it before continuing.
 
-- [ ] **Step 6: Commit the resource contract**
+- [x] **Step 6: Commit the resource contract**
 
 ```bash
 git add vehicle/vehicle_tuning.gd data/default_vehicle_tuning.tres tests/world_scale_contract_test.gd
 git commit -m "feat: rescale vehicle tuning to pixel-space world units"
 ```
 
-- [ ] **Step 7: Fix the scale-dependent literals in the car**
+- [x] **Step 7: Fix the scale-dependent literals in the car**
 
 In `vehicle/top_down_car.gd` there are four hardcoded speeds. Each is in px/s and must scale. Route them through `WorldScale.metres()` so they stay greppable — a missed one presents as a feature bug ("dust never emits"), not a units bug.
 
@@ -339,7 +339,7 @@ Replace the dust gate in `_process`:
 	_dust.emitting = on_dirt and get_speed() > WorldScale.metres(4.0)
 ```
 
-- [ ] **Step 8: Make the HUD honest and apply the camera zoom**
+- [x] **Step 8: Make the HUD honest and apply the camera zoom**
 
 In `vehicle/top_down_car.gd`, in `get_diagnostics()` replace the first entry:
 
@@ -353,7 +353,7 @@ In `_ready()`, after `_follow_camera.top_level = true`, add:
 	_follow_camera.zoom = Vector2.ONE * tuning.camera_zoom
 ```
 
-- [ ] **Step 9: Update the maneuver test's rescaled assertions**
+- [x] **Step 9: Update the maneuver test's rescaled assertions**
 
 In `tests/issue_4_vehicle_maneuvers.gd`, these assertions scale by 12.5:
 
@@ -381,7 +381,7 @@ Line ~251, in the frame-rate stability test:
 	_check(absf(low_fps.speed - high_fps.speed) <= 3.1, "180 fixed ticks are render-frame-rate stable (30 FPS %.2f, 144 FPS %.2f)" % [low_fps.speed, high_fps.speed])
 ```
 
-- [ ] **Step 10: Update the two assertions that change structurally**
+- [x] **Step 10: Update the two assertions that change structurally**
 
 These are **not** rescales. Read the reasoning before editing — a plain ×12.5 leaves both failing.
 
@@ -409,7 +409,7 @@ Leave the *second* `await _simulate_seconds(1.5)` (the reverse phase) alone. The
 
 The reverse band is a plain ×12.5 and it still holds: the car stops ~2.2 s into the 2.5 s window, banking 0.3 s against the 0.4 s `reverse_engage_delay`, so reverse engages ~0.1 s into the following 1.5 s and reaches `73.9 px/s² × 1.4 s ≈ 95 px/s` net of drag — comfortably inside 62.5..212.5.
 
-- [ ] **Step 11: Add the simulated scale-contract test**
+- [x] **Step 11: Add the simulated scale-contract test**
 
 Still in `tests/issue_4_vehicle_maneuvers.gd`. This reuses the existing fixture helpers rather than duplicating them into a new file. `_spawn_vehicle(scene, tuning)` defaults to `with_wall = false`, so the car has open space for the full run.
 
@@ -435,19 +435,19 @@ func _test_scale_contract(scene: PackedScene, tuning: VehicleTuning) -> void:
 	await _dispose_fixture(fixture)
 ```
 
-- [ ] **Step 12: Run the maneuver test to verify it passes**
+- [x] **Step 12: Run the maneuver test to verify it passes**
 
 Run: `godot --headless --path . --script res://tests/issue_4_vehicle_maneuvers.gd`
 Expected: PASS, exit code 0.
 
 If the wall-impact test fails, note that the car now closes on the wall 13× faster; report the actual numbers rather than widening the tolerance blindly.
 
-- [ ] **Step 13: Run the full suite**
+- [x] **Step 13: Run the full suite**
 
 Run every command in the Global Constraints suite block except `segment_grid_test.gd`.
 Expected: all exit 0.
 
-- [ ] **Step 14: Commit**
+- [x] **Step 14: Commit**
 
 ```bash
 git add vehicle/top_down_car.gd tests/issue_4_vehicle_maneuvers.gd
@@ -468,7 +468,7 @@ git commit -m "feat: scale car speed thresholds and report honest km/h"
 
 **Contract:** this is a **broadphase**. Every method returns a *superset* of the true answer and never decides geometry itself. The tests assert the superset property, which is what callers rely on — asserting exact equality would be wrong and would break on diagonal segments.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/segment_grid_test.gd`. The brute-force scan that `TrackSurfaceMap` and `TrackGenerator` use today is the oracle:
 
@@ -583,12 +583,12 @@ func _finish() -> void:
 	quit(1)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `godot --headless --path . --script res://tests/segment_grid_test.gd`
 Expected: FAIL, non-zero exit. As in Task 1, the test references the global class `SegmentGrid`, so this is a **parse** failure (`Identifier "SegmentGrid" not declared in the current scope`), not a failing `_check`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `world/segment_grid.gd`:
 
@@ -663,17 +663,17 @@ func _cell_of(point: Vector2) -> Vector2i:
 
 **Why the superset property holds for `segments_near`:** if a segment's closest point to the query lies within `radius`, that point sits inside the query's bounding box, and the segment's own AABB therefore covers the cell containing it — a cell the query enumerates.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `godot --headless --path . --script res://tests/segment_grid_test.gd`
 Expected: PASS, exit code 0.
 
-- [ ] **Step 5: Run the full suite**
+- [x] **Step 5: Run the full suite**
 
 Run every command in the Global Constraints suite block. All of them exist now.
 Expected: all exit 0. Nothing consumes `SegmentGrid` yet.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add world/segment_grid.gd tests/segment_grid_test.gd
@@ -694,7 +694,7 @@ git commit -m "feat: add uniform segment grid broadphase"
 - Consumes: `SegmentGrid.new()`, `segments_near()` from Task 3.
 - Produces: no signature change. `sample_at(world_position: Vector2) -> SurfaceSample` behaves identically.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add to `tests/segment_grid_test.gd`. Add the constant at the top:
 
@@ -749,12 +749,12 @@ func _brute_force_distance(points: PackedVector2Array, query: Vector2) -> float:
 	return nearest
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `godot --headless --path . --script res://tests/segment_grid_test.gd`
 Expected: FAIL — but read the failure. Before the surface map is indexed, this test compares brute force against brute force and **passes trivially**. That is expected and correct: the test's job is to hold the behaviour still while Step 3 swaps the implementation underneath. If it passes here, record that and proceed; the meaningful run is Step 4.
 
-- [ ] **Step 3: Index the surface map**
+- [x] **Step 3: Index the surface map**
 
 Rewrite `track/track_surface_map.gd`, keeping `sample_at` and the surface constants exactly as they are:
 
@@ -800,16 +800,16 @@ func _distance_to_centerline(world_position: Vector2) -> float:
 
 Note the query radius is `half_width`, matching exactly the threshold `sample_at` tests against — so "no candidate returned" and "further than half a track width" are the same answer, and the fast path agrees with the slow path by construction rather than by luck.
 
-- [ ] **Step 4: Run the test to verify it passes**
+- [x] **Step 4: Run the test to verify it passes**
 
 Run: `godot --headless --path . --script res://tests/segment_grid_test.gd`
 Expected: PASS, exit code 0, with `disagreements == 0`. This run is the meaningful one — the brute-force oracle is now comparing against the indexed implementation.
 
-- [ ] **Step 5: Run the full suite**
+- [x] **Step 5: Run the full suite**
 
 Expected: all exit 0. In particular `issue_4_vehicle_maneuvers.gd` must still pass — it drives across surface boundaries.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add track/track_surface_map.gd tests/segment_grid_test.gd
@@ -832,7 +832,7 @@ Delivers the second reported symptom: the world stops fitting on one screen. Bou
 
 **Spec gap this task fills:** the spec specifies the spline but not how `start_straight_length` is derived once `half_straight` no longer exists. This plan measures the longest low-curvature run and **rotates the sample array so index 0 sits at its start**, which both defines the field and guarantees the car spawns on a straight. Control points 0, 1, and N−1 are pinned to `base_radius` so such a run exists by construction rather than by luck.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 In `tests/track_generator_test.gd`, replace the constants block at lines 8–14:
 
@@ -862,12 +862,12 @@ Call it from `_verify_driveable_definition`, immediately after the existing star
 	_verify_world_exceeds_one_screen(definition, seed)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `godot --headless --path . --script res://tests/track_generator_test.gd`
 Expected: FAIL — the generator still produces ~1500 px stadium ovals, so width, lap length, start straight, and both bounds checks all fail. Exit code 1.
 
-- [ ] **Step 3: Rescale the generator's constants**
+- [x] **Step 3: Rescale the generator's constants**
 
 In `track/track_generator.gd`, replace the constants block:
 
@@ -897,7 +897,7 @@ The fallback stadium is sized to land inside the new band: `4 × 3728 + 2π × 2
 
 `MAX_CURVATURE` **drops** rather than scaling: curvature is 1/length, so the dimensional rule would give 0.0016 — a 50 m minimum corner radius, far too gentle for rally. 0.005 is a 16 m hairpin, which expresses the intent rather than preserving an accident of the old scale.
 
-- [ ] **Step 4: Replace the sampler and the attempt loop**
+- [x] **Step 4: Replace the sampler and the attempt loop**
 
 In `track/track_generator.gd`, replace `generate()` and `_build_definition()`:
 
@@ -1104,7 +1104,7 @@ func _measure_max_curvature(points: PackedVector2Array) -> float:
 
 Keep `_sample_stadium`, `_derive_boundaries`, `_build_checkpoints`, `_validation_reason`, `_polyline_length`, `_combined_bounds`, and `_fingerprint` exactly as they are.
 
-- [ ] **Step 5: Put validation on the index**
+- [x] **Step 5: Put validation on the index**
 
 Still in `track/track_generator.gd`, replace both brute-force checks. At ~1250 samples the old code runs ~781k pairs per check and ~14M segment-intersection calls per generation — seconds, not microseconds.
 
@@ -1133,12 +1133,12 @@ func _boundaries_intersect(left: PackedVector2Array, right: PackedVector2Array) 
 	return false
 ```
 
-- [ ] **Step 6: Run the generator test to verify it passes**
+- [x] **Step 6: Run the generator test to verify it passes**
 
 Run: `godot --headless --path . --script res://tests/track_generator_test.gd`
 Expected: PASS, exit code 0.
 
-- [ ] **Step 7: Measure the fallback rate**
+- [x] **Step 7: Measure the fallback rate**
 
 The generator already prints `seed=N fingerprint=... generation_usec=N` per seed. Add a fallback tally so a silent regression to boring ovals is visible. In `tests/track_generator_test.gd`, inside the `for seed in range(10)` loop, extend the existing `print` call to include the two diagnostic fields:
 
@@ -1156,11 +1156,11 @@ Run the generator test and read the output.
 
 Expected: **at most 2 of 10 seeds report `fallback=true`.** If more do, the radial jitter is too aggressive for the curvature limit — raise `RADIUS_JITTER_MIN` from 0.55 toward 0.70 (gentler dips, less curvature) and re-run until the rate is acceptable. Record the value you settled on in the commit message. Also check `generation_usec`: it should be well under 100,000 (0.1 s) per seed. If it is not, the grid is not being used — re-check Step 5.
 
-- [ ] **Step 8: Run the full suite**
+- [x] **Step 8: Run the full suite**
 
 Expected: all exit 0. `issue_5_main_session_test.gd` builds the real scene against a real generated track, so it exercises the new geometry end to end.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add track/track_generator.gd tests/track_generator_test.gd
@@ -1181,7 +1181,7 @@ git commit -m "feat: generate meandering 2-3 km circuits instead of single-scree
 **Interfaces:**
 - Consumes: everything from Tasks 1–5. Produces nothing new.
 
-- [ ] **Step 1: Make the track's render widths proportional**
+- [x] **Step 1: Make the track's render widths proportional**
 
 In `track/track_runtime.gd`, the grass shoulder is `track_width + 24.0` — a 24 px band that was 2 m at the old scale and renders as a hairline now. Replace the two `_build_line` calls in `_ready()`:
 
@@ -1204,7 +1204,7 @@ In `_build_start_finish_line`, replace the width:
 
 Note `tests/track_generator_test.gd:161` asserts `grass_shoulder.width > dirt_line.width`, which `× 1.4` still satisfies.
 
-- [ ] **Step 2: Scale the dust particles**
+- [x] **Step 2: Scale the dust particles**
 
 In `vehicle/top_down_car.tscn`, in the `ParticleProcess_dust` sub-resource, the dust drifts at 7–15 px/s while the car now travels at 600. Replace:
 
@@ -1216,7 +1216,7 @@ scale_min = 12.5
 scale_max = 30.0
 ```
 
-- [ ] **Step 3: Match the capture script's shoulder to the runtime**
+- [x] **Step 3: Match the capture script's shoulder to the runtime**
 
 In `tests/capture_procedural_tracks.gd`, lines 35–38 duplicate the old widths. The `scale_factor` on line 33 already derives from `definition.bounds`, so it adapts to the bigger world on its own — only the widths need to follow Step 1:
 
@@ -1229,7 +1229,7 @@ In `tests/capture_procedural_tracks.gd`, lines 35–38 duplicate the old widths.
 
 The two `2.0` edge widths stay: they are in **image** pixels, not world pixels, and the image is still 1280 wide.
 
-- [ ] **Step 4: Update the checkpoint-gate fixture**
+- [x] **Step 4: Update the checkpoint-gate fixture**
 
 `tests/issue_5_input_session_test.gd` builds a synthetic `TrackDefinition` with `track_width = 40.0` — now below `MIN_WIDTH`, so it describes a track the generator can no longer produce. Widening it changes the geometry the gate test depends on, so **both** values must move together: the gate is at `(100, 50)` and the "outside the gate" probe sits at `y = 80`, which is 30 px laterally. At width 150 the half-width becomes 75, so `y = 80` would fall *inside* the gate and the assertion would invert.
 
@@ -1249,11 +1249,11 @@ and replace the outside-gate probe (the last three lines of the function before 
 
 `y = 180` is 130 px laterally, comfortably outside the 75 px half-width.
 
-- [ ] **Step 5: Run the full suite**
+- [x] **Step 5: Run the full suite**
 
 Expected: all exit 0.
 
-- [ ] **Step 6: Regenerate the visual evidence**
+- [x] **Step 6: Regenerate the visual evidence**
 
 These need a graphical Godot session, not `--headless`:
 
@@ -1265,7 +1265,7 @@ godot --path . --script res://tests/capture_issue_5_session.gd
 
 Open the regenerated images under `docs/evidence` and `docs/screenshots` and confirm by eye: the track is a meandering loop rather than an oval, the car occupies a small fraction of the visible area, and the dirt band is several car widths wide.
 
-- [ ] **Step 7: Update the documentation**
+- [x] **Step 7: Update the documentation**
 
 In `README.md`, add `world/` to the "Project boundaries" table:
 
@@ -1290,7 +1290,7 @@ In `docs/procedural-tracks.md`, update the documented generator constants to the
 
 In `docs/controller-time-trial.md`, update any quoted tuning values to the Task 2 numbers.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add track/track_runtime.gd vehicle/top_down_car.tscn tests/capture_procedural_tracks.gd tests/issue_5_input_session_test.gd README.md docs/
