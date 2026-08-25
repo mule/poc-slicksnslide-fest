@@ -51,7 +51,23 @@ godot --headless --path . --script res://tests/issue_6_android_test.gd
 | `tests/issue_4_test_surface_provider.gd` | Deterministic test surface | Add a settable centerline distance |
 | `tests/open_surface_auto_reset_test.gd` | New | Auto-reset condition coverage |
 
-Task order keeps the game playable at every commit. Widening happens while the walls still exist, so the generator risk is measured in isolation before the fence is removed.
+**Execution order: 1, 3, 2, 4, 5, 6.** Task numbers are stable (they match issues #26-#31); only the
+order changed, after Task 2's first attempt.
+
+The original order widened before removing the fence, to measure the generator risk in isolation.
+That measurement has been taken and is clean: the fallback rate is 1 of 20 seeds at both the old
+and new widths. But widening also trips two assertions in `tests/track_generator_test.gd` whose own
+messages read `left edge collision sampling is continuous` — they bound the sample gaps along the
+boundary polylines because those polylines *are* the collision geometry. Offsetting a centerline by
+half a track width stretches arc length on the outside of every curve by `(R + w/2) / R`, so a
+wider track produces proportionally larger boundary gaps. That is a real geometric consequence, and
+at 200-280 px it puts 8 of 20 seeds past the threshold.
+
+Relaxing a live collision-safety assertion while the collision it protects still exists would be
+dishonest. Task 3 deletes boundary collision outright, after which those two assertions have nothing
+left to protect — the boundary is a `Line2D`, and its rendering is unaffected by sample spacing.
+So Task 3 runs first and retires them with that justification, and Task 2 follows into a suite that
+no longer asserts a property the design has deliberately abandoned.
 
 ---
 
@@ -180,12 +196,30 @@ Expected: FAIL — `seed N width is within the driveable bound`, because the gen
 
 - [ ] **Step 4: Widen the generator**
 
+Three changes, not one. `MIN_WIDTH` and `MAX_WIDTH` were only ever *validation* bounds — the width
+the generator actually produces came from a hardcoded literal, so changing the constants alone
+rejects every candidate and drives the fallback rate to 20 of 20.
+
 In `track/track_generator.gd`:
 
 ```gdscript
 const MIN_WIDTH := 200.0
 const MAX_WIDTH := 280.0
 ```
+
+```gdscript
+const FALLBACK_WIDTH := 240.0
+```
+
+`240.0` is the midpoint of 200-280, preserving the relationship the old `150.0` had to 125-175.
+
+And in `generate()`, derive the sampled width from those constants instead of the literal range:
+
+```gdscript
+		var width := float(rng.randi_range(int(MIN_WIDTH / 5.0), int(MAX_WIDTH / 5.0)) * 5)
+```
+
+The `* 5` quantization is deliberate and preserved: track widths land on 5 px steps.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
@@ -415,6 +449,30 @@ In `tests/track_generator_test.gd` line 173, the assertion looks for `TrackEdges
 	_check(collision_body != null and collision_body.get_child_count() == 4, "prototype track builds a four-segment containment boundary")
 ```
 
+- [ ] **Step 4b: Retire the boundary collision-sampling assertions**
+
+Delete these two lines from `tests/track_generator_test.gd` (they sit just after the centerline gap
+check, around lines 97-98):
+
+```gdscript
+	_check(_maximum_gap(definition.left_boundary) <= EXPECTED_MAX_SAMPLE_GAP * 1.1, "seed %d left edge collision sampling is continuous" % seed)
+	_check(_maximum_gap(definition.right_boundary) <= EXPECTED_MAX_SAMPLE_GAP * 1.1, "seed %d right edge collision sampling is continuous" % seed)
+```
+
+They bound sample gaps along the boundary polylines because those polylines were the collision
+geometry — a long segment between samples is what a fast body can tunnel through or snag on. This
+task deletes that collision. What remains of the boundary is a `Line2D`, which draws a straight
+segment between consecutive points regardless of their spacing, so the property these assertions
+protect no longer exists to protect.
+
+**Keep the centerline assertion immediately above them.** `_maximum_gap(definition.centerline) <=
+EXPECTED_MAX_SAMPLE_GAP` still matters: the surface map and checkpoint placement both walk the
+centerline, and `EXPECTED_MAX_SAMPLE_GAP` is still referenced by the checkpoint-ordering check
+further down. Do not remove the constant.
+
+Do not replace them with looser versions of themselves. A bound invented to keep a retired
+assertion alive tests nothing.
+
 - [ ] **Step 5: Run both tests to verify they pass**
 
 Run: `godot --headless --path . --script res://tests/track_collision_physics_test.gd`
@@ -440,6 +498,9 @@ Expected: all scripts exit 0.
 git add track/track_runtime.gd tests/track_collision_physics_test.gd tests/track_generator_test.gd
 git commit -m "feat: replace the track fence with a distant containment boundary"
 ```
+
+The commit message body should note that the two boundary collision-sampling assertions were
+retired because boundary collision no longer exists.
 
 ---
 
