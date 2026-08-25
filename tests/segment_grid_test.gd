@@ -210,6 +210,25 @@ func _verify_distance_agrees_with_surface_classification() -> void:
 		"a point beyond the search radius saturates to INF rather than lying about the distance"
 	)
 
+	# Discriminator: a query point placed so far outside that only the radius argument (not an
+	# internally hardcoded half_width) determines whether the centerline is reachable. An
+	# implementation that ignores search_radius and substitutes half_width internally would return
+	# INF for both calls below, since the point sits well past half_width either way. Only an
+	# implementation that actually honours the passed-in radius can find the line at the larger
+	# radius and stay lost at the smaller one. This guards the exact regression the search_radius
+	# parameter exists to prevent (see track/surface_query.gd doc comment).
+	var far_offset: float = half_width + 1.5 * definition.track_width
+	var far_point: Vector2 = centre + lateral * far_offset
+	_check(
+		is_inf(surface_map.distance_to_centerline(far_point, half_width)),
+		"a small search_radius cannot reach a point far outside the track, even though a larger radius (below) can"
+	)
+	var wide_distance: float = surface_map.distance_to_centerline(far_point, half_width * 8.0)
+	_check(
+		not is_inf(wide_distance) and absf(wide_distance - far_offset) < half_width,
+		"widening search_radius alone (not an internal half_width substitute) lets the same far point resolve to a real, roughly-correct distance"
+	)
+
 
 func _verify_base_surface_query_never_reports_lost() -> void:
 	var base := SurfaceQuery.new()
