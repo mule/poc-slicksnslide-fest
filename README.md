@@ -40,6 +40,13 @@ godot --headless --path . --script res://tests/headless_smoke.gd
 
 The smoke check loads and instantiates the configured main scene, exercises its interchangeable track/vehicle mount points, verifies normalized vehicle input behavior, checks release diagnostics visibility, and loads the default seed and vehicle-tuning resources.
 
+Run the world-scale contract and spatial-indexing checks:
+
+```sh
+godot --headless --path . --script res://tests/world_scale_contract_test.gd
+godot --headless --path . --script res://tests/segment_grid_test.gd
+```
+
 Run the issue #5 input/session and integrated-scene checks:
 
 ```sh
@@ -63,6 +70,7 @@ godot --headless --path . --script res://tests/issue_6_android_test.gd
 
 | Directory | Responsibility |
 | --- | --- |
+| `world/` | The pixel-per-metre scale contract and shared spatial indexing |
 | `track/` | Deterministic generated track data, runtime geometry/collision, lap order, and surface queries |
 | `vehicle/` | Tunable force-based car dynamics, reset safety, feedback, and diagnostics |
 | `input/` | InputMap polling, deadzone processing, and hardware-independent normalized vehicle input |
@@ -70,6 +78,8 @@ godot --headless --path . --script res://tests/issue_6_android_test.gd
 | `platform/` | Small Android or Linux/Steam Deck adapters only |
 | `data/` | Versioned/default seed and physics tuning resources |
 | `tests/` | Headless project, contract, and future deterministic behavior checks |
+
+The world unit is the pixel at **12.5 px per metre** (`world/world_scale.gd`). Every length, speed, and acceleration in `track/`, `vehicle/`, and `session/` is expressed in pixels at that scale; route new scale-dependent literals through `WorldScale.metres()` so they stay greppable.
 
 `TrackDefinition` carries the generated centerline, width, bounds, spawn transform, ordered checkpoints, seed, and geometry fingerprint. `SurfaceQuery` maps a world position to surface type, grip, and drag. `VehicleInputState` carries normalized steering, throttle, brake, and handbrake values without referencing hardware.
 

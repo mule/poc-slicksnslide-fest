@@ -32,7 +32,7 @@ func _capture() -> void:
 		var available := CELL_SIZE - Vector2(42.0, 42.0)
 		var scale_factor: float = minf(available.x / definition.bounds.size.x, available.y / definition.bounds.size.y)
 		var offset: Vector2 = cell_origin + CELL_SIZE * 0.5 - definition.bounds.get_center() * scale_factor
-		_draw_polyline(image, definition.centerline, scale_factor, offset, (definition.track_width + 24.0) * scale_factor, GRASS)
+		_draw_polyline(image, definition.centerline, scale_factor, offset, definition.track_width * 1.4 * scale_factor, GRASS)
 		_draw_polyline(image, definition.centerline, scale_factor, offset, definition.track_width * scale_factor, DIRT)
 		_draw_polyline(image, definition.left_boundary, scale_factor, offset, 2.0, EDGE)
 		_draw_polyline(image, definition.right_boundary, scale_factor, offset, 2.0, EDGE)

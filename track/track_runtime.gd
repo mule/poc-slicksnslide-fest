@@ -16,7 +16,7 @@ func _ready() -> void:
 	if definition == null:
 		push_error("TrackRuntime requires a TrackDefinition")
 		return
-	_build_line("GrassShoulder", definition.track_width + 24.0, GRASS_COLOR, -3)
+	_build_line("GrassShoulder", definition.track_width * 1.4, GRASS_COLOR, -3)
 	_build_line("Dirt", definition.track_width, DIRT_COLOR, -2)
 	_build_boundary_line("LeftEdge", definition.left_boundary)
 	_build_boundary_line("RightEdge", definition.right_boundary)
@@ -42,7 +42,7 @@ func _build_boundary_line(line_name: String, points: PackedVector2Array) -> void
 	var line := Line2D.new()
 	line.name = line_name
 	line.points = points
-	line.width = 2.0
+	line.width = 6.0
 	line.default_color = EDGE_COLOR
 	line.antialiased = true
 	line.z_index = -1
@@ -61,7 +61,7 @@ func _build_start_finish_line() -> void:
 		checkpoint.origin - lateral * half_width,
 		checkpoint.origin + lateral * half_width,
 	])
-	line.width = 5.0
+	line.width = 15.0
 	line.default_color = Color("f4edc9")
 	line.antialiased = true
 	line.z_index = 0
