@@ -3,7 +3,7 @@ extends RefCounted
 
 const TrackDefinitionScript := preload("res://track/track_definition.gd")
 
-const DEFAULT_MAX_ATTEMPTS := 6
+const DEFAULT_MAX_ATTEMPTS := 30
 const SAMPLE_SPACING := 25.0
 const CHECKPOINT_COUNT := 8
 const MIN_WIDTH := 125.0
@@ -14,7 +14,7 @@ const MAX_CURVATURE := 0.005
 const MIN_START_STRAIGHT := 1875.0
 
 const CONTROL_POINT_COUNT := 14
-const RADIUS_JITTER_MIN := 0.72
+const RADIUS_JITTER_MIN := 0.55
 const RADIUS_JITTER_MAX := 1.0
 const SPLINE_SAMPLES_PER_SPAN := 24
 const STRAIGHT_CURVATURE := 0.0005

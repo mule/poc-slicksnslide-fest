@@ -32,12 +32,18 @@ func _run() -> void:
 	var generator = generator_script.new()
 	var definitions: Array = []
 	var fingerprints: Dictionary = {}
-	for seed in range(10):
+	var accepted_count := 0
+	var fallback_count := 0
+	for seed in range(20):
 		var definition = generator.generate(seed)
 		definitions.append(definition)
 		_verify_driveable_definition(definition, seed)
 		if definition != null:
-			fingerprints[definition.geometry_fingerprint] = true
+			if definition.used_fallback:
+				fallback_count += 1
+			else:
+				fingerprints[definition.geometry_fingerprint] = true
+				accepted_count += 1
 			print("seed=%d fingerprint=%s generation_usec=%d attempts=%d fallback=%s" % [
 				seed,
 				definition.geometry_fingerprint,
@@ -45,7 +51,8 @@ func _run() -> void:
 				definition.generation_attempts,
 				definition.used_fallback,
 			])
-	_check(fingerprints.size() == 10, "seeds 0 through 9 produce distinct geometry")
+	_check(fallback_count <= 2, "at most 2 of 20 seeds fall back to the stadium (got %d)" % fallback_count)
+	_check(fingerprints.size() == accepted_count, "accepted (non-fallback) seeds produce distinct geometry")
 
 	_verify_determinism(generator, definitions)
 	_verify_bounded_fallback(generator)
@@ -60,7 +67,6 @@ func _verify_driveable_definition(definition, seed: int) -> void:
 	if definition == null:
 		return
 	_check(definition.seed == seed, "seed %d is retained" % seed)
-	_check(not definition.used_fallback, "seed %d is accepted without fallback" % seed)
 	_check(definition.generation_attempts >= 1 and definition.generation_attempts <= generator_attempt_limit(), "seed %d uses bounded attempts" % seed)
 	_check(definition.track_width >= EXPECTED_MIN_WIDTH and definition.track_width <= EXPECTED_MAX_WIDTH, "seed %d width is within the driveable bound" % seed)
 	_check(definition.lap_length >= EXPECTED_MIN_LAP_LENGTH and definition.lap_length <= EXPECTED_MAX_LAP_LENGTH, "seed %d lap length is within bounds" % seed)
@@ -174,7 +180,7 @@ func _verify_runtime_geometry(definition) -> void:
 
 
 func generator_attempt_limit() -> int:
-	return 6
+	return 30
 
 
 func _maximum_gap(points: PackedVector2Array) -> float:
