@@ -64,13 +64,23 @@ func _physics_process(delta: float) -> void:
 		return
 	_trial.advance_time(delta)
 	_controller_input.poll_actions()
+	var reset_this_tick := false
 	if Input.is_action_just_pressed("reset_car"):
 		_vehicle.request_safe_reset()
-		_checkpoint_detector.reset(_vehicle.global_position)
+		_checkpoint_detector.reset(_vehicle.get_safe_reset_pose().origin)
 		_show_status("Car reset to the last safe pose")
+		reset_this_tick = true
 	if _vehicle.consume_auto_reset_notice():
-		_checkpoint_detector.reset(_vehicle.global_position)
+		_checkpoint_detector.reset(_vehicle.get_safe_reset_pose().origin)
 		_show_status("Returned to the track")
+		reset_this_tick = true
+	if reset_this_tick:
+		# A reset only sets a flag the vehicle honours on the *next* physics tick, so
+		# `_vehicle.global_position` still holds the pre-teleport pose right now. Sampling against
+		# it here would immediately overwrite the detector's just-seeded previous position with
+		# that stale value, recreating the exact phantom-crossing bug the reset above closes.
+		# Resume sampling next tick, once the vehicle has actually landed at the safe pose.
+		return
 	var crossing := _checkpoint_detector.sample(_vehicle.global_position)
 	if not crossing.is_empty():
 		var completed := _trial.cross_checkpoint(

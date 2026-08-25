@@ -150,6 +150,14 @@ func request_safe_reset() -> void:
 	sleeping = false
 
 
+## The pose a pending reset will land the car at. `request_safe_reset()` and an automatic reset
+## both only set a flag consumed at the top of the next `_integrate_forces`, so a caller that needs
+## to know where the car is about to be -- such as re-seeding checkpoint detection -- must read this
+## rather than `global_position`, which still holds the pre-reset pose for one more physics tick.
+func get_safe_reset_pose() -> Transform2D:
+	return _safe_reset_pose
+
+
 func set_auto_reset_enabled(enabled: bool) -> void:
 	_auto_reset_enabled = enabled
 	if not enabled:
@@ -268,8 +276,9 @@ func _update_safe_pose_checkpoint(state: PhysicsDirectBodyState2D, delta: float)
 ## "lost" answer. Passing a smaller radius would report INF for every off-track position and fire
 ## the reset the moment the car left the track.
 ##
-## The comparison is written as "not less than or equal" rather than "greater than" so that INF
-## resolves correctly and a NAN from a degenerate provider fails safe by not resetting.
+## The comparison is written as "greater than" rather than its negation so that INF still resolves
+## as lost (INF > r is true) while a NAN from a degenerate provider fails safe by not resetting
+## (NAN > r is false).
 func _update_auto_reset(state: PhysicsDirectBodyState2D, delta: float) -> void:
 	if not _auto_reset_enabled or _surface_type != SurfaceQuery.SurfaceType.OFF_TRACK:
 		_off_track_stopped_elapsed = 0.0
@@ -284,7 +293,7 @@ func _update_auto_reset(state: PhysicsDirectBodyState2D, delta: float) -> void:
 	var lost := false
 	if _surface_query != null:
 		var distance := _surface_query.distance_to_centerline(state.transform.origin, tuning.auto_reset_lost_distance)
-		lost = not (distance <= tuning.auto_reset_lost_distance)
+		lost = distance > tuning.auto_reset_lost_distance
 
 	if stuck or lost:
 		_off_track_stopped_elapsed = 0.0

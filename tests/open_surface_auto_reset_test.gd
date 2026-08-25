@@ -8,6 +8,7 @@ const VEHICLE_SCENE := preload("res://vehicle/top_down_car.tscn")
 const TUNING_PATH := "res://data/default_vehicle_tuning.tres"
 const GENERATOR_PATH := "res://track/track_generator.gd"
 const START := Vector2(4000.0, 6500.0)
+const DISPLACED := START + Vector2(600.0, -450.0)
 
 var _failures: Array[String] = []
 var _checks := 0
@@ -30,6 +31,11 @@ func _verify_stuck_off_track_triggers_reset() -> void:
 	var context := _make_car(true)
 	var car: TopDownCar = context.car
 	var provider = context.provider
+	# Displace the car away from its safe pose before waiting: START never moves, so if this
+	# assertion checked the un-displaced spawn pose it would pass identically with the reset
+	# deleted entirely. Moving away first makes "the car came back" mean something.
+	car.global_transform = Transform2D(0.0, DISPLACED)
+	car.linear_velocity = Vector2.ZERO
 	provider.force_off_track = true
 	provider.distance_from_line = 10.0
 	var tuning: VehicleTuning = car.tuning
@@ -52,6 +58,10 @@ func _verify_straying_far_triggers_reset() -> void:
 	for tick in range(5):
 		await physics_frame
 	_check(car.consume_auto_reset_notice(), "straying beyond the lost distance triggers an automatic reset")
+	_check(
+		is_equal_approx(provider.last_search_radius, tuning.auto_reset_lost_distance),
+		"the car queries centerline distance using the lost-distance threshold as its search radius"
+	)
 	context.world.queue_free()
 	await process_frame
 

@@ -32,6 +32,7 @@ godot --headless --path . --script res://tests/issue_4_vehicle_maneuvers.gd
 godot --headless --path . --script res://tests/issue_5_input_session_test.gd
 godot --headless --path . --script res://tests/issue_5_main_session_test.gd
 godot --headless --path . --script res://tests/issue_6_android_test.gd
+godot --headless --path . --script res://tests/open_surface_auto_reset_test.gd
 ```
 
 ## File Structure
