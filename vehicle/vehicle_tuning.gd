@@ -20,6 +20,15 @@ extends Resource
 @export_range(0.1, 5.0, 0.1) var safe_pose_interval: float = 0.5
 @export_range(0.0, 1.0, 0.01) var safe_pose_max_slip: float = 0.28
 
+@export_group("Automatic reset")
+## Below this speed the car counts as stopped. Terminal speed is 600 px/s, so this cannot fire
+## during any controlled off-track run.
+@export_range(0.0, 200.0, 0.1) var auto_reset_stuck_speed: float = 25.0
+## Long enough to ride out a slow corner exit, short enough not to strand the player.
+@export_range(0.1, 10.0, 0.1) var auto_reset_stuck_seconds: float = 2.0
+## Half the generator's PLAY_AREA_MARGIN, so "lost" resolves before the containment boundary.
+@export_range(0.0, 10000.0, 10.0) var auto_reset_lost_distance: float = 1000.0
+
 @export_group("Steering and grip")
 @export_range(0.0, 10.0, 0.01) var steering_response: float = 3.4
 @export_range(0.0, 10.0, 0.01) var max_steering_rate: float = 1.75

@@ -66,6 +66,12 @@ Run the Android lifecycle/diagnostics checks:
 godot --headless --path . --script res://tests/issue_6_android_test.gd
 ```
 
+Run the opt-in automatic reset check:
+
+```sh
+godot --headless --path . --script res://tests/open_surface_auto_reset_test.gd
+```
+
 ## Project boundaries
 
 | Directory | Responsibility |
