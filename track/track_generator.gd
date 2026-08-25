@@ -6,8 +6,8 @@ const TrackDefinitionScript := preload("res://track/track_definition.gd")
 const DEFAULT_MAX_ATTEMPTS := 30
 const SAMPLE_SPACING := 25.0
 const CHECKPOINT_COUNT := 8
-const MIN_WIDTH := 125.0
-const MAX_WIDTH := 175.0
+const MIN_WIDTH := 200.0
+const MAX_WIDTH := 280.0
 const MIN_LAP_LENGTH := 25000.0
 const MAX_LAP_LENGTH := 37500.0
 const MAX_CURVATURE := 0.005
@@ -21,7 +21,7 @@ const STRAIGHT_CURVATURE := 0.0005
 
 const FALLBACK_HALF_STRAIGHT := 3728.0
 const FALLBACK_RADIUS := 2600.0
-const FALLBACK_WIDTH := 150.0
+const FALLBACK_WIDTH := 240.0
 
 ## Runoff beyond the track's own bounds before the containment boundary. Sized so a car that
 ## leaves the circuit has roughly 1.5 viewport widths to recover in before meeting anything solid.
@@ -36,7 +36,7 @@ func generate(requested_seed: int, limit_overrides: Dictionary = {}):
 	var last_reason := "candidate_not_generated"
 	for attempt in range(1, maximum_attempts + 1):
 		var target_lap_length := rng.randf_range(MIN_LAP_LENGTH, MAX_LAP_LENGTH)
-		var width := float(rng.randi_range(25, 35) * 5)
+		var width := float(rng.randi_range(int(MIN_WIDTH / 5.0), int(MAX_WIDTH / 5.0)) * 5)
 		var centerline := _sample_loop(rng, target_lap_length)
 		var candidate = _build_definition(requested_seed, centerline, width)
 		candidate.generation_attempts = attempt

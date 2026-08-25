@@ -6,8 +6,8 @@ const LAP_TRACKER_PATH := "res://track/lap_progress_tracker.gd"
 const TRACK_RUNTIME_PATH := "res://track/track_runtime.gd"
 const TrackGeneratorScript := preload("res://track/track_generator.gd")
 
-const EXPECTED_MIN_WIDTH := 125.0
-const EXPECTED_MAX_WIDTH := 175.0
+const EXPECTED_MIN_WIDTH := 200.0
+const EXPECTED_MAX_WIDTH := 280.0
 const EXPECTED_MIN_LAP_LENGTH := 25000.0
 const EXPECTED_MAX_LAP_LENGTH := 37500.0
 const EXPECTED_MAX_CURVATURE := 0.005
