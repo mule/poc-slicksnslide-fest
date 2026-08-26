@@ -24,6 +24,8 @@ The project opens one full-screen gameplay canvas. Drive with a left stick and t
 
 Press **F3** or controller **Back/View** to toggle the development diagnostics overlay. It reports FPS/frame time, current and peak memory, seed, vehicle state, and normalized inputs, and is forcibly hidden in release exports. See [Controller-first time trial](docs/controller-time-trial.md) for the complete mapping and tuning contract.
 
+The track itself has no walls: the only collision is a single containment rectangle far outside the circuit, and the painted boundary line is purely decorative. Leaving the dirt is expected — it costs grip, drag, and engine force rather than blocking the car, though checkpoint gates stay strict, so straying too far past one still costs the lap. Automatic reset back to the track when stuck or lost off-track is off by default; enable it through `SessionSettings.auto_reset_enabled`. See [The open surface](docs/open-surface.md) for the full contract and the actual constants involved.
+
 ## Verification
 
 Import the project and exit after all resources are parsed:
