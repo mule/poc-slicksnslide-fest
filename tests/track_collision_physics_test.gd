@@ -6,13 +6,17 @@ extends SceneTree
 const ORDINARY_RACING_SPEED := 300.0
 const TEST_TICKS_PER_SECOND := 60.0
 const TEST_BODY_RADIUS := 4.0
-## `play_area = bounds.grow(PLAY_AREA_MARGIN)`, and every centerline point lies inside `bounds`,
-## so the nearest play-area edge is never closer than PLAY_AREA_MARGIN (2000 px) from a start
-## point on the centerline. At 5 px/tick, 500 ticks covers 2500 px — enough to clear that 2000 px
-## floor with margin to spare (measured minimum across seeds 0/4/9 is ~2400 px) so a probe with
-## containment removed actually reaches and passes the boundary instead of running out of ticks
-## first.
-const ESCAPE_TICKS := 500
+const TEST_STEP := ORDINARY_RACING_SPEED / TEST_TICKS_PER_SECOND
+## The distance from a probe's start point (`centerline[0]`) to the play-area edge it is driven
+## towards varies enormously by seed and direction — from ~2400 px to over 12000 px across seeds
+## 0/4/9. A single fixed tick budget sized for the nearest case leaves every farther probe
+## stopping thousands of pixels short of the wall, never touching it, so the "stays inside" check
+## passes trivially whether or not containment exists. Instead, the tick budget is derived per
+## direction from the actual distance between the start point and that edge of `definition.play_area`,
+## plus a small tick slack, so every probe is guaranteed to travel far enough to actually reach and
+## be stopped by the boundary — and stays correct if seeds, SAMPLE_SPACING, the tick rate, or
+## ORDINARY_RACING_SPEED ever change.
+const ESCAPE_SLACK_TICKS := 20
 ## The probe is a point-like body; allow its radius plus solver margin outside the nominal edge.
 const CONTAINMENT_TOLERANCE := 8.0
 
@@ -78,29 +82,54 @@ func _remove_containment(runtime: Node) -> void:
 		child.queue_free()
 
 
-## Drive a probe outward from the track towards each side of the play area and confirm the
-## containment boundary stops it. Four runs per seed, one per edge.
+## Drive a probe outward from the track towards each side of the play area and confirm it
+## actually reaches the containment boundary and is stopped there. Four runs per seed, one per
+## edge.
 func _verify_probe_stays_inside(world: Node2D, definition, seed: int) -> void:
 	var play_area: Rect2 = definition.play_area
+	var start: Vector2 = definition.centerline[0]
 	var directions := [Vector2.RIGHT, Vector2.LEFT, Vector2.DOWN, Vector2.UP]
 	var names := ["right", "left", "down", "up"]
 	for index in range(directions.size()):
+		var direction: Vector2 = directions[index]
+		var name: String = names[index]
+		var edge_coordinate: float
+		var edge_distance: float
+		match name:
+			"right":
+				edge_coordinate = play_area.end.x
+				edge_distance = edge_coordinate - start.x
+			"left":
+				edge_coordinate = play_area.position.x
+				edge_distance = start.x - edge_coordinate
+			"down":
+				edge_coordinate = play_area.end.y
+				edge_distance = edge_coordinate - start.y
+			"up":
+				edge_coordinate = play_area.position.y
+				edge_distance = start.y - edge_coordinate
+		var escape_ticks := int(ceil(edge_distance / TEST_STEP)) + ESCAPE_SLACK_TICKS
+
 		var body := _create_test_body()
 		world.add_child(body)
-		body.position = definition.centerline[0]
+		body.position = start
 		await physics_frame
 		_physics_ticks += 1
 
-		var direction: Vector2 = directions[index]
-		for tick in range(ESCAPE_TICKS):
-			body.move_and_collide(direction * ORDINARY_RACING_SPEED / TEST_TICKS_PER_SECOND)
+		for tick in range(escape_ticks):
+			body.move_and_collide(direction * TEST_STEP)
 			await physics_frame
 			_physics_ticks += 1
 
 		var grown := play_area.grow(CONTAINMENT_TOLERANCE)
 		_check(
 			grown.has_point(body.position),
-			"seed %d probe driven %s stays inside the play area (at %.1f,%.1f)" % [seed, names[index], body.position.x, body.position.y]
+			"seed %d probe driven %s stays inside the play area (at %.1f,%.1f)" % [seed, name, body.position.x, body.position.y]
+		)
+		var reached_coordinate: float = body.position.x if (name == "right" or name == "left") else body.position.y
+		_check(
+			abs(reached_coordinate - edge_coordinate) <= CONTAINMENT_TOLERANCE,
+			"seed %d probe driven %s reaches the play area boundary (at %.1f,%.1f, edge %.1f, %d ticks budgeted)" % [seed, name, body.position.x, body.position.y, edge_coordinate, escape_ticks]
 		)
 		body.queue_free()
 		await process_frame
