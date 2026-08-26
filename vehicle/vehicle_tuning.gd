@@ -21,8 +21,9 @@ extends Resource
 @export_range(0.0, 1.0, 0.01) var safe_pose_max_slip: float = 0.28
 
 @export_group("Automatic reset")
-## Below this speed the car counts as stopped. Terminal speed is 600 px/s, so this cannot fire
-## during any controlled off-track run.
+## Below this speed the car counts as stopped. The rule only ever applies off-track, where
+## measured terminal speed is 259.2 px/s, so this still has a 10x margin and cannot fire during
+## any controlled off-track run.
 @export_range(0.0, 200.0, 0.1) var auto_reset_stuck_speed: float = 25.0
 ## Long enough to ride out a slow corner exit, short enough not to strand the player.
 @export_range(0.1, 10.0, 0.1) var auto_reset_stuck_seconds: float = 2.0

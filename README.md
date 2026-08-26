@@ -89,7 +89,7 @@ godot --headless --path . --script res://tests/open_surface_auto_reset_test.gd
 
 The world unit is the pixel at **12.5 px per metre** (`world/world_scale.gd`). Every length, speed, and acceleration in `track/`, `vehicle/`, and `session/` is expressed in pixels at that scale; route new scale-dependent literals through `WorldScale.metres()` so they stay greppable.
 
-`TrackDefinition` carries the generated centerline, width, bounds, spawn transform, ordered checkpoints, seed, and geometry fingerprint. `SurfaceQuery` maps a world position to surface type, grip, and drag. `VehicleInputState` carries normalized steering, throttle, brake, and handbrake values without referencing hardware.
+`TrackDefinition` carries the generated centerline, width, bounds, play area, spawn transform, ordered checkpoints, seed, and geometry fingerprint. `SurfaceQuery` maps a world position to surface type, grip, and drag. `VehicleInputState` carries normalized steering, throttle, brake, and handbrake values without referencing hardware.
 
 The session owns `TrackMount` and `VehicleMount` integration points. Track and vehicle scenes are installed as opaque scene roots, so neither side needs hard-coded paths into the other's internals.
 
