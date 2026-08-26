@@ -17,17 +17,18 @@ func _init(definition) -> void:
 
 
 func sample_at(world_position: Vector2) -> SurfaceSample:
-	if _definition != null and _distance_to_centerline(world_position) <= _definition.track_width * 0.5:
-		return SurfaceSample.new(SurfaceType.DIRT, DIRT_GRIP, DIRT_DRAG)
+	if _definition != null:
+		var half_width: float = _definition.track_width * 0.5
+		if distance_to_centerline(world_position, half_width) <= half_width:
+			return SurfaceSample.new(SurfaceType.DIRT, DIRT_GRIP, DIRT_DRAG)
 	return SurfaceSample.new(SurfaceType.OFF_TRACK, GRASS_GRIP, GRASS_DRAG)
 
 
-func _distance_to_centerline(world_position: Vector2) -> float:
+func distance_to_centerline(world_position: Vector2, search_radius: float) -> float:
 	if _grid == null:
 		return INF
-	var half_width: float = _definition.track_width * 0.5
 	var nearest_distance := INF
-	for index in _grid.segments_near(world_position, half_width):
+	for index in _grid.segments_near(world_position, search_radius):
 		var closest := Geometry2D.get_closest_point_to_segment(
 			world_position,
 			_definition.centerline[index],

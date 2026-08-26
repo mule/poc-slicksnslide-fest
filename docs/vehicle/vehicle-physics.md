@@ -6,7 +6,7 @@
 
 The vehicle decomposes world velocity into local longitudinal and lateral components every fixed physics tick. Engine, service-brake/reverse, linear rolling drag and quadratic aerodynamic drag affect the longitudinal component. Progressive lateral correction is capped by available acceleration; the correction fades from static to sliding grip between `slip_onset` and `full_slip`, while the handbrake lowers grip and raises a bounded target yaw rate. Counter-steering therefore changes the target yaw without cancelling lateral momentum instantaneously.
 
-The default resource at `data/default_vehicle_tuning.tres` owns mass, engine/reverse/brake forces, drag, speed and yaw safety limits, steering response, progressive grip/slip, handbrake, dirt/off-track, safe-reset, camera, and feedback settings. Surface provider multipliers are combined with the dirt/off-track tuning multipliers. Off-track defaults use 46% grip, 260% drag, and 62% drive force.
+The default resource at `data/default_vehicle_tuning.tres` owns mass, engine/reverse/brake forces, drag, speed and yaw safety limits, steering response, progressive grip/slip, handbrake, dirt/off-track, safe-reset, automatic reset, camera, and feedback settings. Surface provider multipliers are combined with the dirt/off-track tuning multipliers. Off-track defaults use 46% grip, 260% drag, and 62% drive force.
 
 Collision safety uses a capsule, ray continuous collision detection, low restitution, a 640 px/s hard safety bound (`max_safe_speed`), and a 2.6 rad/s yaw bound. Stable dirt poses with low slip and no contacts become reset checkpoints every 0.5 seconds. Candidate checkpoints overlapping a physics body are rejected; reset restores the previous valid transform and clears both velocities.
 

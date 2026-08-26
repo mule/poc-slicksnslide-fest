@@ -4,9 +4,10 @@ const TRACK_GENERATOR_PATH := "res://track/track_generator.gd"
 const SURFACE_MAP_PATH := "res://track/track_surface_map.gd"
 const LAP_TRACKER_PATH := "res://track/lap_progress_tracker.gd"
 const TRACK_RUNTIME_PATH := "res://track/track_runtime.gd"
+const TrackGeneratorScript := preload("res://track/track_generator.gd")
 
-const EXPECTED_MIN_WIDTH := 125.0
-const EXPECTED_MAX_WIDTH := 175.0
+const EXPECTED_MIN_WIDTH := 200.0
+const EXPECTED_MAX_WIDTH := 280.0
 const EXPECTED_MIN_LAP_LENGTH := 25000.0
 const EXPECTED_MAX_LAP_LENGTH := 37500.0
 const EXPECTED_MAX_CURVATURE := 0.005
@@ -69,6 +70,18 @@ func _verify_driveable_definition(definition, seed: int) -> void:
 	_check(definition.seed == seed, "seed %d is retained" % seed)
 	_check(definition.generation_attempts >= 1 and definition.generation_attempts <= generator_attempt_limit(), "seed %d uses bounded attempts" % seed)
 	_check(definition.track_width >= EXPECTED_MIN_WIDTH and definition.track_width <= EXPECTED_MAX_WIDTH, "seed %d width is within the driveable bound" % seed)
+	var expected_margin: float = TrackGeneratorScript.PLAY_AREA_MARGIN
+	_check(definition.play_area.encloses(definition.bounds), "seed %d play area encloses the track bounds" % seed)
+	_check(
+		is_equal_approx(definition.play_area.position.x, definition.bounds.position.x - expected_margin)
+			and is_equal_approx(definition.play_area.position.y, definition.bounds.position.y - expected_margin),
+		"seed %d play area starts one margin outside the bounds" % seed
+	)
+	_check(
+		is_equal_approx(definition.play_area.size.x, definition.bounds.size.x + expected_margin * 2.0)
+			and is_equal_approx(definition.play_area.size.y, definition.bounds.size.y + expected_margin * 2.0),
+		"seed %d play area adds one margin on every side" % seed
+	)
 	_check(definition.lap_length >= EXPECTED_MIN_LAP_LENGTH and definition.lap_length <= EXPECTED_MAX_LAP_LENGTH, "seed %d lap length is within bounds" % seed)
 	_check(definition.max_curvature <= EXPECTED_MAX_CURVATURE, "seed %d curvature is bounded" % seed)
 	_check(definition.start_straight_length >= EXPECTED_MIN_START_STRAIGHT, "seed %d has an adequate start straight" % seed)
@@ -81,8 +94,6 @@ func _verify_driveable_definition(definition, seed: int) -> void:
 	_check(definition.left_boundary[0].is_equal_approx(definition.left_boundary[-1]), "seed %d left boundary is continuous at closure" % seed)
 	_check(definition.right_boundary[0].is_equal_approx(definition.right_boundary[-1]), "seed %d right boundary is continuous at closure" % seed)
 	_check(_maximum_gap(definition.centerline) <= EXPECTED_MAX_SAMPLE_GAP, "seed %d centerline sampling has no escape-sized gaps" % seed)
-	_check(_maximum_gap(definition.left_boundary) <= EXPECTED_MAX_SAMPLE_GAP * 1.1, "seed %d left edge collision sampling is continuous" % seed)
-	_check(_maximum_gap(definition.right_boundary) <= EXPECTED_MAX_SAMPLE_GAP * 1.1, "seed %d right edge collision sampling is continuous" % seed)
 	_check(not _has_self_intersection(definition.centerline), "seed %d centerline does not self-intersect" % seed)
 	_check(not _has_self_intersection(definition.left_boundary), "seed %d left boundary does not self-intersect" % seed)
 	_check(not _has_self_intersection(definition.right_boundary), "seed %d right boundary does not self-intersect" % seed)
@@ -170,12 +181,10 @@ func _verify_runtime_geometry(definition) -> void:
 	root.add_child(runtime)
 	var dirt_line := runtime.get_node_or_null("Dirt") as Line2D
 	var grass_shoulder := runtime.get_node_or_null("GrassShoulder") as Line2D
-	var collision_body := runtime.get_node_or_null("TrackEdges") as StaticBody2D
+	var collision_body := runtime.get_node_or_null("PlayAreaBounds") as StaticBody2D
 	_check(dirt_line != null and dirt_line.points.size() == definition.centerline.size(), "prototype dirt rendering follows the generated circuit")
 	_check(grass_shoulder != null and grass_shoulder.width > dirt_line.width, "prototype grass shoulder distinguishes off-track")
-	_check(collision_body != null, "generated track owns static edge collision")
-	if collision_body != null:
-		_check(collision_body.get_child_count() == 2 * (definition.centerline.size() - 1), "both continuous boundaries receive static segment collision")
+	_check(collision_body != null and collision_body.get_child_count() == 4, "prototype track builds a four-segment containment boundary")
 	runtime.free()
 
 

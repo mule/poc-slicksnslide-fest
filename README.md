@@ -24,6 +24,8 @@ The project opens one full-screen gameplay canvas. Drive with a left stick and t
 
 Press **F3** or controller **Back/View** to toggle the development diagnostics overlay. It reports FPS/frame time, current and peak memory, seed, vehicle state, and normalized inputs, and is forcibly hidden in release exports. See [Controller-first time trial](docs/controller-time-trial.md) for the complete mapping and tuning contract.
 
+The track itself has no walls: the only collision is a single containment rectangle far outside the circuit, and the painted boundary line is purely decorative. Leaving the dirt is expected — it costs grip, drag, and engine force rather than blocking the car, though checkpoint gates stay strict, so straying too far past one still costs the lap. Automatic reset back to the track when stuck or lost off-track is off by default; enable it through `SessionSettings.auto_reset_enabled`. See [The open surface](docs/open-surface.md) for the full contract and the actual constants involved.
+
 ## Verification
 
 Import the project and exit after all resources are parsed:
@@ -66,6 +68,12 @@ Run the Android lifecycle/diagnostics checks:
 godot --headless --path . --script res://tests/issue_6_android_test.gd
 ```
 
+Run the opt-in automatic reset check:
+
+```sh
+godot --headless --path . --script res://tests/open_surface_auto_reset_test.gd
+```
+
 ## Project boundaries
 
 | Directory | Responsibility |
@@ -81,7 +89,7 @@ godot --headless --path . --script res://tests/issue_6_android_test.gd
 
 The world unit is the pixel at **12.5 px per metre** (`world/world_scale.gd`). Every length, speed, and acceleration in `track/`, `vehicle/`, and `session/` is expressed in pixels at that scale; route new scale-dependent literals through `WorldScale.metres()` so they stay greppable.
 
-`TrackDefinition` carries the generated centerline, width, bounds, spawn transform, ordered checkpoints, seed, and geometry fingerprint. `SurfaceQuery` maps a world position to surface type, grip, and drag. `VehicleInputState` carries normalized steering, throttle, brake, and handbrake values without referencing hardware.
+`TrackDefinition` carries the generated centerline, width, bounds, play area, spawn transform, ordered checkpoints, seed, and geometry fingerprint. `SurfaceQuery` maps a world position to surface type, grip, and drag. `VehicleInputState` carries normalized steering, throttle, brake, and handbrake values without referencing hardware.
 
 The session owns `TrackMount` and `VehicleMount` integration points. Track and vehicle scenes are installed as opaque scene roots, so neither side needs hard-coded paths into the other's internals.
 

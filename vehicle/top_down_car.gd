@@ -14,6 +14,9 @@ var _surface_drag := 1.0
 var _safe_reset_pose := Transform2D.IDENTITY
 var _has_safe_reset_pose := false
 var _reset_requested := false
+var _auto_reset_enabled := false
+var _auto_reset_notice := false
+var _off_track_stopped_elapsed := 0.0
 var _local_velocity := Vector2.ZERO
 var _slip_ratio := 0.0
 var _peak_speed := 0.0
@@ -122,6 +125,7 @@ func _integrate_forces(state: PhysicsDirectBodyState2D) -> void:
 	_local_velocity = state.transform.basis_xform_inv(state.linear_velocity)
 	_slip_ratio = absf(_local_velocity.x) / maxf(state.linear_velocity.length(), WorldScale.metres(1.0))
 	_update_safe_pose_checkpoint(state, delta)
+	_update_auto_reset(state, delta)
 
 
 func set_input_state(input_state: VehicleInputState) -> void:
@@ -144,6 +148,28 @@ func set_safe_reset_pose(safe_pose: Transform2D) -> bool:
 func request_safe_reset() -> void:
 	_reset_requested = true
 	sleeping = false
+
+
+## The pose a pending reset will land the car at. `request_safe_reset()` and an automatic reset
+## both only set a flag consumed at the top of the next `_integrate_forces`, so a caller that needs
+## to know where the car is about to be -- such as re-seeding checkpoint detection -- must read this
+## rather than `global_position`, which still holds the pre-reset pose for one more physics tick.
+func get_safe_reset_pose() -> Transform2D:
+	return _safe_reset_pose
+
+
+func set_auto_reset_enabled(enabled: bool) -> void:
+	_auto_reset_enabled = enabled
+	if not enabled:
+		_off_track_stopped_elapsed = 0.0
+
+
+## True once after an automatic reset, then false until the next one. The session polls this to
+## show a status message without the car needing a reference to the HUD.
+func consume_auto_reset_notice() -> bool:
+	var notice := _auto_reset_notice
+	_auto_reset_notice = false
+	return notice
 
 
 func get_speed() -> float:
@@ -240,6 +266,39 @@ func _update_safe_pose_checkpoint(state: PhysicsDirectBodyState2D, delta: float)
 	_safe_pose_elapsed = 0.0
 	_safe_reset_pose = state.transform
 	_has_safe_reset_pose = true
+
+
+## Two conditions, either sufficient, evaluated only while off-track: the car has stopped, or it
+## has strayed far from the racing line. Returning to dirt clears both.
+##
+## The search radius passed below is the lost distance itself: TrackSurfaceMap answers from a grid
+## queried with exactly that radius, so anything further away returns INF -- which is precisely the
+## "lost" answer. Passing a smaller radius would report INF for every off-track position and fire
+## the reset the moment the car left the track.
+##
+## The comparison is written as "greater than" rather than its negation so that INF still resolves
+## as lost (INF > r is true) while a NAN from a degenerate provider fails safe by not resetting
+## (NAN > r is false).
+func _update_auto_reset(state: PhysicsDirectBodyState2D, delta: float) -> void:
+	if not _auto_reset_enabled or _surface_type != SurfaceQuery.SurfaceType.OFF_TRACK:
+		_off_track_stopped_elapsed = 0.0
+		return
+
+	if state.linear_velocity.length() < tuning.auto_reset_stuck_speed:
+		_off_track_stopped_elapsed += delta
+	else:
+		_off_track_stopped_elapsed = 0.0
+
+	var stuck := _off_track_stopped_elapsed >= tuning.auto_reset_stuck_seconds
+	var lost := false
+	if _surface_query != null:
+		var distance := _surface_query.distance_to_centerline(state.transform.origin, tuning.auto_reset_lost_distance)
+		lost = distance > tuning.auto_reset_lost_distance
+
+	if stuck or lost:
+		_off_track_stopped_elapsed = 0.0
+		_auto_reset_notice = true
+		_reset_requested = true
 
 
 func _is_pose_clear(candidate: Transform2D) -> bool:

@@ -23,6 +23,10 @@ func _run() -> void:
 	_verify_single_viewport_ui(session)
 	_verify_pause_and_restart(session)
 
+	await process_frame
+	await physics_frame
+	await _verify_automatic_reset_does_not_leak_checkpoint_progress(session)
+
 	paused = false
 	session.queue_free()
 	await process_frame
@@ -84,6 +88,71 @@ func _verify_pause_and_restart(session: Node) -> void:
 	var restarted: Dictionary = session.call("get_session_snapshot")
 	_check(restarted.get("seed", -1) == 7, "restart regenerates the requested seed")
 	_check(restarted.get("lap_count", -1) == 0 and is_zero_approx(float(restarted.get("session_time", -1.0))), "seed restart clears lap and timer state")
+
+
+## Regression coverage for the off-by-one in the automatic-reset checkpoint wiring: an automatic
+## reset only sets a flag the vehicle honours on the *next* physics tick, so the session's
+## `_physics_process` sees the pre-teleport (off-track) position when it reseeds the checkpoint
+## detector. Seeding it with that stale position instead of the pose the car is about to land at
+## turns the off-track-to-safe-pose teleport into a fake "movement" the detector can credit as a
+## driven checkpoint crossing. This drives the real session (restarted to seed 7 by
+## `_verify_pause_and_restart`) through exactly that scenario and confirms lap progress does not
+## move.
+func _verify_automatic_reset_does_not_leak_checkpoint_progress(session: Node) -> void:
+	var vehicle_mount := session.get_node_or_null("%VehicleMount")
+	var track_mount := session.get_node_or_null("%TrackMount")
+	var has_fixture := (
+		vehicle_mount != null and vehicle_mount.get_child_count() > 0
+		and track_mount != null and track_mount.get_child_count() > 0
+	)
+	_check(has_fixture, "session exposes a vehicle and track to drive the automatic-reset checkpoint regression")
+	if not has_fixture:
+		return
+
+	var car := vehicle_mount.get_child(0) as TopDownCar
+	var runtime := track_mount.get_child(0)
+	var track_definition: TrackDefinition = runtime.definition
+
+	var before: Dictionary = session.call("get_session_snapshot")
+	_check(
+		int(before.get("next_checkpoint", -1)) == 1 and int(before.get("lap_count", -1)) == 0,
+		"baseline before the regression drive is a fresh, un-advanced lap"
+	)
+
+	# Position the car behind checkpoint 1 (where it will be "stuck"), and set the safe pose ahead
+	# of the same gate. A detector reseeded with the stale off-track position would see a forward
+	# crossing when the car actually lands at the safe pose; reseeded with the safe pose itself,
+	# the segment collapses to zero length and nothing crosses.
+	var checkpoint: Transform2D = track_definition.checkpoints[1]
+	var forward := checkpoint.x.normalized()
+	var offset := 40.0
+	var stuck_pose := checkpoint.origin - forward * offset
+	var safe_pose := checkpoint.origin + forward * offset
+
+	var provider := Issue4TestSurfaceProvider.new()
+	provider.force_off_track = true
+	provider.distance_from_line = 10.0
+	car.set_surface_query(provider)
+	car.global_transform = Transform2D(0.0, stuck_pose)
+	car.linear_velocity = Vector2.ZERO
+	var pose_accepted := car.set_safe_reset_pose(Transform2D(0.0, safe_pose))
+	_check(pose_accepted, "the engineered safe pose ahead of the gate is collision-clear")
+	car.set_auto_reset_enabled(true)
+
+	var tuning: VehicleTuning = car.tuning
+	var ticks := int((tuning.auto_reset_stuck_seconds + 1.0) * 60.0)
+	for tick in range(ticks):
+		await physics_frame
+
+	_check(
+		car.global_position.distance_to(safe_pose) < 1.0,
+		"the automatic reset lands the car at the engineered safe pose"
+	)
+	var after: Dictionary = session.call("get_session_snapshot")
+	_check(
+		int(after.get("next_checkpoint", -1)) == 1 and int(after.get("lap_count", -1)) == 0,
+		"the automatic reset's off-track-to-safe-pose teleport is not credited as a driven checkpoint crossing"
+	)
 
 
 func _count_descendants_of_type(node: Node, type_name: String) -> int:
