@@ -11,6 +11,7 @@ var _trial: TimeTrialState
 var _checkpoint_detector: CheckpointCrossingDetector
 var _track_definition: TrackDefinition
 var _vehicle: TopDownCar
+var _track_runtime: TrackRuntime
 var _current_seed := 0
 var _status_hide_at_msec := 0
 
@@ -89,6 +90,7 @@ func _physics_process(delta: float) -> void:
 		)
 		if completed:
 			_show_status("Lap %d  ·  %s" % [_trial.lap_count, _format_time(_trial.last_lap_time)], 4.0)
+		_track_runtime.set_next_checkpoint(_trial.next_checkpoint)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -119,6 +121,7 @@ func restart_with_seed(seed: int) -> void:
 	var runtime := TrackRuntime.new(_track_definition)
 	runtime.name = "GeneratedTrack"
 	install_track(runtime)
+	_track_runtime = runtime
 
 	_vehicle = VEHICLE_SCENE.instantiate() as TopDownCar
 	_vehicle.name = "PlayerCar"
@@ -133,6 +136,7 @@ func restart_with_seed(seed: int) -> void:
 	_trial = TimeTrialState.new(_track_definition.checkpoints.size())
 	_checkpoint_detector = CheckpointCrossingDetector.new(_track_definition)
 	_checkpoint_detector.reset(_vehicle.global_position)
+	_track_runtime.set_next_checkpoint(_trial.next_checkpoint)
 	_controller_input.suppress_until_controls_released()
 	_refresh_hud()
 	_show_status("Seed %d ready" % _current_seed)

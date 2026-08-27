@@ -4,8 +4,22 @@ extends Node2D
 const GRASS_COLOR := Color("426b32")
 const DIRT_COLOR := Color("895426")
 const EDGE_COLOR := Color("c7a15f")
+## Deliberately the same hue as EDGE_COLOR today, so the gates read as part of the track's own
+## furniture rather than an overlay. Kept separate so the boundary line can be retuned without
+## silently moving the gates with it.
+const GATE_COLOR := Color("c7a15f")
+const START_FINISH_COLOR := Color("f4edc9")
+const START_FINISH_WIDTH := 15.0
+const NEXT_GATE_WIDTH := 12.0
+const GATE_WIDTH := 8.0
+## Gates that are not the one you need next. Low enough to read as background, high enough to still
+## show the circuit's shape ahead of you.
+const INACTIVE_GATE_ALPHA := 0.35
 
 var definition
+
+var _checkpoint_markers: Array[Line2D] = []
+var _next_checkpoint := 0
 
 
 func _init(initial_definition = null) -> void:
@@ -20,7 +34,7 @@ func _ready() -> void:
 	_build_line("Dirt", definition.track_width, DIRT_COLOR, -2)
 	_build_boundary_line("LeftEdge", definition.left_boundary)
 	_build_boundary_line("RightEdge", definition.right_boundary)
-	_build_start_finish_line()
+	_build_checkpoint_markers()
 	_build_collision()
 
 
@@ -49,23 +63,44 @@ func _build_boundary_line(line_name: String, points: PackedVector2Array) -> void
 	add_child(line)
 
 
-func _build_start_finish_line() -> void:
-	if definition.checkpoints.is_empty():
-		return
-	var checkpoint: Transform2D = definition.checkpoints[0]
-	var lateral := checkpoint.y.normalized()
+## One gate per checkpoint, not just the finish line. The gates are ordered and unforgiving --
+## passing them out of sequence silently voids the lap -- and on a circuit 5.5 to 8 screens wide you
+## cannot see which one is next. So width and hue mark the start/finish, and alpha alone carries
+## "this is the one you need", keeping one visual channel per meaning.
+func _build_checkpoint_markers() -> void:
+	_checkpoint_markers.clear()
 	var half_width: float = definition.track_width * 0.5
-	var line := Line2D.new()
-	line.name = "StartFinishLine"
-	line.points = PackedVector2Array([
-		checkpoint.origin - lateral * half_width,
-		checkpoint.origin + lateral * half_width,
-	])
-	line.width = 15.0
-	line.default_color = Color("f4edc9")
-	line.antialiased = true
-	line.z_index = 0
-	add_child(line)
+	for index in range(definition.checkpoints.size()):
+		var checkpoint: Transform2D = definition.checkpoints[index]
+		var lateral := checkpoint.y.normalized()
+		var line := Line2D.new()
+		line.name = "Checkpoint%d" % index
+		line.points = PackedVector2Array([
+			checkpoint.origin - lateral * half_width,
+			checkpoint.origin + lateral * half_width,
+		])
+		line.antialiased = true
+		line.z_index = 0
+		add_child(line)
+		_checkpoint_markers.append(line)
+	set_next_checkpoint(_next_checkpoint)
+
+
+## Index of the gate the driver must cross next, as reported by LapProgressTracker. Safe to call
+## before the markers exist; the value is reapplied when they are built.
+func set_next_checkpoint(index: int) -> void:
+	_next_checkpoint = index
+	for marker_index in range(_checkpoint_markers.size()):
+		var line: Line2D = _checkpoint_markers[marker_index]
+		var is_start_finish := marker_index == 0
+		var is_next := marker_index == index
+		var color: Color = START_FINISH_COLOR if is_start_finish else GATE_COLOR
+		color.a = 1.0 if is_next else INACTIVE_GATE_ALPHA
+		line.default_color = color
+		if is_start_finish:
+			line.width = START_FINISH_WIDTH
+		else:
+			line.width = NEXT_GATE_WIDTH if is_next else GATE_WIDTH
 
 
 ## The circuit has no walls. A single rectangle far outside the track keeps the car recoverable
