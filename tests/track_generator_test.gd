@@ -185,7 +185,50 @@ func _verify_runtime_geometry(definition) -> void:
 	_check(dirt_line != null and dirt_line.points.size() == definition.centerline.size(), "prototype dirt rendering follows the generated circuit")
 	_check(grass_shoulder != null and grass_shoulder.width > dirt_line.width, "prototype grass shoulder distinguishes off-track")
 	_check(collision_body != null and collision_body.get_child_count() == 4, "prototype track builds a four-segment containment boundary")
+	_verify_checkpoint_markers(runtime, definition)
 	runtime.free()
+
+
+## Every checkpoint gets a visible gate, the start/finish reads differently from the rest, and the
+## gate the driver needs next is the bright one. Ordered gates are unforgiving -- passing them out
+## of sequence silently voids the lap -- so which one is next has to be visible from the car.
+func _verify_checkpoint_markers(runtime, definition) -> void:
+	var markers := []
+	var missing := 0
+	for index in range(definition.checkpoints.size()):
+		var marker := runtime.get_node_or_null("Checkpoint%d" % index) as Line2D
+		if marker == null:
+			missing += 1
+		markers.append(marker)
+	_check(missing == 0, "every checkpoint is drawn as its own marker (%d of %d missing)" % [missing, markers.size()])
+	if missing > 0:
+		return
+
+	var half_width: float = definition.track_width * 0.5
+	_check(
+		is_equal_approx(markers[0].points[0].distance_to(markers[0].points[1]), half_width * 2.0),
+		"a checkpoint marker spans the full track width"
+	)
+	_check(markers[0].width > markers[1].width, "the start/finish marker is distinguishable from the other gates")
+
+	_check(runtime.has_method("set_next_checkpoint"), "the runtime can be told which gate comes next")
+	if not runtime.has_method("set_next_checkpoint"):
+		return
+
+	runtime.set_next_checkpoint(2)
+	_check(
+		markers[2].default_color.a > markers[3].default_color.a,
+		"the next gate is brighter than the gates beyond it"
+	)
+	_check(
+		markers[2].default_color.a > markers[1].default_color.a,
+		"the next gate is brighter than the gates already passed"
+	)
+	runtime.set_next_checkpoint(0)
+	_check(
+		markers[0].default_color.a > markers[2].default_color.a,
+		"the start/finish highlights when it is the gate needed to complete the lap"
+	)
 
 
 func generator_attempt_limit() -> int:

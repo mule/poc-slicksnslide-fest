@@ -41,8 +41,9 @@ func _verify_integrated_world(session: Node) -> void:
 	if track_mount != null and track_mount.get_child_count() == 1:
 		var runtime := track_mount.get_child(0)
 		_check(runtime is TrackRuntime, "track mount contains runtime generated geometry")
-		var start_finish := runtime.get_node_or_null("StartFinishLine") as Line2D
+		var start_finish := runtime.get_node_or_null("Checkpoint0") as Line2D
 		_check(start_finish != null and start_finish.points.size() == 2, "generated finish checkpoint has a visible track-width marker")
+		_check_highlighted_gate_tracks_session(session, runtime)
 	if vehicle_mount != null and vehicle_mount.get_child_count() == 1:
 		_check(vehicle_mount.get_child(0) is TopDownCar, "vehicle mount contains the real top-down car")
 	_check(session.has_method("get_session_snapshot"), "session exposes observable time-trial state")
@@ -162,6 +163,30 @@ func _count_descendants_of_type(node: Node, type_name: String) -> int:
 			count += 1
 		count += _count_descendants_of_type(child, type_name)
 	return count
+
+
+## The bright gate must be the one the session says comes next. Ordered gates void the lap when
+## crossed out of sequence, so a marker that disagrees with LapProgressTracker would actively
+## mislead the driver rather than merely fail to help.
+func _check_highlighted_gate_tracks_session(session, runtime) -> void:
+	var highlighted := -1
+	var index := 0
+	while true:
+		var marker := runtime.get_node_or_null("Checkpoint%d" % index) as Line2D
+		if marker == null:
+			break
+		if marker.default_color.a >= 1.0:
+			highlighted = index
+		index += 1
+	_check(index > 0, "the session's track has checkpoint markers to highlight")
+	if index == 0:
+		return
+	var progress: Dictionary = session.call("get_session_snapshot")
+	var expected: int = int(progress.get("next_checkpoint", -1))
+	_check(
+		highlighted == expected,
+		"the highlighted gate is the one the session says comes next (highlighted %d, expected %d)" % [highlighted, expected]
+	)
 
 
 func _check(condition: bool, message: String) -> void:
