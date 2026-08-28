@@ -9,6 +9,9 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# Each verification reports whether it ran to completion. A GDScript runtime error aborts
+	# only the function it occurs in and returns false to here, so without this the script
+	# would exit 0 with assertions silently skipped. See tests/harness_contract_test.gd.
 	var main_scene := load("res://session/main.tscn") as PackedScene
 	_check(main_scene != null, "main session scene loads")
 	if main_scene == null:
@@ -19,21 +22,19 @@ func _run() -> void:
 	await process_frame
 	await physics_frame
 
-	_verify_integrated_world(session)
-	_verify_single_viewport_ui(session)
-	_verify_pause_and_restart(session)
-
+	_check(_verify_integrated_world(session), "the integrated world verification ran to completion")
+	_check(_verify_single_viewport_ui(session), "the single viewport ui verification ran to completion")
+	_check(_verify_pause_and_restart(session), "the pause and restart verification ran to completion")
 	await process_frame
 	await physics_frame
-	await _verify_automatic_reset_does_not_leak_checkpoint_progress(session)
-
+	_check(await _verify_automatic_reset_does_not_leak_checkpoint_progress(session), "the automatic reset does not leak checkpoint progress verification ran to completion")
 	paused = false
 	session.queue_free()
 	await process_frame
 	_finish()
 
 
-func _verify_integrated_world(session: Node) -> void:
+func _verify_integrated_world(session: Node) -> bool:
 	var track_mount := session.get_node_or_null("%TrackMount")
 	var vehicle_mount := session.get_node_or_null("%VehicleMount")
 	_check(track_mount != null and track_mount.get_child_count() == 1, "session installs one generated track")
@@ -51,9 +52,10 @@ func _verify_integrated_world(session: Node) -> void:
 		var snapshot: Dictionary = session.call("get_session_snapshot")
 		_check(snapshot.get("seed", -1) == 0, "session starts from the configured seed")
 		_check(snapshot.get("lap_count", -1) == 0 and snapshot.get("next_checkpoint", -1) == 1, "session starts with ordered lap progress")
+	return true
 
 
-func _verify_single_viewport_ui(session: Node) -> void:
+func _verify_single_viewport_ui(session: Node) -> bool:
 	_check(_count_descendants_of_type(session, "SubViewport") == 0, "gameplay uses no nested or secondary viewport")
 	var hud := session.get_node_or_null("%SessionHud") as Control
 	var pause_overlay := session.get_node_or_null("%PauseOverlay") as Control
@@ -64,13 +66,14 @@ func _verify_single_viewport_ui(session: Node) -> void:
 	for button_name in ["ResumeButton", "RestartButton", "NextSeedButton"]:
 		var button := session.get_node_or_null("%%%s" % button_name) as Button
 		_check(button != null and button.focus_mode == Control.FOCUS_ALL, "%s is controller-focusable" % button_name)
+	return true
 
 
-func _verify_pause_and_restart(session: Node) -> void:
+func _verify_pause_and_restart(session: Node) -> bool:
 	_check(session.has_method("set_session_paused"), "session exposes pause control")
 	_check(session.has_method("restart_with_seed"), "session exposes seed restart control")
 	if not session.has_method("set_session_paused") or not session.has_method("restart_with_seed"):
-		return
+		return false
 	var before_pause: Dictionary = session.call("get_session_snapshot")
 	session.call("set_session_paused", true)
 	var pause_overlay := session.get_node_or_null("%PauseOverlay") as Control
@@ -99,7 +102,10 @@ func _verify_pause_and_restart(session: Node) -> void:
 ## driven checkpoint crossing. This drives the real session (restarted to seed 7 by
 ## `_verify_pause_and_restart`) through exactly that scenario and confirms lap progress does not
 ## move.
-func _verify_automatic_reset_does_not_leak_checkpoint_progress(session: Node) -> void:
+	return true
+
+
+func _verify_automatic_reset_does_not_leak_checkpoint_progress(session: Node) -> bool:
 	var vehicle_mount := session.get_node_or_null("%VehicleMount")
 	var track_mount := session.get_node_or_null("%TrackMount")
 	var has_fixture := (
@@ -108,8 +114,7 @@ func _verify_automatic_reset_does_not_leak_checkpoint_progress(session: Node) ->
 	)
 	_check(has_fixture, "session exposes a vehicle and track to drive the automatic-reset checkpoint regression")
 	if not has_fixture:
-		return
-
+		return false
 	var car := vehicle_mount.get_child(0) as TopDownCar
 	var runtime := track_mount.get_child(0)
 	var track_definition: TrackDefinition = runtime.definition
@@ -154,6 +159,7 @@ func _verify_automatic_reset_does_not_leak_checkpoint_progress(session: Node) ->
 		int(after.get("next_checkpoint", -1)) == 1 and int(after.get("lap_count", -1)) == 0,
 		"the automatic reset's off-track-to-safe-pose teleport is not credited as a driven checkpoint crossing"
 	)
+	return true
 
 
 func _count_descendants_of_type(node: Node, type_name: String) -> int:

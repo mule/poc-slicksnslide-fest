@@ -74,6 +74,19 @@ Run the opt-in automatic reset check:
 godot --headless --path . --script res://tests/open_surface_auto_reset_test.gd
 ```
 
+Run the harness contract check:
+
+```sh
+godot --headless --path . --script res://tests/harness_contract_test.gd
+```
+
+This one pins the engine behaviour the rest of the suite depends on, and prints one `SCRIPT ERROR`
+on purpose — that error is the thing under test. A GDScript runtime error aborts only the function
+it occurs in and then execution continues, so a test script could previously reach `_finish()` with
+assertions silently skipped and still exit 0. Every verification function is therefore typed
+`-> bool`, ends in `return true`, and is called through `_check(...)`: an aborted function returns
+`false` to its caller and fails the script, naming which function died.
+
 ## Project boundaries
 
 | Directory | Responsibility |

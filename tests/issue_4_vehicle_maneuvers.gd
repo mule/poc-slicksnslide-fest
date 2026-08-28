@@ -16,6 +16,9 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# Each verification reports whether it ran to completion. A GDScript runtime error aborts
+	# only the function it occurs in and returns false to here, so without this the script
+	# would exit 0 with assertions silently skipped. See tests/harness_contract_test.gd.
 	var vehicle_scene := load(VEHICLE_SCENE_PATH) as PackedScene
 	_check(vehicle_scene != null, "top-down RigidBody2D vehicle scene loads")
 	var tuning := load(DEFAULT_TUNING_PATH) as VehicleTuning
@@ -24,49 +27,49 @@ func _run() -> void:
 		_finish()
 		return
 	if "--break-countersteer" in OS.get_cmdline_user_args():
-		await _test_constant_steering_and_countersteer(vehicle_scene, tuning)
+		_check(await _test_constant_steering_and_countersteer(vehicle_scene, tuning), "the constant steering and countersteer test ran to completion")
 		_finish()
 		return
 	if "--break-proportional-steering" in OS.get_cmdline_user_args():
-		await _test_proportional_steering_response(vehicle_scene, tuning)
+		_check(await _test_proportional_steering_response(vehicle_scene, tuning), "the proportional steering response test ran to completion")
 		_finish()
 		return
 	if "--break-surface-recovery" in OS.get_cmdline_user_args():
-		await _test_surface_transition_changes_recovery(vehicle_scene, tuning)
+		_check(await _test_surface_transition_changes_recovery(vehicle_scene, tuning), "the surface transition changes recovery test ran to completion")
 		_finish()
 		return
 	if "--surface-only" in OS.get_cmdline_user_args():
-		await _test_surface_transition_changes_recovery(vehicle_scene, tuning)
+		_check(await _test_surface_transition_changes_recovery(vehicle_scene, tuning), "the surface transition changes recovery test ran to completion")
 		_finish()
 		return
 	if "--reset-only" in OS.get_cmdline_user_args():
-		await _test_safe_reset_restores_latest_valid_pose(vehicle_scene, tuning)
-		await _test_reset_rejects_pose_inside_boundary(vehicle_scene, tuning)
-		await _test_driving_updates_latest_valid_reset_pose(vehicle_scene, tuning)
+		_check(await _test_safe_reset_restores_latest_valid_pose(vehicle_scene, tuning), "the safe reset restores latest valid pose test ran to completion")
+		_check(await _test_reset_rejects_pose_inside_boundary(vehicle_scene, tuning), "the reset rejects pose inside boundary test ran to completion")
+		_check(await _test_driving_updates_latest_valid_reset_pose(vehicle_scene, tuning), "the driving updates latest valid reset pose test ran to completion")
 		_finish()
 		return
 	if "--collision-only" in OS.get_cmdline_user_args():
-		await _test_wall_impact_does_not_tunnel_or_gain_energy(vehicle_scene, tuning)
+		_check(await _test_wall_impact_does_not_tunnel_or_gain_energy(vehicle_scene, tuning), "the wall impact does not tunnel or gain energy test ran to completion")
 		_finish()
 		return
 
-	await _test_proportional_acceleration_and_no_hidden_drive(vehicle_scene, tuning)
-	await _test_service_brake_and_reverse(vehicle_scene, tuning)
-	await _test_proportional_steering_response(vehicle_scene, tuning)
-	await _test_constant_steering_and_countersteer(vehicle_scene, tuning)
-	await _test_handbrake_rotation_is_useful_and_bounded(vehicle_scene, tuning)
-	await _test_surface_transition_changes_recovery(vehicle_scene, tuning)
-	await _test_wall_impact_does_not_tunnel_or_gain_energy(vehicle_scene, tuning)
-	await _test_safe_reset_restores_latest_valid_pose(vehicle_scene, tuning)
-	await _test_reset_rejects_pose_inside_boundary(vehicle_scene, tuning)
-	await _test_driving_updates_latest_valid_reset_pose(vehicle_scene, tuning)
-	await _test_camera_feedback_and_diagnostics(vehicle_scene, tuning)
-	await _test_render_frame_rate_does_not_change_fixed_tick_result(vehicle_scene, tuning)
-	await _test_scale_contract(vehicle_scene, tuning)
+	_check(await _test_proportional_acceleration_and_no_hidden_drive(vehicle_scene, tuning), "the proportional acceleration and no hidden drive test ran to completion")
+	_check(await _test_service_brake_and_reverse(vehicle_scene, tuning), "the service brake and reverse test ran to completion")
+	_check(await _test_proportional_steering_response(vehicle_scene, tuning), "the proportional steering response test ran to completion")
+	_check(await _test_constant_steering_and_countersteer(vehicle_scene, tuning), "the constant steering and countersteer test ran to completion")
+	_check(await _test_handbrake_rotation_is_useful_and_bounded(vehicle_scene, tuning), "the handbrake rotation is useful and bounded test ran to completion")
+	_check(await _test_surface_transition_changes_recovery(vehicle_scene, tuning), "the surface transition changes recovery test ran to completion")
+	_check(await _test_wall_impact_does_not_tunnel_or_gain_energy(vehicle_scene, tuning), "the wall impact does not tunnel or gain energy test ran to completion")
+	_check(await _test_safe_reset_restores_latest_valid_pose(vehicle_scene, tuning), "the safe reset restores latest valid pose test ran to completion")
+	_check(await _test_reset_rejects_pose_inside_boundary(vehicle_scene, tuning), "the reset rejects pose inside boundary test ran to completion")
+	_check(await _test_driving_updates_latest_valid_reset_pose(vehicle_scene, tuning), "the driving updates latest valid reset pose test ran to completion")
+	_check(await _test_camera_feedback_and_diagnostics(vehicle_scene, tuning), "the camera feedback and diagnostics test ran to completion")
+	_check(await _test_render_frame_rate_does_not_change_fixed_tick_result(vehicle_scene, tuning), "the render frame rate does not change fixed tick result test ran to completion")
+	_check(await _test_scale_contract(vehicle_scene, tuning), "the scale contract test ran to completion")
 	_finish()
 
 
-func _test_proportional_acceleration_and_no_hidden_drive(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_proportional_acceleration_and_no_hidden_drive(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var full := await _run_straight_acceleration(scene, tuning, 1.0)
 	var half := await _run_straight_acceleration(scene, tuning, 0.5)
 	_check(full.speed >= 450.0 and full.speed <= 550.0, "full throttle reaches 450..550 px/s after 4 s (got %.2f)" % full.speed)
@@ -83,9 +86,10 @@ func _test_proportional_acceleration_and_no_hidden_drive(scene: PackedScene, tun
 	var speed_after_release: float = car.get_speed()
 	_check(speed_after_release < speed_before_release - 3.1, "released controls add no hidden drive force (%.2f -> %.2f)" % [speed_before_release, speed_after_release])
 	await _dispose_fixture(fixture)
+	return true
 
 
-func _test_service_brake_and_reverse(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_service_brake_and_reverse(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var fixture := await _spawn_vehicle(scene, tuning)
 	var car = fixture.car
 	var controls: VehicleInputState = fixture.controls
@@ -101,17 +105,19 @@ func _test_service_brake_and_reverse(scene: PackedScene, tuning: VehicleTuning) 
 	_check(stopped_speed <= 31.0, "service brake stops without overshoot jitter (got %.2f)" % stopped_speed)
 	_check(reverse_local.y >= 62.5 and reverse_local.y <= 212.5, "held brake provides bounded reverse (local y %.2f)" % reverse_local.y)
 	await _dispose_fixture(fixture)
+	return true
 
 
-func _test_proportional_steering_response(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_proportional_steering_response(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var full_rotation := await _run_rotation_maneuver(scene, tuning, 0.0, 0.8)
 	var half_steer := 0.8 if "--break-proportional-steering" in OS.get_cmdline_user_args() else 0.4
 	var half_rotation := await _run_rotation_maneuver(scene, tuning, 0.0, half_steer)
 	_check(full_rotation >= 0.65, "full steering creates a meaningful one-second rotation (%.2f rad)" % full_rotation)
 	_check(half_rotation >= full_rotation * 0.35 and half_rotation <= full_rotation * 0.65, "half steering produces proportional rotation (half %.2f, full %.2f rad)" % [half_rotation, full_rotation])
+	return true
 
 
-func _test_constant_steering_and_countersteer(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_constant_steering_and_countersteer(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var fixture := await _spawn_vehicle(scene, tuning)
 	var car = fixture.car
 	var controls: VehicleInputState = fixture.controls
@@ -131,16 +137,18 @@ func _test_constant_steering_and_countersteer(scene: PackedScene, tuning: Vehicl
 	_check(absf(car.angular_velocity) <= tuning.max_angular_speed + 0.01, "steering angular speed remains bounded (%.2f rad/s)" % absf(car.angular_velocity))
 	_check(slip_after <= slip_before - 0.03, "counter-steer meaningfully reduces slip (%.2f -> %.2f)" % [slip_before, slip_after])
 	await _dispose_fixture(fixture)
+	return true
 
 
-func _test_handbrake_rotation_is_useful_and_bounded(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_handbrake_rotation_is_useful_and_bounded(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var normal_rotation := await _run_rotation_maneuver(scene, tuning, 0.0, 0.8)
 	var handbrake_rotation := await _run_rotation_maneuver(scene, tuning, 1.0, 0.8)
 	_check(handbrake_rotation >= normal_rotation + 0.18, "handbrake adds useful rotation (normal %.2f, handbrake %.2f rad)" % [normal_rotation, handbrake_rotation])
 	_check(handbrake_rotation <= 2.8, "one-second handbrake input cannot snap or spin indefinitely (%.2f rad)" % handbrake_rotation)
+	return true
 
 
-func _test_surface_transition_changes_recovery(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_surface_transition_changes_recovery(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var dirt := Issue4TestSurfaceProvider.new()
 	dirt.boundary_y = -INF
 	var grass := Issue4TestSurfaceProvider.new()
@@ -162,9 +170,10 @@ func _test_surface_transition_changes_recovery(scene: PackedScene, tuning: Vehic
 	_check(dirt_recovery.initial_slip >= 0.45 and grass_recovery.initial_slip >= 0.45, "surface recovery maneuvers begin with equivalent meaningful slip (dirt %.2f, off-track %.2f)" % [dirt_recovery.initial_slip, grass_recovery.initial_slip])
 	_check(dirt_recovery.recovered and grass_recovery.recovered, "both surfaces recover below 0.12 slip within four seconds")
 	_check(grass_recovery.ticks >= dirt_recovery.ticks + 15, "reduced off-track grip takes at least 15 more ticks to recover (dirt %d, off-track %d)" % [dirt_recovery.ticks, grass_recovery.ticks])
+	return true
 
 
-func _test_wall_impact_does_not_tunnel_or_gain_energy(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_wall_impact_does_not_tunnel_or_gain_energy(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var fixture := await _spawn_vehicle(scene, tuning, true)
 	var car = fixture.car
 	var controls: VehicleInputState = fixture.controls
@@ -196,9 +205,10 @@ func _test_wall_impact_does_not_tunnel_or_gain_energy(scene: PackedScene, tuning
 	_check(approach_speed >= 0.0, "captured a pre-impact approach speed before the wall collision (%.2f)" % approach_speed)
 	_check(post_impact_peak_speed <= approach_speed + 1.0, "wall impact (bounce=0.05) does not rebound faster than the approach speed (approach %.2f, post-impact peak %.2f)" % [approach_speed, post_impact_peak_speed])
 	await _dispose_fixture(fixture)
+	return true
 
 
-func _test_safe_reset_restores_latest_valid_pose(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_safe_reset_restores_latest_valid_pose(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var fixture := await _spawn_vehicle(scene, tuning)
 	var car = fixture.car
 	var safe_pose := Transform2D(0.42, Vector2(410.0, 430.0))
@@ -213,9 +223,10 @@ func _test_safe_reset_restores_latest_valid_pose(scene: PackedScene, tuning: Veh
 	_check(absf(wrapf(car.global_rotation - safe_pose.get_rotation(), -PI, PI)) <= 0.01, "reset restores the latest valid orientation")
 	_check(car.linear_velocity.length() <= 0.01 and absf(car.angular_velocity) <= 0.01, "reset clears unsafe linear and angular velocity")
 	await _dispose_fixture(fixture)
+	return true
 
 
-func _test_reset_rejects_pose_inside_boundary(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_reset_rejects_pose_inside_boundary(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var fixture := await _spawn_vehicle(scene, tuning, true)
 	var car = fixture.car
 	var wall_pose := Transform2D(0.0, Vector2(320.0, 430.0))
@@ -225,9 +236,10 @@ func _test_reset_rejects_pose_inside_boundary(scene: PackedScene, tuning: Vehicl
 	_check(not accepted, "reset rejects a candidate pose overlapping a boundary")
 	_check(car.global_position.distance_to(START_POSE.origin) <= 0.1, "rejected reset candidate preserves the previous safe pose")
 	await _dispose_fixture(fixture)
+	return true
 
 
-func _test_driving_updates_latest_valid_reset_pose(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_driving_updates_latest_valid_reset_pose(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var fixture := await _spawn_vehicle(scene, tuning)
 	var car = fixture.car
 	fixture.controls.set_controls(0.0, 1.0, 0.0, 0.0)
@@ -240,9 +252,10 @@ func _test_driving_updates_latest_valid_reset_pose(scene: PackedScene, tuning: V
 	_check(car.global_position.y < START_POSE.origin.y - 3.0, "dirt driving advances the latest valid reset checkpoint")
 	_check(car.global_position.distance_to(latest_valid_position) <= 100.0, "automatic reset checkpoint remains near the latest stable track pose")
 	await _dispose_fixture(fixture)
+	return true
 
 
-func _test_camera_feedback_and_diagnostics(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_camera_feedback_and_diagnostics(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var fixture := await _spawn_vehicle(scene, tuning)
 	var car = fixture.car
 	var controls: VehicleInputState = fixture.controls
@@ -258,9 +271,10 @@ func _test_camera_feedback_and_diagnostics(scene: PackedScene, tuning: VehicleTu
 	_check(dust != null and dust.emitting, "dust feedback emits while driving on dirt")
 	_check(skid != null and skid.visible, "skid feedback becomes visible during meaningful slip")
 	await _dispose_fixture(fixture)
+	return true
 
 
-func _test_render_frame_rate_does_not_change_fixed_tick_result(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_render_frame_rate_does_not_change_fixed_tick_result(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var old_max_fps := Engine.max_fps
 	Engine.max_fps = 30
 	var low_fps := await _run_straight_acceleration(scene, tuning, 0.8, 180)
@@ -269,9 +283,10 @@ func _test_render_frame_rate_does_not_change_fixed_tick_result(scene: PackedScen
 	Engine.max_fps = old_max_fps
 	_check(absf(low_fps.speed - high_fps.speed) <= 0.25, "180 fixed ticks are render-frame-rate stable (30 FPS %.2f, 144 FPS %.2f)" % [low_fps.speed, high_fps.speed])
 	_check(low_fps.position.distance_to(high_fps.position) <= 0.75, "fixed-tick trajectory is render-frame-rate stable (delta %.3f)" % low_fps.position.distance_to(high_fps.position))
+	return true
 
 
-func _test_scale_contract(scene: PackedScene, tuning: VehicleTuning) -> void:
+func _test_scale_contract(scene: PackedScene, tuning: VehicleTuning) -> bool:
 	var fixture := await _spawn_vehicle(scene, tuning)
 	fixture.controls.set_controls(0.0, 1.0, 0.0, 0.0)
 	await _simulate_seconds(25.0)
@@ -282,6 +297,7 @@ func _test_scale_contract(scene: PackedScene, tuning: VehicleTuning) -> void:
 	_check(crossing_seconds >= 2.5 and crossing_seconds <= 3.0, "the car crosses one viewport width in 2.5..3.0 s (got %.2f)" % crossing_seconds)
 	_check(WorldScale.to_kph(terminal) >= 160.0 and WorldScale.to_kph(terminal) <= 185.0, "the HUD reads a truthful ~173 km/h (got %.1f)" % WorldScale.to_kph(terminal))
 	await _dispose_fixture(fixture)
+	return true
 
 
 func _run_straight_acceleration(scene: PackedScene, tuning: VehicleTuning, throttle: float, ticks := 240) -> Dictionary:

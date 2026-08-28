@@ -13,14 +13,17 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	_verify_input_map_contract()
-	_verify_analog_input_normalization()
-	_verify_time_trial_state()
-	_verify_checkpoint_crossings()
+	# Each verification reports whether it ran to completion. A GDScript runtime error aborts
+	# only the function it occurs in and returns false to here, so without this the script
+	# would exit 0 with assertions silently skipped. See tests/harness_contract_test.gd.
+	_check(_verify_input_map_contract(), "the input map contract verification ran to completion")
+	_check(_verify_analog_input_normalization(), "the analog input normalization verification ran to completion")
+	_check(_verify_time_trial_state(), "the time trial state verification ran to completion")
+	_check(_verify_checkpoint_crossings(), "the checkpoint crossings verification ran to completion")
 	_finish()
 
 
-func _verify_input_map_contract() -> void:
+func _verify_input_map_contract() -> bool:
 	var expected_actions := [
 		"steer_left",
 		"steer_right",
@@ -55,6 +58,7 @@ func _verify_input_map_contract() -> void:
 	_check(_has_joy_button("reset_car", JOY_BUTTON_Y), "reset uses a separate face button")
 	_check(_has_joy_button("pause_back", JOY_BUTTON_START), "pause/back uses Menu/Start")
 	_check(_has_joy_button("confirm", JOY_BUTTON_A), "confirm uses the south face button")
+	return true
 
 
 func _has_joy_axis(action: StringName, axis: JoyAxis, axis_value: float) -> bool:
@@ -84,11 +88,11 @@ func _has_joy_button(action: StringName, button: JoyButton) -> bool:
 	return false
 
 
-func _verify_analog_input_normalization() -> void:
+func _verify_analog_input_normalization() -> bool:
 	var controller_script := load(CONTROLLER_INPUT_PATH) as GDScript
 	_check(controller_script != null, "controller input adapter loads")
 	if controller_script == null:
-		return
+		return false
 	var controller = controller_script.new(0.2, 0.1)
 	var state = controller.apply_raw_values(0.1, 0.05, 0.0, false)
 	_check(state.steer == 0.0 and state.throttle == 0.0, "stick and trigger noise inside deadzones is removed")
@@ -114,13 +118,14 @@ func _verify_analog_input_normalization() -> void:
 		_check(is_equal_approx(state.steer, 0.5) and is_equal_approx(state.throttle, 0.5), "real InputMap polling preserves analog action strength")
 		Input.action_release("steer_right")
 		Input.action_release("throttle")
+	return true
 
 
-func _verify_time_trial_state() -> void:
+func _verify_time_trial_state() -> bool:
 	var state_script := load(TIME_TRIAL_STATE_PATH) as GDScript
 	_check(state_script != null, "time-trial state loads")
 	if state_script == null:
-		return
+		return false
 	var trial = state_script.new(8)
 	trial.advance_time(3.0)
 	trial.cross_checkpoint(2, 1.0)
@@ -143,13 +148,14 @@ func _verify_time_trial_state() -> void:
 	trial.restart()
 	_check(trial.lap_count == 0 and trial.next_checkpoint == 1, "seed restart clears lap progress")
 	_check(trial.session_time == 0.0 and trial.best_lap_time == 0.0, "seed restart clears timing results")
+	return true
 
 
-func _verify_checkpoint_crossings() -> void:
+func _verify_checkpoint_crossings() -> bool:
 	var detector_script := load(CHECKPOINT_DETECTOR_PATH) as GDScript
 	_check(detector_script != null, "checkpoint crossing detector loads")
 	if detector_script == null:
-		return
+		return false
 	var definition := TrackDefinition.new()
 	definition.track_width = 150.0
 	definition.checkpoints = [Transform2D(0.0, Vector2(100.0, 50.0))]
@@ -165,6 +171,7 @@ func _verify_checkpoint_crossings() -> void:
 	detector.reset(Vector2(95.0, 180.0))
 	var outside_gate: Dictionary = detector.sample(Vector2(105.0, 180.0))
 	_check(outside_gate.is_empty(), "crossing outside the finite track-width gate is ignored")
+	return true
 
 
 func _check(condition: bool, message: String) -> void:

@@ -19,15 +19,18 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	await _verify_stuck_off_track_triggers_reset()
-	await _verify_straying_far_triggers_reset()
-	await _verify_disabled_never_triggers()
-	await _verify_moving_off_track_near_the_line_does_not_trigger()
-	_verify_lost_distance_stays_inside_the_play_area()
+	# Each verification reports whether it ran to completion. A GDScript runtime error aborts
+	# only the function it occurs in and returns false to here, so without this the script
+	# would exit 0 with assertions silently skipped. See tests/harness_contract_test.gd.
+	_check(await _verify_stuck_off_track_triggers_reset(), "the stuck off track triggers reset verification ran to completion")
+	_check(await _verify_straying_far_triggers_reset(), "the straying far triggers reset verification ran to completion")
+	_check(await _verify_disabled_never_triggers(), "the disabled never triggers verification ran to completion")
+	_check(await _verify_moving_off_track_near_the_line_does_not_trigger(), "the moving off track near the line does not trigger verification ran to completion")
+	_check(_verify_lost_distance_stays_inside_the_play_area(), "the lost distance stays inside the play area verification ran to completion")
 	_finish()
 
 
-func _verify_stuck_off_track_triggers_reset() -> void:
+func _verify_stuck_off_track_triggers_reset() -> bool:
 	var context := _make_car(true)
 	var car: TopDownCar = context.car
 	var provider = context.provider
@@ -46,9 +49,10 @@ func _verify_stuck_off_track_triggers_reset() -> void:
 	_check(car.global_position.distance_to(START) < 1.0, "the automatic reset returns the car to its safe pose")
 	context.world.queue_free()
 	await process_frame
+	return true
 
 
-func _verify_straying_far_triggers_reset() -> void:
+func _verify_straying_far_triggers_reset() -> bool:
 	var context := _make_car(true)
 	var car: TopDownCar = context.car
 	var provider = context.provider
@@ -64,9 +68,10 @@ func _verify_straying_far_triggers_reset() -> void:
 	)
 	context.world.queue_free()
 	await process_frame
+	return true
 
 
-func _verify_disabled_never_triggers() -> void:
+func _verify_disabled_never_triggers() -> bool:
 	var context := _make_car(false)
 	var car: TopDownCar = context.car
 	var provider = context.provider
@@ -79,9 +84,10 @@ func _verify_disabled_never_triggers() -> void:
 	_check(not car.consume_auto_reset_notice(), "auto reset stays silent when the setting is disabled")
 	context.world.queue_free()
 	await process_frame
+	return true
 
 
-func _verify_moving_off_track_near_the_line_does_not_trigger() -> void:
+func _verify_moving_off_track_near_the_line_does_not_trigger() -> bool:
 	var context := _make_car(true)
 	var car: TopDownCar = context.car
 	var provider = context.provider
@@ -100,15 +106,17 @@ func _verify_moving_off_track_near_the_line_does_not_trigger() -> void:
 	)
 	context.world.queue_free()
 	await process_frame
+	return true
 
 
-func _verify_lost_distance_stays_inside_the_play_area() -> void:
+func _verify_lost_distance_stays_inside_the_play_area() -> bool:
 	var tuning = load(TUNING_PATH) as VehicleTuning
 	var margin: float = (load(GENERATOR_PATH) as GDScript).PLAY_AREA_MARGIN
 	_check(
 		tuning.auto_reset_lost_distance < margin,
 		"the lost distance (%.1f) resolves before the containment boundary (%.1f)" % [tuning.auto_reset_lost_distance, margin]
 	)
+	return true
 
 
 func _make_car(auto_reset_enabled: bool) -> Dictionary:
