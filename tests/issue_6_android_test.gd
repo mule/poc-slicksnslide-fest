@@ -9,8 +9,10 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	_verify_diagnostics_action()
-
+	# Each verification reports whether it ran to completion. A GDScript runtime error aborts
+	# only the function it occurs in and returns false to here, so without this the script
+	# would exit 0 with assertions silently skipped. See tests/harness_contract_test.gd.
+	_check(_verify_diagnostics_action(), "the diagnostics action verification ran to completion")
 	var main_scene := load("res://session/main.tscn") as PackedScene
 	_check(main_scene != null, "main session scene loads for Android checks")
 	if main_scene == null:
@@ -27,51 +29,51 @@ func _run() -> void:
 		_finish()
 		return
 
-	_verify_mobile_diagnostics(session)
-	_verify_application_lifecycle(session)
-
+	_check(_verify_mobile_diagnostics(session), "the mobile diagnostics verification ran to completion")
+	_check(_verify_application_lifecycle(session), "the application lifecycle verification ran to completion")
 	paused = false
 	session.queue_free()
 	await process_frame
 	_finish()
 
 
-func _verify_diagnostics_action() -> void:
+func _verify_diagnostics_action() -> bool:
 	_check(InputMap.has_action("toggle_diagnostics"), "InputMap exposes an on-device diagnostics toggle")
 	if not InputMap.has_action("toggle_diagnostics"):
-		return
+		return false
 	_check(_has_key("toggle_diagnostics", KEY_F3), "diagnostics retain the F3 development shortcut")
 	_check(_has_joy_button("toggle_diagnostics", JOY_BUTTON_BACK), "diagnostics use the controller Back/View button on Android")
+	return true
 
 
-func _verify_mobile_diagnostics(session: Node) -> void:
+func _verify_mobile_diagnostics(session: Node) -> bool:
 	var overlay := session.get_node_or_null("%DiagnosticsOverlay") as CanvasLayer
 	_check(overlay != null, "Android session includes the in-viewport diagnostics overlay")
 	if overlay == null:
-		return
+		return false
 	var metrics_method := _find_method(overlay, "set_metrics")
 	var supports_mobile_metrics := int(metrics_method.get("args", []).size()) >= 8
 	_check(supports_mobile_metrics, "diagnostics accept seed, vehicle, and normalized input telemetry")
 	if not supports_mobile_metrics:
-		return
+		return false
 	overlay.callv("set_metrics", [23, 61.5, "dirt", 0.35, -0.25, 0.75, 0.10, 1.0])
 	overlay.call("_process", 1.0 / 60.0)
 	var label := session.get_node_or_null("%MetricsLabel") as Label
 	_check(label != null, "diagnostics expose player-visible telemetry text")
 	if label == null:
-		return
+		return false
 	var text := label.text.to_lower()
 	_check(text.contains("memory:") and text.contains("peak:"), "diagnostics report current and peak memory for trend recording")
 	_check(text.contains("steer:") and text.contains("throttle:") and text.contains("brake:") and text.contains("handbrake:"), "diagnostics report normalized controller input state")
 	_check(text.contains("seed: 23") and text.contains("61.5 km/h"), "diagnostics retain seed and driving telemetry")
+	return true
 
 
-func _verify_application_lifecycle(session: Node) -> void:
+func _verify_application_lifecycle(session: Node) -> bool:
 	var lifecycle := session.get_node_or_null("%ApplicationLifecycle")
 	_check(lifecycle != null, "session routes application lifecycle through the platform boundary")
 	if lifecycle == null:
-		return
-
+		return false
 	# Release the initial restart suppression, then prove the real car receives input.
 	session.call("_physics_process", 1.0 / 60.0)
 	Input.action_press("throttle", 1.0)
@@ -95,6 +97,7 @@ func _verify_application_lifecycle(session: Node) -> void:
 	lifecycle.notification(Node.NOTIFICATION_APPLICATION_FOCUS_OUT)
 	_check(paused, "application focus loss also enters the safe paused state")
 	Input.action_release("throttle")
+	return true
 
 
 func _find_method(instance: Object, method_name: StringName) -> Dictionary:

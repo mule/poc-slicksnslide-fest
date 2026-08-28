@@ -8,17 +8,18 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# Each verification reports whether it ran to completion. A GDScript runtime error aborts
+	# only the function it occurs in and returns false to here, so without this the script
+	# would exit 0 with assertions silently skipped. See tests/harness_contract_test.gd.
 	var main_scene_path := str(ProjectSettings.get_setting("application/run/main_scene", ""))
 	_check(main_scene_path == "res://session/main.tscn", "main scene is configured")
 
 	var main_scene := load(main_scene_path) as PackedScene if not main_scene_path.is_empty() else null
 	_check(main_scene != null, "main scene resource loads")
 	if main_scene != null:
-		_verify_main_scene(main_scene)
-
-	_verify_contracts()
-	_verify_default_resources()
-
+		_check(_verify_main_scene(main_scene), "the main scene verification ran to completion")
+	_check(_verify_contracts(), "the contracts verification ran to completion")
+	_check(_verify_default_resources(), "the default resources verification ran to completion")
 	if _failures.is_empty():
 		print("Foundation smoke check passed")
 		quit(0)
@@ -29,12 +30,11 @@ func _run() -> void:
 	quit(1)
 
 
-func _verify_main_scene(main_scene: PackedScene) -> void:
+func _verify_main_scene(main_scene: PackedScene) -> bool:
 	var root := main_scene.instantiate()
 	_check(root != null, "main scene instantiates")
 	if root == null:
-		return
-
+		return false
 	_check(root.has_method("install_track"), "session exposes the track mount contract")
 	_check(root.has_method("install_vehicle"), "session exposes the vehicle mount contract")
 	var track_mount := root.get_node_or_null("%TrackMount")
@@ -70,9 +70,10 @@ func _verify_main_scene(main_scene: PackedScene) -> void:
 			_check(not overlay.visible, "release diagnostics cannot be toggled back on")
 
 	root.free()
+	return true
 
 
-func _verify_contracts() -> void:
+func _verify_contracts() -> bool:
 	var track_script := load("res://track/track_definition.gd") as GDScript
 	_check(track_script != null, "track definition contract loads")
 	if track_script != null:
@@ -92,9 +93,10 @@ func _verify_contracts() -> void:
 		_check(input_state.steer == 1.0, "steering is normalized to minus one through one")
 		_check(input_state.throttle == 0.0, "throttle is normalized to zero through one")
 		_check(input_state.brake == 0.4 and input_state.handbrake == 1.0, "brake inputs preserve analog magnitude within bounds")
+	return true
 
 
-func _verify_default_resources() -> void:
+func _verify_default_resources() -> bool:
 	var session_settings := load("res://data/default_session_settings.tres")
 	_check(session_settings != null, "default session settings load")
 	if session_settings != null:
@@ -104,6 +106,7 @@ func _verify_default_resources() -> void:
 	_check(vehicle_tuning != null, "default vehicle tuning loads")
 	if vehicle_tuning != null:
 		_check(float(vehicle_tuning.get("mass_kg")) > 0.0, "vehicle physics tuning has an explicit resource home")
+	return true
 
 
 func _check(condition: bool, message: String) -> void:

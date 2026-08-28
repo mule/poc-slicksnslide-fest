@@ -23,6 +23,9 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# Each verification reports whether it ran to completion. A GDScript runtime error aborts
+	# only the function it occurs in and returns false to here, so without this the script
+	# would exit 0 with assertions silently skipped. See tests/harness_contract_test.gd.
 	var started_usec := Time.get_ticks_usec()
 	var generator_script := load(TRACK_GENERATOR_PATH) as GDScript
 	_check(generator_script != null, "runtime generator script loads")
@@ -38,7 +41,7 @@ func _run() -> void:
 	for seed in range(20):
 		var definition = generator.generate(seed)
 		definitions.append(definition)
-		_verify_driveable_definition(definition, seed)
+		_check(_verify_driveable_definition(definition, seed), "the driveable definition verification ran to completion")
 		if definition != null:
 			if definition.used_fallback:
 				fallback_count += 1
@@ -55,18 +58,18 @@ func _run() -> void:
 	_check(fallback_count <= 2, "at most 2 of 20 seeds fall back to the stadium (got %d)" % fallback_count)
 	_check(fingerprints.size() == accepted_count, "accepted (non-fallback) seeds produce distinct geometry")
 
-	_verify_determinism(generator, definitions)
-	_verify_bounded_fallback(generator)
-	_verify_surface_samples(definitions[0])
-	_verify_lap_order(definitions[0])
-	_verify_runtime_geometry(definitions[0])
+	_check(_verify_determinism(generator, definitions), "the determinism verification ran to completion")
+	_check(_verify_bounded_fallback(generator), "the bounded fallback verification ran to completion")
+	_check(_verify_surface_samples(definitions[0]), "the surface samples verification ran to completion")
+	_check(_verify_lap_order(definitions[0]), "the lap order verification ran to completion")
+	_check(_verify_runtime_geometry(definitions[0]), "the runtime geometry verification ran to completion")
 	_finish(started_usec)
 
 
-func _verify_driveable_definition(definition, seed: int) -> void:
+func _verify_driveable_definition(definition, seed: int) -> bool:
 	_check(definition != null, "seed %d produces a definition" % seed)
 	if definition == null:
-		return
+		return false
 	_check(definition.seed == seed, "seed %d is retained" % seed)
 	_check(definition.generation_attempts >= 1 and definition.generation_attempts <= generator_attempt_limit(), "seed %d uses bounded attempts" % seed)
 	_check(definition.track_width >= EXPECTED_MIN_WIDTH and definition.track_width <= EXPECTED_MAX_WIDTH, "seed %d width is within the driveable bound" % seed)
@@ -85,7 +88,7 @@ func _verify_driveable_definition(definition, seed: int) -> void:
 	_check(definition.lap_length >= EXPECTED_MIN_LAP_LENGTH and definition.lap_length <= EXPECTED_MAX_LAP_LENGTH, "seed %d lap length is within bounds" % seed)
 	_check(definition.max_curvature <= EXPECTED_MAX_CURVATURE, "seed %d curvature is bounded" % seed)
 	_check(definition.start_straight_length >= EXPECTED_MIN_START_STRAIGHT, "seed %d has an adequate start straight" % seed)
-	_verify_world_exceeds_one_screen(definition, seed)
+	_check(_verify_world_exceeds_one_screen(definition, seed), "the world exceeds one screen verification ran to completion")
 	_check(definition.geometry_fingerprint.length() == 64, "seed %d has a SHA-256 geometry fingerprint" % seed)
 	_check(definition.centerline.size() >= 64, "seed %d is sampled densely" % seed)
 	_check(definition.left_boundary.size() == definition.centerline.size(), "seed %d left boundary matches centerline sampling" % seed)
@@ -104,14 +107,16 @@ func _verify_driveable_definition(definition, seed: int) -> void:
 	for checkpoint_index in range(definition.checkpoints.size()):
 		var expected_sample := int(round(float(checkpoint_index) * float(definition.centerline.size() - 1) / float(definition.checkpoints.size())))
 		_check(definition.checkpoints[checkpoint_index].origin.distance_to(definition.centerline[expected_sample]) < EXPECTED_MAX_SAMPLE_GAP, "seed %d checkpoint %d follows centerline order" % [seed, checkpoint_index])
+	return true
 
 
-func _verify_world_exceeds_one_screen(definition, seed: int) -> void:
+func _verify_world_exceeds_one_screen(definition, seed: int) -> bool:
 	_check(definition.bounds.size.x >= 5000.0, "seed %d spans several screens horizontally (%.0f px)" % [seed, definition.bounds.size.x])
 	_check(definition.bounds.size.y >= 5000.0, "seed %d spans several screens vertically (%.0f px)" % [seed, definition.bounds.size.y])
+	return true
 
 
-func _verify_determinism(generator, originals: Array) -> void:
+func _verify_determinism(generator, originals: Array) -> bool:
 	for seed in range(10):
 		var regenerated = generator.generate(seed)
 		var original = originals[seed]
@@ -119,9 +124,10 @@ func _verify_determinism(generator, originals: Array) -> void:
 		_check(regenerated.centerline == original.centerline, "seed %d sampled geometry is repeatable" % seed)
 		_check(regenerated.spawn_transform == original.spawn_transform, "seed %d spawn transform is repeatable" % seed)
 		_check(regenerated.checkpoints == original.checkpoints, "seed %d checkpoint order is repeatable" % seed)
+	return true
 
 
-func _verify_bounded_fallback(generator) -> void:
+func _verify_bounded_fallback(generator) -> bool:
 	var impossible_limits := {
 		"max_attempts": 2,
 		"min_lap_length": 100000.0,
@@ -129,33 +135,35 @@ func _verify_bounded_fallback(generator) -> void:
 	var fallback = generator.generate(314159, impossible_limits)
 	_check(fallback != null, "invalid candidates return a fallback")
 	if fallback == null:
-		return
+		return false
 	_check(fallback.used_fallback, "retry exhaustion is reported")
 	_check(fallback.generation_attempts == 2, "retry exhaustion stops at the configured bound")
 	_check(fallback.diagnostic_reason.begins_with("retry_exhausted:"), "fallback includes the validation reason")
 	_check(fallback.seed == 314159, "fallback retains the requested seed for diagnostics")
 	_check(fallback.lap_length >= EXPECTED_MIN_LAP_LENGTH and fallback.lap_length <= EXPECTED_MAX_LAP_LENGTH, "fallback layout is known-valid")
 	_check(not _has_self_intersection(fallback.centerline), "fallback centerline is valid")
+	return true
 
 
-func _verify_surface_samples(definition) -> void:
+func _verify_surface_samples(definition) -> bool:
 	var surface_script := load(SURFACE_MAP_PATH) as GDScript
 	_check(surface_script != null, "track surface provider loads")
 	if surface_script == null:
-		return
+		return false
 	var surface_map = surface_script.new(definition)
 	var dirt = surface_map.sample_at(definition.centerline[0])
 	var grass = surface_map.sample_at(definition.bounds.end + Vector2(500.0, 500.0))
 	_check(dirt.surface_type != grass.surface_type, "road and off-track positions report distinct surfaces")
 	_check(dirt.grip_multiplier > grass.grip_multiplier, "dirt has more grip than off-track grass")
 	_check(dirt.drag_multiplier < grass.drag_multiplier, "off-track grass has more drag than dirt")
+	return true
 
 
-func _verify_lap_order(definition) -> void:
+func _verify_lap_order(definition) -> bool:
 	var tracker_script := load(LAP_TRACKER_PATH) as GDScript
 	_check(tracker_script != null, "lap progress tracker loads")
 	if tracker_script == null:
-		return
+		return false
 	var tracker = tracker_script.new(definition.checkpoints.size())
 	for ignored_crossing in range(6):
 		tracker.cross_checkpoint(0, 1.0)
@@ -170,13 +178,14 @@ func _verify_lap_order(definition) -> void:
 	tracker.cross_checkpoint(0, 1.0)
 	tracker.cross_checkpoint(0, -1.0)
 	_check(tracker.lap_count == 1, "repeated and reverse finish crossings do not add laps")
+	return true
 
 
-func _verify_runtime_geometry(definition) -> void:
+func _verify_runtime_geometry(definition) -> bool:
 	var runtime_script := load(TRACK_RUNTIME_PATH) as GDScript
 	_check(runtime_script != null, "prototype runtime renderer loads")
 	if runtime_script == null:
-		return
+		return false
 	var runtime = runtime_script.new(definition)
 	root.add_child(runtime)
 	var dirt_line := runtime.get_node_or_null("Dirt") as Line2D
@@ -185,14 +194,17 @@ func _verify_runtime_geometry(definition) -> void:
 	_check(dirt_line != null and dirt_line.points.size() == definition.centerline.size(), "prototype dirt rendering follows the generated circuit")
 	_check(grass_shoulder != null and grass_shoulder.width > dirt_line.width, "prototype grass shoulder distinguishes off-track")
 	_check(collision_body != null and collision_body.get_child_count() == 4, "prototype track builds a four-segment containment boundary")
-	_verify_checkpoint_markers(runtime, definition)
+	_check(_verify_checkpoint_markers(runtime, definition), "the checkpoint markers verification ran to completion")
 	runtime.free()
 
 
 ## Every checkpoint gets a visible gate, the start/finish reads differently from the rest, and the
 ## gate the driver needs next is the bright one. Ordered gates are unforgiving -- passing them out
 ## of sequence silently voids the lap -- so which one is next has to be visible from the car.
-func _verify_checkpoint_markers(runtime, definition) -> void:
+	return true
+
+
+func _verify_checkpoint_markers(runtime, definition) -> bool:
 	var markers := []
 	var missing := 0
 	for index in range(definition.checkpoints.size()):
@@ -202,8 +214,7 @@ func _verify_checkpoint_markers(runtime, definition) -> void:
 		markers.append(marker)
 	_check(missing == 0, "every checkpoint is drawn as its own marker (%d of %d missing)" % [missing, markers.size()])
 	if missing > 0:
-		return
-
+		return false
 	var half_width: float = definition.track_width * 0.5
 	_check(
 		is_equal_approx(markers[0].points[0].distance_to(markers[0].points[1]), half_width * 2.0),
@@ -213,8 +224,7 @@ func _verify_checkpoint_markers(runtime, definition) -> void:
 
 	_check(runtime.has_method("set_next_checkpoint"), "the runtime can be told which gate comes next")
 	if not runtime.has_method("set_next_checkpoint"):
-		return
-
+		return false
 	runtime.set_next_checkpoint(2)
 	_check(
 		markers[2].default_color.a > markers[3].default_color.a,
@@ -229,6 +239,7 @@ func _verify_checkpoint_markers(runtime, definition) -> void:
 		markers[0].default_color.a > markers[2].default_color.a,
 		"the start/finish highlights when it is the gate needed to complete the lap"
 	)
+	return true
 
 
 func generator_attempt_limit() -> int:

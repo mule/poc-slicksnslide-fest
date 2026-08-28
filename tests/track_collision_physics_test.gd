@@ -51,11 +51,13 @@ func _run() -> void:
 		await physics_frame
 		_physics_ticks += 1
 
-		_verify_bounds_body_exists(runtime, seed)
+		# Each verification reports whether it ran to completion. A GDScript runtime error aborts
+		# only the function it occurs in and returns false to here, so without this the script
+		# would exit 0 with assertions silently skipped. See tests/harness_contract_test.gd.
+		_check(_verify_bounds_body_exists(runtime, seed), "the bounds body exists verification ran to completion")
 		if _break_collision:
 			_remove_containment(runtime)
-		await _verify_probe_stays_inside(world, definition, seed)
-
+		_check(await _verify_probe_stays_inside(world, definition, seed), "the probe stays inside verification ran to completion")
 		world.queue_free()
 		await process_frame
 		await physics_frame
@@ -64,13 +66,14 @@ func _run() -> void:
 	_finish()
 
 
-func _verify_bounds_body_exists(runtime: Node, seed: int) -> void:
+func _verify_bounds_body_exists(runtime: Node, seed: int) -> bool:
 	var body := runtime.get_node_or_null("PlayAreaBounds") as StaticBody2D
 	_check(body != null, "seed %d builds a PlayAreaBounds body" % seed)
 	if body == null:
-		return
+		return false
 	_check(body.get_child_count() == 4, "seed %d containment is four segments (got %d)" % [seed, body.get_child_count()])
 	_check(runtime.get_node_or_null("TrackEdges") == null, "seed %d builds no per-segment track walls" % seed)
+	return true
 
 
 func _remove_containment(runtime: Node) -> void:
@@ -85,7 +88,7 @@ func _remove_containment(runtime: Node) -> void:
 ## Drive a probe outward from the track towards each side of the play area and confirm it
 ## actually reaches the containment boundary and is stopped there. Four runs per seed, one per
 ## edge.
-func _verify_probe_stays_inside(world: Node2D, definition, seed: int) -> void:
+func _verify_probe_stays_inside(world: Node2D, definition, seed: int) -> bool:
 	var play_area: Rect2 = definition.play_area
 	var start: Vector2 = definition.centerline[0]
 	var directions := [Vector2.RIGHT, Vector2.LEFT, Vector2.DOWN, Vector2.UP]
@@ -133,6 +136,7 @@ func _verify_probe_stays_inside(world: Node2D, definition, seed: int) -> void:
 		)
 		body.queue_free()
 		await process_frame
+	return true
 
 
 func _create_test_body() -> CharacterBody2D:

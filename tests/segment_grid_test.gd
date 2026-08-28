@@ -13,21 +13,24 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	# Each verification reports whether it ran to completion. A GDScript runtime error aborts
+	# only the function it occurs in and returns false to here, so without this the script
+	# would exit 0 with assertions silently skipped. See tests/harness_contract_test.gd.
 	var script := load(SEGMENT_GRID_PATH) as GDScript
 	_check(script != null, "segment grid script loads")
 	if script != null:
-		_verify_proximity_matches_brute_force()
-		_verify_pairs_cover_every_real_intersection()
-		_verify_overlapping_matches_brute_force()
-		_verify_degenerate_inputs_are_safe()
-		_verify_surface_map_agrees_with_brute_force()
-		_verify_segments_near_actually_narrows_candidates()
-		_verify_distance_agrees_with_surface_classification()
-		_verify_base_surface_query_never_reports_lost()
+		_check(_verify_proximity_matches_brute_force(), "the proximity matches brute force verification ran to completion")
+		_check(_verify_pairs_cover_every_real_intersection(), "the pairs cover every real intersection verification ran to completion")
+		_check(_verify_overlapping_matches_brute_force(), "the overlapping matches brute force verification ran to completion")
+		_check(_verify_degenerate_inputs_are_safe(), "the degenerate inputs are safe verification ran to completion")
+		_check(_verify_surface_map_agrees_with_brute_force(), "the surface map agrees with brute force verification ran to completion")
+		_check(_verify_segments_near_actually_narrows_candidates(), "the segments near actually narrows candidates verification ran to completion")
+		_check(_verify_distance_agrees_with_surface_classification(), "the distance agrees with surface classification verification ran to completion")
+		_check(_verify_base_surface_query_never_reports_lost(), "the base surface query never reports lost verification ran to completion")
 	_finish()
 
 
-func _verify_proximity_matches_brute_force() -> void:
+func _verify_proximity_matches_brute_force() -> bool:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 20260824
 	for trial in range(8):
@@ -45,9 +48,10 @@ func _verify_proximity_matches_brute_force() -> void:
 				if not actual.has(index):
 					misses += 1
 		_check(misses == 0, "trial %d: grid proximity returns every segment brute force finds (%d misses)" % [trial, misses])
+	return true
 
 
-func _verify_pairs_cover_every_real_intersection() -> void:
+func _verify_pairs_cover_every_real_intersection() -> bool:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 99001
 	for trial in range(6):
@@ -65,9 +69,10 @@ func _verify_pairs_cover_every_real_intersection() -> void:
 				if not offered.has(Vector2i(first, second)):
 					misses += 1
 		_check(misses == 0, "trial %d: candidate pairs cover every real intersection (%d misses)" % [trial, misses])
+	return true
 
 
-func _verify_overlapping_matches_brute_force() -> void:
+func _verify_overlapping_matches_brute_force() -> bool:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 771144
 	for trial in range(6):
@@ -89,9 +94,10 @@ func _verify_overlapping_matches_brute_force() -> void:
 					misses += 1
 		_check(crossings > 0, "trial %d: probe segments actually crossed the polyline (%d crossings)" % [trial, crossings])
 		_check(misses == 0, "trial %d: segments_overlapping returns every real crossing (%d misses)" % [trial, misses])
+	return true
 
 
-func _verify_degenerate_inputs_are_safe() -> void:
+func _verify_degenerate_inputs_are_safe() -> bool:
 	var empty := SegmentGrid.new(PackedVector2Array(), 50.0)
 	_check(empty.segments_near(Vector2.ZERO, 100.0).is_empty(), "an empty polyline yields no candidates")
 	_check(empty.candidate_pairs().is_empty(), "an empty polyline yields no pairs")
@@ -99,6 +105,7 @@ func _verify_degenerate_inputs_are_safe() -> void:
 	_check(single.segments_near(Vector2.ZERO, 100.0).is_empty(), "a one-point polyline has no segments")
 	var zero_cell := SegmentGrid.new(PackedVector2Array([Vector2.ZERO, Vector2(10.0, 0.0)]), 0.0)
 	_check(zero_cell.segments_near(Vector2(5.0, 0.0), 10.0).size() == 1, "a zero cell size is clamped rather than dividing by zero")
+	return true
 
 
 func _random_polyline(rng: RandomNumberGenerator, count: int, extent: float) -> PackedVector2Array:
@@ -120,12 +127,12 @@ func _brute_force_near(points: PackedVector2Array, query: Vector2, radius: float
 	return found
 
 
-func _verify_surface_map_agrees_with_brute_force() -> void:
+func _verify_surface_map_agrees_with_brute_force() -> bool:
 	var generator_script := load(TRACK_GENERATOR_PATH) as GDScript
 	var surface_script := load(SURFACE_MAP_PATH) as GDScript
 	_check(generator_script != null and surface_script != null, "generator and surface map scripts load")
 	if generator_script == null or surface_script == null:
-		return
+		return false
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 4242
 	var generator = generator_script.new()
@@ -147,9 +154,10 @@ func _verify_surface_map_agrees_with_brute_force() -> void:
 				disagreements += 1
 	_check(on_track_hits > 0, "the probe actually covered on-track positions (%d hits)" % on_track_hits)
 	_check(disagreements == 0, "indexed surface lookup agrees with brute force everywhere (%d disagreements)" % disagreements)
+	return true
 
 
-func _verify_segments_near_actually_narrows_candidates() -> void:
+func _verify_segments_near_actually_narrows_candidates() -> bool:
 	## The superset checks above would all still pass if `segments_near()` degenerately
 	## returned every segment for every query. This guards the one property the spatial
 	## index actually exists for: that it narrows the candidate set. Mirrors the real
@@ -159,7 +167,7 @@ func _verify_segments_near_actually_narrows_candidates() -> void:
 	var generator_script := load(TRACK_GENERATOR_PATH) as GDScript
 	_check(generator_script != null, "generator script loads for the narrowing check")
 	if generator_script == null:
-		return
+		return false
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 555222
 	var generator = generator_script.new()
@@ -176,9 +184,10 @@ func _verify_segments_near_actually_narrows_candidates() -> void:
 	var average_candidates := float(total_candidates) / float(probes)
 	var average_fraction := average_candidates / float(segment_count)
 	_check(average_fraction < MAX_CANDIDATE_FRACTION, "segments_near narrows candidates well below every segment (avg %.1f of %d segments = %.1f%%, threshold %.0f%%)" % [average_candidates, segment_count, average_fraction * 100.0, MAX_CANDIDATE_FRACTION * 100.0])
+	return true
 
 
-func _verify_distance_agrees_with_surface_classification() -> void:
+func _verify_distance_agrees_with_surface_classification() -> bool:
 	var generator_script := load(TRACK_GENERATOR_PATH) as GDScript
 	var surface_map_script := load(SURFACE_MAP_PATH) as GDScript
 	var definition = generator_script.new().generate(0)
@@ -228,14 +237,16 @@ func _verify_distance_agrees_with_surface_classification() -> void:
 		not is_inf(wide_distance) and absf(wide_distance - far_offset) < half_width,
 		"widening search_radius alone (not an internal half_width substitute) lets the same far point resolve to a real, roughly-correct distance"
 	)
+	return true
 
 
-func _verify_base_surface_query_never_reports_lost() -> void:
+func _verify_base_surface_query_never_reports_lost() -> bool:
 	var base := SurfaceQuery.new()
 	_check(
 		is_zero_approx(base.distance_to_centerline(Vector2(9999.0, 9999.0), 1000.0)),
 		"the base SurfaceQuery reports zero distance so providers without a centerline never read as lost"
 	)
+	return true
 
 
 func _brute_force_distance(points: PackedVector2Array, query: Vector2) -> float:

@@ -12,28 +12,32 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	_verify_scale_helpers()
-	_verify_rescaled_tuning()
+	# Each verification reports whether it ran to completion. A GDScript runtime error aborts only
+	# the function it occurs in and returns false to here, so without this the script would exit 0
+	# with assertions silently skipped. See tests/harness_contract_test.gd.
+	_check(_verify_scale_helpers(), "the scale-helper verification ran to completion")
+	_check(_verify_rescaled_tuning(), "the rescaled-tuning verification ran to completion")
 	_finish()
 
 
-func _verify_scale_helpers() -> void:
+func _verify_scale_helpers() -> bool:
 	var script := load(WORLD_SCALE_PATH) as GDScript
 	_check(script != null, "world scale script loads")
 	if script == null:
-		return
+		return false
 	_check(is_equal_approx(WorldScale.PIXELS_PER_METRE, 12.5), "the world declares 12.5 px per metre")
 	_check(is_equal_approx(WorldScale.metres(4.4), 55.0), "a 4.4 m car body measures 55 px")
 	_check(is_equal_approx(WorldScale.to_metres(55.0), 4.4), "pixels-to-metres inverts metres-to-pixels")
 	_check(is_equal_approx(WorldScale.to_kph(600.0), 172.8), "600 px/s reads as 172.8 km/h")
 	_check(is_equal_approx(WorldScale.to_kph(0.0), 0.0), "a stopped car reads as zero")
+	return true
 
 
-func _verify_rescaled_tuning() -> void:
+func _verify_rescaled_tuning() -> bool:
 	var tuning := load(TUNING_PATH) as VehicleTuning
 	_check(tuning != null, "default vehicle tuning loads")
 	if tuning == null:
-		return
+		return false
 
 	# Values must survive their @export_range declarations. aerodynamic_drag is
 	# the dangerous one: a step of 0.001 would round 0.00043 down to zero.
@@ -60,6 +64,7 @@ func _verify_rescaled_tuning() -> void:
 	var terminal := _solve_terminal_speed(tuning)
 	_check(terminal >= 595.0 and terminal <= 605.0, "analytic terminal speed is the designed 600 px/s (got %.1f)" % terminal)
 	_check(terminal < tuning.max_safe_speed, "the limiter sits above terminal speed, so it is a real safety net")
+	return true
 
 
 func _solve_terminal_speed(tuning: VehicleTuning) -> float:
