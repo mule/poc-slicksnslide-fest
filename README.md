@@ -46,6 +46,7 @@ Run the world-scale contract and spatial-indexing checks:
 
 ```sh
 godot --headless --path . --script res://tests/world_scale_contract_test.gd
+godot --headless --path . --script res://tests/offtrack_object_contract_test.gd
 godot --headless --path . --script res://tests/segment_grid_test.gd
 ```
 

@@ -106,6 +106,13 @@ func _verify_default_resources() -> bool:
 	_check(vehicle_tuning != null, "default vehicle tuning loads")
 	if vehicle_tuning != null:
 		_check(float(vehicle_tuning.get("mass_kg")) > 0.0, "vehicle physics tuning has an explicit resource home")
+
+	var offtrack_catalog := load("res://data/default_offtrack_object_catalog.tres") as OfftrackObjectCatalog
+	_check(offtrack_catalog != null, "default off-track object catalog loads")
+	if offtrack_catalog != null:
+		_check(offtrack_catalog.version == 1, "default off-track catalog is version 1")
+		for archetype_id in [&"grass", &"debris", &"tree", &"rock"]:
+			_check(offtrack_catalog.archetype_by_id(archetype_id) != null, "default off-track catalog contains %s" % archetype_id)
 	return true
 
 

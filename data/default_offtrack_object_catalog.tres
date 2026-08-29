@@ -1,0 +1,63 @@
+[gd_resource type="Resource" script_class="OfftrackObjectCatalog" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://world/offtrack/offtrack_object_catalog.gd" id="1_catalog"]
+[ext_resource type="Script" path="res://world/offtrack/offtrack_object_archetype.gd" id="2_archetype"]
+
+[sub_resource type="Resource" id="Archetype_grass"]
+script = ExtResource("2_archetype")
+id = &"grass"
+footprint_radius = 5.0
+min_scale = 0.7
+max_scale = 1.3
+visual_variant_count = 3
+near_weight = 0.75
+hazard_weight = 0.4
+
+[sub_resource type="Resource" id="Archetype_debris"]
+script = ExtResource("2_archetype")
+id = &"debris"
+footprint_radius = 7.5
+min_scale = 0.8
+max_scale = 1.2
+visual_variant_count = 3
+near_weight = 0.25
+hazard_weight = 0.15
+
+[sub_resource type="Resource" id="Archetype_tree"]
+script = ExtResource("2_archetype")
+id = &"tree"
+solid = true
+footprint_radius = 25.0
+collision_radius = 15.0
+min_scale = 0.8
+max_scale = 1.25
+visual_variant_count = 2
+hazard_weight = 0.3
+collision_profile = &"tree_circle"
+
+[sub_resource type="Resource" id="Archetype_rock"]
+script = ExtResource("2_archetype")
+id = &"rock"
+solid = true
+footprint_radius = 18.75
+collision_radius = 15.0
+min_scale = 0.7
+max_scale = 1.4
+visual_variant_count = 3
+hazard_weight = 0.15
+collision_profile = &"rock_circle"
+
+[resource]
+script = ExtResource("1_catalog")
+version = 1
+cell_size = 250.0
+chunk_size = 1000.0
+near_max_distance = 150.0
+solid_clearance = 250.0
+hazard_max_distance = 1750.0
+containment_buffer = 250.0
+spawn_checkpoint_exclusion = 500.0
+near_occupancy = 0.55
+hazard_occupancy = 0.35
+minimum_fill_ratio = 0.75
+archetypes = Array[ExtResource("2_archetype")]([SubResource("Archetype_grass"), SubResource("Archetype_debris"), SubResource("Archetype_tree"), SubResource("Archetype_rock")])
