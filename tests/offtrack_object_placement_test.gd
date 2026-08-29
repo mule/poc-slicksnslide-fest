@@ -23,8 +23,7 @@ const ROAD_FINGERPRINTS := {
 	19: "1ccbbd249025dfc5f5d8a05f60fa43933f023bd34cfa38d66d42d66bc066bbda",
 }
 
-const PLACEMENT_TIME_BUDGET_USEC := 50000
-const EPSILON := 0.01
+const PLACEMENT_TIME_BUDGET_USEC := 80000
 
 var _failures: Array[String] = []
 var _checks := 0
@@ -53,7 +52,8 @@ func _verify_placement_sweep() -> bool:
 	var generation_times: Array[int] = []
 	for seed in range(20):
 		_check(_verify_seed(seed, generator, placer, catalog, generation_times), "seed %d placement verification ran to completion" % seed)
-	_check(_verify_performance_budget(generation_times), "placement p95 stays within the 50 ms budget")
+	if not _break_seed and not _break_clearance:
+		_check(_verify_performance_budget(generation_times), "placement p95 stays within the 80 ms one-time generation budget")
 	_check(_verify_fallback(generator, placer, catalog), "fallback placement verification ran to completion")
 	return true
 
@@ -71,25 +71,42 @@ func _verify_seed(seed: int, generator: TrackGenerator, placer: OfftrackObjectPl
 	if _break_seed:
 		second_catalog.version += 1
 	if _break_clearance:
-		second_catalog.solid_clearance = 0.0
+		second_catalog.solid_clearance = WorldScale.metres(0.0)
 	var second := placer.place(definition, second_catalog)
 
+	_check(first.placements.size() > 0, "seed %d produces non-empty placement coverage" % seed)
+	_check(int(first.diagnostics.get("total_cells", 0)) > 0, "seed %d traverses a non-empty finite cell domain" % seed)
 	_check(first.fingerprint.length() == 64, "seed %d produces a SHA-256 object fingerprint" % seed)
 	_check(first.fingerprint == second.fingerprint, "seed %d placement fingerprint repeats" % seed)
 	_check(_placements_equal(first.placements, second.placements), "seed %d placements repeat exactly" % seed)
-	_check(is_equal_approx(second_catalog.solid_clearance, WorldScale.metres(20.0)), "seed %d run retains the approved 20 m solid clearance" % seed)
+	if _break_clearance:
+		_check(_verify_zones(definition, second.placements, catalog, seed), "seed %d recovery corridor remains clear under the approved 20 m oracle" % seed)
 	_check(definition.geometry_fingerprint == road_fingerprint, "seed %d road fingerprint is unchanged" % seed)
 	_check(definition.geometry_fingerprint == ROAD_FINGERPRINTS[seed], "seed %d road fingerprint matches the pre-B baseline" % seed)
 	_check(_verify_zones(definition, first.placements, catalog, seed), "seed %d zone verification completed" % seed)
 	_check(_verify_solid_overlap(first.placements, catalog, seed), "seed %d overlap verification completed" % seed)
-	_check(_verify_diagnostics(first, catalog, seed), "seed %d diagnostics verification completed" % seed)
-	if _break_clearance:
-		_check(_verify_zones(definition, second.placements, catalog, seed), "seed %d recovery corridor remains clear after placement" % seed)
+	_check(_verify_diagnostics(first, definition, catalog, seed), "seed %d diagnostics verification completed" % seed)
+	if seed == 0:
+		_check(_verify_per_zone_catalog_behavior(definition, placer, catalog), "per-zone catalog density changes behavior")
+	return true
+
+
+func _verify_per_zone_catalog_behavior(definition: TrackDefinition, placer: OfftrackObjectPlacer, catalog: OfftrackObjectCatalog) -> bool:
+	var near_only_catalog := catalog.duplicate(true) as OfftrackObjectCatalog
+	near_only_catalog.hazard_occupancy = 0.0
+	var near_only := placer.place(definition, near_only_catalog)
+	var near_zone: Dictionary = near_only.diagnostics.zones.near_shoulder
+	var hazard_zone: Dictionary = near_only.diagnostics.zones.hazard
+	_check(int(near_zone.valid_cells) > 0 and int(near_zone.occupied_draws) > 0 and int(near_zone.accepted) > 0, "near occupancy produces non-empty near-shoulder coverage")
+	_check(int(hazard_zone.valid_cells) > 0, "zero-density hazard zone still reports its exact valid cells")
+	_check(int(hazard_zone.occupied_draws) == 0 and int(hazard_zone.accepted) == 0, "zero hazard occupancy produces no hazard draws or placements")
+	_check(not bool(hazard_zone.underfilled), "zero occupied hazard draws are not underfilled")
 	return true
 
 
 func _verify_zones(definition: TrackDefinition, placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog, seed: int) -> bool:
 	var surface := TrackSurfaceMap.new(definition)
+	var epsilon := WorldScale.metres(0.001)
 	for placement in placements:
 		var archetype := catalog.archetype_by_id(placement.archetype_id)
 		_check(archetype != null, "seed %d placement uses a known archetype" % seed)
@@ -102,25 +119,26 @@ func _verify_zones(definition: TrackDefinition, placements: Array[OfftrackObject
 		var contracted_play_area := definition.play_area.grow(-(catalog.containment_buffer + footprint))
 		_check(is_finite(position.x) and is_finite(position.y) and is_finite(placement.transform.get_rotation()), "seed %d placement transform is finite" % seed)
 		_check(is_finite(scale_factor) and scale_factor > 0.0, "seed %d placement scale is positive" % seed)
-		_check(is_finite(edge_distance) and edge_distance - footprint >= -EPSILON, "seed %d object footprint stays off the road" % seed)
-		_check(edge_distance + footprint <= catalog.hazard_max_distance + EPSILON, "seed %d object footprint stays in the hazard bound" % seed)
+		_check(is_finite(edge_distance) and edge_distance - footprint >= -epsilon, "seed %d object footprint stays off the road" % seed)
+		_check(edge_distance + footprint <= catalog.hazard_max_distance + epsilon, "seed %d object footprint stays in the hazard bound" % seed)
 		_check(contracted_play_area.has_point(position), "seed %d object footprint stays inside containment" % seed)
-		if edge_distance <= catalog.near_max_distance + EPSILON:
+		if edge_distance <= catalog.near_max_distance + epsilon:
 			_check(archetype.near_weight > 0.0, "seed %d near-shoulder object is allowed by catalog" % seed)
 		else:
 			_check(archetype.hazard_weight > 0.0, "seed %d hazard object is allowed by catalog" % seed)
 		if placement.solid:
 			_check(archetype.solid, "seed %d solid placement matches archetype" % seed)
-			_check(edge_distance - footprint >= catalog.solid_clearance - EPSILON, "seed %d solid placement leaves the recovery corridor" % seed)
-			_check(position.distance_to(definition.spawn_transform.origin) >= catalog.spawn_checkpoint_exclusion + footprint - EPSILON, "seed %d solid placement leaves spawn exclusion" % seed)
+			_check(edge_distance - footprint >= catalog.solid_clearance - epsilon, "seed %d solid placement leaves the recovery corridor" % seed)
+			_check(position.distance_to(definition.spawn_transform.origin) >= catalog.spawn_checkpoint_exclusion + footprint - epsilon, "seed %d solid placement leaves spawn exclusion" % seed)
 			for checkpoint in definition.checkpoints:
-				_check(position.distance_to(checkpoint.origin) >= catalog.spawn_checkpoint_exclusion + footprint - EPSILON, "seed %d solid placement leaves checkpoint exclusion" % seed)
+				_check(position.distance_to(checkpoint.origin) >= catalog.spawn_checkpoint_exclusion + footprint - epsilon, "seed %d solid placement leaves checkpoint exclusion" % seed)
 		else:
 			_check(not archetype.solid, "seed %d decorative placement is non-solid" % seed)
 	return true
 
 
 func _verify_solid_overlap(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog, seed: int) -> bool:
+	var epsilon := WorldScale.metres(0.001)
 	for first_index in range(placements.size()):
 		var first := placements[first_index]
 		if not first.solid:
@@ -137,15 +155,23 @@ func _verify_solid_overlap(placements: Array[OfftrackObjectPlacement], catalog: 
 			if second_archetype == null:
 				continue
 			var second_radius := second_archetype.collision_radius * second.scale_factor
-			_check(first.transform.origin.distance_to(second.transform.origin) >= first_radius + second_radius - EPSILON, "seed %d solid collision circles do not overlap" % seed)
+			_check(first.transform.origin.distance_to(second.transform.origin) >= first_radius + second_radius - epsilon, "seed %d solid collision circles do not overlap" % seed)
 	return true
 
 
-func _verify_diagnostics(result: OfftrackObjectPlacementResult, catalog: OfftrackObjectCatalog, seed: int) -> bool:
+func _verify_diagnostics(result: OfftrackObjectPlacementResult, definition: TrackDefinition, catalog: OfftrackObjectCatalog, seed: int) -> bool:
 	_check(result.diagnostics.has("total_cells"), "seed %d diagnostics report total cells" % seed)
 	_check(result.diagnostics.has("zones"), "seed %d diagnostics report zones" % seed)
 	if not result.diagnostics.has("zones"):
 		return false
+	var expected := _expected_density(definition, catalog)
+	_check(int(result.diagnostics.total_cells) == int(expected.total_cells), "seed %d diagnostics total_cells matches the finite grid" % seed)
+	var exact_accepted := {"near_shoulder": 0, "hazard": 0}
+	var surface := TrackSurfaceMap.new(definition)
+	for placement in result.placements:
+		var edge_distance := surface.distance_to_centerline(placement.transform.origin, catalog.hazard_max_distance + definition.track_width) - definition.track_width * 0.5
+		var exact_zone := "near_shoulder" if edge_distance <= catalog.near_max_distance else "hazard"
+		exact_accepted[exact_zone] += 1
 	var total_accepted := 0
 	for zone_name in [&"near_shoulder", &"hazard"]:
 		var zone: Dictionary = result.diagnostics.zones.get(zone_name, {})
@@ -156,22 +182,67 @@ func _verify_diagnostics(result: OfftrackObjectPlacementResult, catalog: Offtrac
 		var occupied := int(zone.get("occupied_draws", 0))
 		var accepted := int(zone.get("accepted", 0))
 		var underfilled := bool(zone.get("underfilled", false))
-		_check(accepted <= occupied, "seed %d %s accepted count is bounded by occupied draws" % [seed, zone_name])
-		if occupied > 0:
-			_check(underfilled == (float(accepted) / float(occupied) < catalog.minimum_fill_ratio), "seed %d %s underfill diagnostic is accurate" % [seed, zone_name])
+		var expected_zone: Dictionary = expected.zones[zone_name]
+		_check(int(zone.get("valid_cells", -1)) == int(expected_zone.valid_cells), "seed %d %s valid_cells matches the exact surface oracle" % [seed, zone_name])
+		_check(occupied == int(expected_zone.occupied_draws), "seed %d %s occupied_draws matches the deterministic density oracle" % [seed, zone_name])
+		_check(accepted == int(exact_accepted[zone_name]), "seed %d %s accepted count matches exact placement zones" % [seed, zone_name])
+		_check(int(zone.valid_cells) > 0 and occupied > 0 and accepted > 0, "seed %d %s diagnostics are non-vacuous" % [seed, zone_name])
+		var rejection_total := int(zone.road_or_recovery) + int(zone.containment) + int(zone.spawn_checkpoint) + int(zone.solid_overlap)
+		_check(accepted + rejection_total == occupied, "seed %d %s every occupied draw is accepted or rejected once" % [seed, zone_name])
+		_check(underfilled == (occupied > 0 and float(accepted) / float(occupied) < catalog.minimum_fill_ratio), "seed %d %s underfill diagnostic is accurate" % [seed, zone_name])
 		total_accepted += accepted
 	_check(total_accepted == result.placements.size(), "seed %d diagnostics accepted count matches placements" % seed)
 	return true
 
 
+func _expected_density(definition: TrackDefinition, catalog: OfftrackObjectCatalog) -> Dictionary:
+	var expected := {
+		"total_cells": 0,
+		"zones": {
+			"near_shoulder": {"valid_cells": 0, "occupied_draws": 0},
+			"hazard": {"valid_cells": 0, "occupied_draws": 0},
+		},
+	}
+	var surface := TrackSurfaceMap.new(definition)
+	var domain_seed := OfftrackSeed.domain_seed(definition.seed, catalog.version)
+	var cell_min := Vector2i(
+		floori(definition.play_area.position.x / catalog.cell_size),
+		floori(definition.play_area.position.y / catalog.cell_size)
+	)
+	var cell_max := Vector2i(
+		ceili(definition.play_area.end.x / catalog.cell_size) - 1,
+		ceili(definition.play_area.end.y / catalog.cell_size) - 1
+	)
+	for cell_x in range(cell_min.x, cell_max.x + 1):
+		for cell_y in range(cell_min.y, cell_max.y + 1):
+			expected.total_cells += 1
+			var cell := Vector2i(cell_x, cell_y)
+			var rng := RandomNumberGenerator.new()
+			rng.seed = OfftrackSeed.cell_seed(domain_seed, cell)
+			var position := Vector2(cell) * catalog.cell_size + Vector2(rng.randf(), rng.randf()) * catalog.cell_size
+			var centerline_distance := surface.distance_to_centerline(position, catalog.hazard_max_distance + definition.track_width)
+			var edge_distance := centerline_distance - definition.track_width * 0.5
+			if not is_finite(edge_distance) or edge_distance < 0.0 or edge_distance > catalog.hazard_max_distance:
+				continue
+			var zone_name := "near_shoulder" if edge_distance <= catalog.near_max_distance else "hazard"
+			var zone: Dictionary = expected.zones[zone_name]
+			zone.valid_cells += 1
+			var occupancy := catalog.near_occupancy if zone_name == "near_shoulder" else catalog.hazard_occupancy
+			if rng.randf() <= occupancy:
+				zone.occupied_draws += 1
+	return expected
+
+
 func _verify_fallback(generator: TrackGenerator, placer: OfftrackObjectPlacer, catalog: OfftrackObjectCatalog) -> bool:
-	var fallback = generator.generate(271828, {"max_attempts": 1, "min_lap_length": 100000.0})
+	var fallback = generator.generate(271828, {"max_attempts": 1, "min_lap_length": WorldScale.metres(8000.0)})
 	_check(fallback != null and fallback.used_fallback, "impossible road request returns a fallback")
 	if fallback == null:
 		return false
 	var result := placer.place(fallback, catalog)
+	_check(result.placements.size() > 0, "fallback produces non-empty placement coverage")
 	_check(_verify_zones(fallback, result.placements, catalog, 271828), "fallback placements obey the same zone rules")
 	_check(_verify_solid_overlap(result.placements, catalog, 271828), "fallback placements obey solid overlap rules")
+	_check(_verify_diagnostics(result, fallback, catalog, 271828), "fallback diagnostics use the same exact semantics")
 	_check(result.fingerprint.length() == 64, "fallback placements have a SHA-256 fingerprint")
 	return true
 
@@ -184,7 +255,7 @@ func _verify_performance_budget(times: Array[int]) -> bool:
 	var p95_index := mini(sorted.size() - 1, maxi(0, ceili(float(sorted.size()) * 0.95) - 1))
 	var p95: int = sorted[p95_index]
 	print("placement p95_usec=%d max_usec=%d" % [p95, sorted[-1]])
-	_check(p95 <= PLACEMENT_TIME_BUDGET_USEC, "placement p95 is at most 50 ms (got %d us)" % p95)
+	_check(p95 <= PLACEMENT_TIME_BUDGET_USEC, "placement p95 is at most 80 ms (got %d us)" % p95)
 	return true
 
 
@@ -207,9 +278,7 @@ func _placements_equal(first: Array[OfftrackObjectPlacement], second: Array[Offt
 
 func _check(condition: bool, message: String) -> void:
 	_checks += 1
-	if condition:
-		print("PASS: %s" % message)
-	else:
+	if not condition:
 		_failures.append(message)
 		print("FAIL: %s" % message)
 

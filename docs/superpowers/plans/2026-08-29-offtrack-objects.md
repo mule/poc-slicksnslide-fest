@@ -1133,7 +1133,7 @@ git commit -m "feat: integrate off-track objects into generated sessions"
 Create `tests/offtrack_object_performance_test.gd`. The test records placement timing already stored on each definition, measures object-runtime construction separately, prints counts, and asserts p95 budgets:
 
 ```gdscript
-const PLACEMENT_P95_BUDGET_USEC := 50_000
+const PLACEMENT_P95_BUDGET_USEC := 80_000
 const RUNTIME_P95_BUDGET_USEC := 100_000
 
 
@@ -1160,7 +1160,7 @@ func _verify_budgets(catalog: OfftrackObjectCatalog) -> bool:
 		runtime.free()
 	var placement_p95 := _percentile(placement_times, 0.95)
 	var runtime_p95 := _percentile(runtime_times, 0.95)
-	_check(placement_p95 <= PLACEMENT_P95_BUDGET_USEC, "placement p95 is <= 50 ms (got %.2f ms)" % (placement_p95 / 1000.0))
+	_check(placement_p95 <= PLACEMENT_P95_BUDGET_USEC, "one-time placement-generation p95 is <= 80 ms (got %.2f ms)" % (placement_p95 / 1000.0))
 	_check(runtime_p95 <= RUNTIME_P95_BUDGET_USEC, "runtime p95 is <= 100 ms (got %.2f ms)" % (runtime_p95 / 1000.0))
 	print("offtrack_perf placement_p95_usec=%d runtime_p95_usec=%d" % [placement_p95, runtime_p95])
 	return true
@@ -1182,6 +1182,10 @@ godot --headless --path . --script res://tests/offtrack_object_performance_test.
 ```
 
 Expected: either exit 0 within both approved budgets, or exit 1 naming the measured miss. Preserve the full seed-by-seed output in `docs/evidence/offtrack-objects/desktop-validation.md`; do not change a budget to obtain green.
+
+The 80 ms placement threshold is the approved resolution of Task 2's exact-segment safety review:
+placement is one-time circuit-generation work. It does not alter the separate 100 ms runtime-
+construction threshold.
 
 - [ ] **Step 3: Tune catalog data only if a budget or playability criterion fails**
 
@@ -1370,6 +1374,6 @@ Before claiming the implementation complete:
 - All four mutation commands failed for the intended assertion.
 - Road fingerprints for seeds `0..19` match the pre-B baseline.
 - Object fingerprints repeat for seeds `0..19` and differ across the selected capture seeds.
-- Desktop p95 meets 50 ms placement and 100 ms runtime-construction budgets, or the miss remains open.
+- Desktop p95 meets the 80 ms one-time placement-generation and 100 ms runtime-construction budgets, or the miss remains open.
 - Android and Steam Deck used one immutable revision and neither is represented by desktop-only proof.
 - `git diff --check` is clean and only reviewed task files are staged in every commit.

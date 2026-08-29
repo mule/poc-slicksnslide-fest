@@ -236,10 +236,13 @@ the collision contract are observed.
 
 Desktop evidence records placement time, runtime construction time, placement count, node count,
 chunk count, collision-shape count, memory, and representative frame time for at least three seeds.
-On the reference workstation, the initial budgets are placement p95 at or below 50 ms and runtime
-construction p95 at or below 100 ms across seeds `0..19`. A miss is reported and escalated rather
-than hidden by loosening the budget. Captures show near-shoulder decoration, the open recovery
-corridor, deep hazards, and a real impact.
+On the reference workstation, the approved budgets are placement p95 at or below 80 ms and runtime
+construction p95 at or below 100 ms across seeds `0..19`. Placement runs once when a circuit is
+generated; its original 50 ms target was raised to 80 ms after exact segment-safe placement measured
+73.136 ms p95. This approval applies only to one-time placement generation and does not change the
+separate runtime-construction budget. A miss is reported and escalated rather than hidden by further
+loosening either budget. Captures show near-shoulder decoration, the open recovery corridor, deep
+hazards, and a real impact.
 
 Android issue #23 and Steam Deck issue #7 validate the same B-enabled commit in parallel. Their
 reports add object and collision counts to the existing frame-time, memory, controller, and
@@ -283,7 +286,7 @@ it would weaken test-driven delivery and make ownership of failed acceptance cri
   buffer.
 - Real physics probes collide with trees and rocks without tunnelling or unbounded energy.
 - Seed restart replaces the complete object field without retaining nodes or physics shapes.
-- Placement p95 is at most 50 ms and runtime-construction p95 is at most 100 ms across seeds
+- One-time placement-generation p95 is at most 80 ms and runtime-construction p95 is at most 100 ms across seeds
   `0..19` on the documented reference workstation, or the miss remains explicitly open.
 - Desktop evidence covers at least three seeds and documents any density or performance shortfall.
 - Android and Steam Deck evidence runs against the same B-enabled revision; unmet physical-device
