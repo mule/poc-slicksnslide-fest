@@ -37,6 +37,7 @@ func _placement(stable_id: String, archetype_id: StringName, position: Vector2, 
 
 
 func _verify_visuals(catalog: OfftrackObjectCatalog) -> bool:
+	_check(_verify_prototype_dimensions(), "prototype dimensions use world-scale metres")
 	var placements := _fixture_placements()
 	var visuals := OfftrackObjectVisuals.new()
 	root.add_child(visuals)
@@ -48,6 +49,40 @@ func _verify_visuals(catalog: OfftrackObjectCatalog) -> bool:
 	_check(visuals.get_node_or_null("SolidObjects/v1_0_5_0") != null, "rock stable ID names its visual node")
 	_check(_verify_solid_transform(visuals, placements[2]), "tree transform verification completed")
 	visuals.queue_free()
+	return true
+
+
+func _verify_prototype_dimensions() -> bool:
+	var grass_mesh := OfftrackObjectMeshFactory.decorative_mesh(&"grass", 1)
+	var grass_vertices: PackedVector3Array = grass_mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	_check(
+		grass_vertices[0].is_equal_approx(Vector3(WorldScale.metres(-0.32), WorldScale.metres(0.4), 0.0)),
+		"grass vertex dimensions preserve the intended world metres"
+	)
+	_check(
+		grass_vertices[1].is_equal_approx(Vector3(WorldScale.metres(0.0), WorldScale.metres(-0.8), 0.0)),
+		"grass variant height is expressed in world metres"
+	)
+	var debris_mesh := OfftrackObjectMeshFactory.decorative_mesh(&"debris", 2)
+	var debris_vertices: PackedVector3Array = debris_mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
+	_check(
+		debris_vertices[1].is_equal_approx(Vector3(WorldScale.metres(0.56), WorldScale.metres(-0.16), 0.0)),
+		"debris variant dimensions preserve the intended world metres"
+	)
+	var tree := OfftrackObjectMeshFactory.solid_visual(&"tree", 1)
+	var tree_body := tree.get_child(1) as Polygon2D
+	_check(
+		tree_body.polygon[2].is_equal_approx(Vector2(WorldScale.metres(0.0), WorldScale.metres(-2.24))),
+		"tree apex dimensions preserve the intended world metres"
+	)
+	var rock := OfftrackObjectMeshFactory.solid_visual(&"rock", 0)
+	var rock_body := rock.get_child(1) as Polygon2D
+	_check(
+		rock_body.polygon[0].is_equal_approx(Vector2(WorldScale.metres(-1.44), WorldScale.metres(0.64))),
+		"rock dimensions preserve the intended world metres"
+	)
+	tree.free()
+	rock.free()
 	return true
 
 
