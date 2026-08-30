@@ -50,6 +50,18 @@ godot --headless --path . --script res://tests/offtrack_object_contract_test.gd
 godot --headless --path . --script res://tests/segment_grid_test.gd
 ```
 
+Run the deterministic off-track object placement, visual, collision, and generated-session checks:
+
+```sh
+godot --headless --path . --script res://tests/offtrack_object_placement_test.gd
+godot --headless --path . --script res://tests/offtrack_object_visuals_test.gd
+godot --headless --path . --script res://tests/offtrack_object_collision_test.gd
+godot --headless --path . --script res://tests/offtrack_object_runtime_test.gd
+```
+
+These checks keep placement deterministic and separate from road geometry, require decorative and
+solid runtime consumers to agree on every placement, and exercise the real seed-restart path.
+
 Run the issue #5 input/session and integrated-scene checks:
 
 ```sh

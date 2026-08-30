@@ -2,6 +2,7 @@ class_name TrackGenerator
 extends RefCounted
 
 const TrackDefinitionScript := preload("res://track/track_definition.gd")
+const DEFAULT_OFFTRACK_CATALOG := preload("res://data/default_offtrack_object_catalog.tres")
 
 const DEFAULT_MAX_ATTEMPTS := 30
 const SAMPLE_SPACING := 25.0
@@ -44,14 +45,23 @@ func generate(requested_seed: int, limit_overrides: Dictionary = {}):
 		if last_reason.is_empty():
 			candidate.diagnostic_reason = "accepted"
 			candidate.generation_usec = Time.get_ticks_usec() - started_usec
-			return candidate
+			return _attach_offtrack_objects(candidate)
 
 	var fallback = _build_definition(requested_seed, _sample_stadium(FALLBACK_HALF_STRAIGHT, FALLBACK_RADIUS), FALLBACK_WIDTH)
 	fallback.generation_attempts = maximum_attempts
 	fallback.used_fallback = true
 	fallback.diagnostic_reason = "retry_exhausted:%s; fallback=known_valid_stadium" % last_reason
 	fallback.generation_usec = Time.get_ticks_usec() - started_usec
-	return fallback
+	return _attach_offtrack_objects(fallback)
+
+
+func _attach_offtrack_objects(definition: TrackDefinition) -> TrackDefinition:
+	var result := OfftrackObjectPlacer.new().place(definition, DEFAULT_OFFTRACK_CATALOG)
+	definition.offtrack_objects = result.placements
+	definition.offtrack_object_fingerprint = result.fingerprint
+	definition.offtrack_object_generation_usec = result.generation_usec
+	definition.offtrack_object_diagnostics = result.diagnostics
+	return definition
 
 
 func _build_definition(requested_seed: int, centerline: PackedVector2Array, width: float):

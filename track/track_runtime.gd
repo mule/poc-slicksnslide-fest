@@ -36,6 +36,11 @@ func _ready() -> void:
 	_build_boundary_line("RightEdge", definition.right_boundary)
 	_build_checkpoint_markers()
 	_build_collision()
+	var object_runtime := OfftrackObjectRuntime.new(
+		definition.offtrack_objects,
+		preload("res://data/default_offtrack_object_catalog.tres"),
+	)
+	add_child(object_runtime)
 
 
 func _build_line(line_name: String, width: float, color: Color, z_layer: int) -> void:
