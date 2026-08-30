@@ -24,6 +24,14 @@ func _verify_generated_runtime() -> bool:
 	var definition: TrackDefinition = generator.generate(0)
 	_check(not definition.offtrack_objects.is_empty(), "seed 0 carries generated off-track objects")
 	_check(definition.offtrack_object_fingerprint.length() == 64, "seed 0 carries an object fingerprint")
+	_check(
+		is_finite(float(definition.offtrack_object_generation_usec)) and definition.offtrack_object_generation_usec > 0,
+		"seed 0 carries finite positive object generation timing"
+	)
+	_check(
+		_verify_object_diagnostics(definition.offtrack_object_diagnostics, definition.offtrack_objects),
+		"seed 0 carries placement diagnostics consistent with generated objects"
+	)
 	var repeated: TrackDefinition = generator.generate(0)
 	_check(repeated.geometry_fingerprint == definition.geometry_fingerprint, "off-track placement leaves the road fingerprint unchanged")
 	_check(repeated.offtrack_object_fingerprint == definition.offtrack_object_fingerprint, "same seed repeats the exact object fingerprint")
@@ -58,19 +66,25 @@ func _verify_seed_restart(main_scene: PackedScene) -> bool:
 	await process_frame
 	var first_runtime := session.get_node_or_null("World/TrackMount/GeneratedTrack") as TrackRuntime
 	_check(first_runtime != null, "session mounts the initial generated track runtime")
+	_check(_verify_single_runtime_mount(session, first_runtime, "initial seed"), "initial seed mount integrity verification completed")
 	var first_snapshot: Dictionary = session.get_session_snapshot()
 	var first_fingerprint: String = str(first_snapshot.get("offtrack_object_fingerprint", ""))
 	_check(first_fingerprint.length() == 64, "session snapshot exposes the initial object fingerprint")
 	session.restart_with_seed(0)
+	var repeated_runtime := session.get_node_or_null("World/TrackMount/GeneratedTrack") as TrackRuntime
+	_check(not is_instance_valid(first_runtime), "same-seed restart frees the initial runtime immediately")
+	_check(repeated_runtime != first_runtime, "same-seed restart mounts a distinct runtime")
+	_check(_verify_single_runtime_mount(session, repeated_runtime, "same-seed restart"), "same-seed mount integrity verification completed")
 	var repeated_fingerprint: String = str(session.get_session_snapshot().get("offtrack_object_fingerprint", ""))
 	_check(repeated_fingerprint == first_fingerprint, "same-seed session restart repeats the object fingerprint")
 	session.restart_with_seed(1)
 	var second_runtime := session.get_node_or_null("World/TrackMount/GeneratedTrack") as TrackRuntime
 	_check(second_runtime != null, "seed restart mounts a replacement generated track runtime")
+	_check(not is_instance_valid(repeated_runtime), "different-seed restart frees the immediately preceding same-seed runtime")
+	_check(second_runtime != repeated_runtime, "different-seed restart mounts a distinct runtime")
+	_check(_verify_single_runtime_mount(session, second_runtime, "different-seed restart"), "different-seed mount integrity verification completed")
 	var second_snapshot: Dictionary = session.get_session_snapshot()
 	var second_fingerprint: String = str(second_snapshot.get("offtrack_object_fingerprint", ""))
-	_check(not is_instance_valid(first_runtime), "seed restart frees the previous runtime immediately")
-	_check(second_runtime != first_runtime, "seed restart mounts a new runtime")
 	_check(second_fingerprint.length() == 64 and second_fingerprint != first_fingerprint, "different seeds produce different object fingerprints")
 	if second_runtime != null:
 		var objects := second_runtime.get_node_or_null("OfftrackObjects")
@@ -80,6 +94,39 @@ func _verify_seed_restart(main_scene: PackedScene) -> bool:
 			_check(int(metrics.get("visuals", -1)) > 0, "replacement runtime has no stale empty visual batch")
 			_check(int(metrics.get("colliders", -1)) == _solid_count(second_runtime.definition.offtrack_objects), "replacement runtime has no stale collision bodies")
 	session.free()
+	return true
+
+
+func _verify_object_diagnostics(diagnostics: Dictionary, placements: Array[OfftrackObjectPlacement]) -> bool:
+	_check(not diagnostics.is_empty(), "object diagnostics are non-empty")
+	_check(int(diagnostics.get("total_cells", 0)) > 0, "object diagnostics report a non-empty placement domain")
+	var zones: Dictionary = diagnostics.get("zones", {})
+	var accepted_total := 0
+	for zone_name in ["near_shoulder", "hazard"]:
+		var zone: Dictionary = zones.get(zone_name, {})
+		for counter in ["valid_cells", "occupied_draws", "accepted", "road_or_recovery", "containment", "spawn_checkpoint", "solid_overlap"]:
+			_check(zone.has(counter) and int(zone.get(counter, -1)) >= 0, "%s diagnostics include non-negative %s" % [zone_name, counter])
+		accepted_total += int(zone.get("accepted", 0))
+	_check(accepted_total == placements.size(), "object diagnostic accepted counts equal generated placements")
+	return true
+
+
+func _verify_single_runtime_mount(session: MainSession, runtime: TrackRuntime, label: String) -> bool:
+	var mount := session.get_node_or_null("World/TrackMount")
+	_check(mount != null, "%s exposes the track mount" % label)
+	if mount == null or runtime == null:
+		return false
+	_check(mount.get_child_count() == 1, "%s track mount has exactly one child" % label)
+	var generated_count := 0
+	for child in mount.get_children():
+		if child.name == "GeneratedTrack":
+			generated_count += 1
+	_check(generated_count == 1 and mount.get_child(0) == runtime, "%s track mount has exactly one generated runtime" % label)
+	var object_count := 0
+	for child in runtime.get_children():
+		if child.name == "OfftrackObjects":
+			object_count += 1
+	_check(object_count == 1, "%s generated runtime has exactly one off-track coordinator" % label)
 	return true
 
 
