@@ -88,6 +88,8 @@ seeds 0-19. Mutation checks must fail (exit 1):
 ```sh
 /home/japurane/.local/bin/godot --headless --path . --script res://tests/offtrack_object_placement_test.gd -- --break-seed
 /home/japurane/.local/bin/godot --headless --path . --script res://tests/offtrack_object_placement_test.gd -- --break-clearance
+/home/japurane/.local/bin/godot --headless --path . --script res://tests/offtrack_object_collision_test.gd -- --remove-solid-collider
+/home/japurane/.local/bin/godot --headless --path . --script res://tests/offtrack_object_collision_test.gd -- --solid-decoration
 ```
 
 Refresh desktop graphical evidence in a graphical Godot session, then inspect each PNG:

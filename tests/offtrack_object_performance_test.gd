@@ -5,9 +5,11 @@ const RUNTIME_P95_BUDGET_USEC := 100_000
 
 var _failures: Array[String] = []
 var _checks := 0
+var _break_runtime_integrity := false
 
 
 func _initialize() -> void:
+	_break_runtime_integrity = OS.get_cmdline_user_args().has("--break-runtime-integrity")
 	call_deferred("_run")
 
 
@@ -25,12 +27,23 @@ func _verify_budgets(catalog: OfftrackObjectCatalog) -> bool:
 	for seed in range(20):
 		var definition: TrackDefinition = TrackGenerator.new().generate(seed)
 		placement_times.append(definition.offtrack_object_generation_usec)
+		var runtime_placements: Array[OfftrackObjectPlacement] = definition.offtrack_objects
+		if _break_runtime_integrity:
+			runtime_placements = []
 		var started := Time.get_ticks_usec()
-		var runtime := OfftrackObjectRuntime.new(definition.offtrack_objects, catalog)
+		var runtime := OfftrackObjectRuntime.new(runtime_placements, catalog)
 		root.add_child(runtime)
 		var construction_usec := Time.get_ticks_usec() - started
 		runtime_times.append(construction_usec)
 		var metrics := runtime.get_metrics()
+		var expected_solid_count := _solid_count(definition.offtrack_objects)
+		_check(not definition.offtrack_objects.is_empty(), "seed %d produces non-empty object placements for performance verification" % seed)
+		_check(int(metrics.get("visuals", -1)) == definition.offtrack_objects.size(), "seed %d runtime visual count matches generated placements" % seed)
+		_check(int(metrics.get("solid_visuals", -1)) == expected_solid_count, "seed %d runtime solid visual count matches generated solid placements" % seed)
+		_check(int(metrics.get("colliders", -1)) == expected_solid_count, "seed %d runtime collider count matches generated solid placements" % seed)
+		_check(int(metrics.get("colliders", -1)) == int(metrics.get("solid_visuals", -1)), "seed %d runtime collider count matches solid visual count" % seed)
+		_check(int(metrics.get("decorative_batches", -1)) > 0, "seed %d runtime produces decorative batches" % seed)
+		_check(int(metrics.get("collision_chunks", -1)) > 0, "seed %d runtime produces solid collision chunks" % seed)
 		print("offtrack_perf seed=%d placement_usec=%d runtime_usec=%d placements=%d batches=%d solid_visuals=%d colliders=%d collision_chunks=%d" % [
 			seed,
 			definition.offtrack_object_generation_usec,
@@ -50,6 +63,14 @@ func _verify_budgets(catalog: OfftrackObjectCatalog) -> bool:
 	_check(runtime_p95 <= RUNTIME_P95_BUDGET_USEC, "runtime p95 is <= 100 ms (got %.2f ms)" % (runtime_p95 / 1000.0))
 	print("offtrack_perf placement_p50_usec=%d placement_p95_usec=%d runtime_p50_usec=%d runtime_p95_usec=%d" % [placement_p50, placement_p95, runtime_p50, runtime_p95])
 	return true
+
+
+func _solid_count(placements: Array[OfftrackObjectPlacement]) -> int:
+	var count := 0
+	for placement in placements:
+		if placement != null and placement.solid:
+			count += 1
+	return count
 
 
 func _percentile(values: Array[int], ratio: float) -> int:
