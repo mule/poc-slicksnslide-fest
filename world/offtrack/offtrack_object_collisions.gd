@@ -1,7 +1,6 @@
 class_name OfftrackObjectCollisions
 extends Node2D
 
-var _collider_count := 0
 var _chunk_body_count := 0
 
 
@@ -39,11 +38,17 @@ func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCa
 		circle.radius = archetype.collision_radius * placement.scale_factor
 		shape.shape = circle
 		body.add_child(shape)
-		_collider_count += 1
 
 
 func collider_count() -> int:
-	return _collider_count
+	var count := 0
+	for body in get_children():
+		if not body is StaticBody2D:
+			continue
+		for shape in body.get_children():
+			if shape is CollisionShape2D and shape.shape != null:
+				count += 1
+	return count
 
 
 func chunk_body_count() -> int:
@@ -53,5 +58,4 @@ func chunk_body_count() -> int:
 func _clear_children() -> void:
 	for child in get_children():
 		child.free()
-	_collider_count = 0
 	_chunk_body_count = 0

@@ -2,9 +2,9 @@ extends SceneTree
 
 const VEHICLE_SCENE_PATH := "res://vehicle/top_down_car.tscn"
 const DEFAULT_TUNING_PATH := "res://data/default_vehicle_tuning.tres"
-const TREE_POSITION := Vector2(200.0, 0.0)
-const ROCK_POSITION := Vector2(400.0, 0.0)
-const TEST_TICKS_PER_SECOND := 60
+
+var _tree_position := Vector2(WorldScale.metres(16.0), 0.0)
+var _rock_position := Vector2(WorldScale.metres(32.0), 0.0)
 
 var _failures: Array[String] = []
 var _checks := 0
@@ -22,17 +22,19 @@ func _initialize() -> void:
 func _run() -> void:
 	var catalog := load("res://data/default_offtrack_object_catalog.tres") as OfftrackObjectCatalog
 	_check(catalog != null, "default off-track object catalog loads")
-	if catalog != null:
-		_check(await _verify_contract(catalog), "fixture collision verification ran to completion")
+	if catalog == null:
+		_finish()
+		return
+	_check(await _verify_contract(catalog), "fixture collision verification ran to completion")
 	_finish()
 
 
 func _fixture_placements() -> Array[OfftrackObjectPlacement]:
 	var placements: Array[OfftrackObjectPlacement] = []
-	placements.append(_placement("v1:0:0:0", &"grass", Vector2(50.0, 0.0), 0.15, 0.8, 1, false, &"none"))
-	placements.append(_placement("v1:0:0:1", &"debris", Vector2(75.0, 0.0), -0.35, 1.1, 2, false, &"none"))
-	placements.append(_placement("v1:0:0:2", &"tree", TREE_POSITION, 0.5, 0.9, 1, true, &"tree_circle"))
-	placements.append(_placement("v1:0:0:3", &"rock", ROCK_POSITION, -0.7, 1.2, 2, true, &"rock_circle"))
+	placements.append(_placement("v1:0:0:0", &"grass", Vector2(WorldScale.metres(4.0), 0.0), 0.15, 0.8, 1, false, &"none"))
+	placements.append(_placement("v1:0:0:1", &"debris", Vector2(WorldScale.metres(6.0), 0.0), -0.35, 1.1, 2, false, &"none"))
+	placements.append(_placement("v1:0:0:2", &"tree", _tree_position, 0.5, 0.9, 1, true, &"tree_circle"))
+	placements.append(_placement("v1:0:0:3", &"rock", _rock_position, -0.7, 1.2, 2, true, &"rock_circle"))
 	return placements
 
 
@@ -62,27 +64,24 @@ func _verify_contract(catalog: OfftrackObjectCatalog) -> bool:
 	_check(collisions.collider_count() == 2, "only tree and rock produce colliders")
 	_check(collisions.chunk_body_count() == 1, "nearby solid fixtures share one chunk body")
 	_check(_verify_shape_contract(collisions, placements, catalog), "solid shape transforms and radii match fixtures")
-	_check(await _verify_sweep(collisions, Vector2.ZERO, Vector2(300.0, 0.0), "tree"), "tree sweep verification completed")
-	_check(await _verify_sweep(collisions, Vector2(260.0, 0.0), Vector2(240.0, 0.0), "rock"), "rock sweep verification completed")
+	_check(await _verify_sweep(collisions, Vector2.ZERO, Vector2(WorldScale.metres(24.0), 0.0), "tree"), "tree sweep verification completed")
+	_check(await _verify_sweep(collisions, Vector2(WorldScale.metres(20.8), 0.0), Vector2(WorldScale.metres(19.2), 0.0), "rock"), "rock sweep verification completed")
 	_check(await _verify_car_impact(collisions), "real car impact verification completed")
 	collisions.queue_free()
 	return true
 
 
 func _verify_catalog_alignment(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog) -> bool:
-	var aligned := true
 	for placement in placements:
 		var archetype := catalog.archetype_by_id(placement.archetype_id)
 		var expected_solid := archetype != null and archetype.solid
 		var expected_profile := archetype.collision_profile if archetype != null else &""
 		_check(placement.solid == expected_solid, "%s solid flag matches its catalog archetype" % placement.stable_id)
 		_check(placement.collision_profile == expected_profile, "%s collision profile matches its catalog archetype" % placement.stable_id)
-		aligned = aligned and placement.solid == expected_solid and placement.collision_profile == expected_profile
-	return aligned
+	return true
 
 
 func _verify_shape_contract(collisions: OfftrackObjectCollisions, placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog) -> bool:
-	var valid := true
 	for placement in placements:
 		if not placement.solid:
 			continue
@@ -90,7 +89,6 @@ func _verify_shape_contract(collisions: OfftrackObjectCollisions, placements: Ar
 		var archetype := catalog.archetype_by_id(placement.archetype_id)
 		_check(shape != null, "%s has a fixture collision shape" % placement.stable_id)
 		if shape == null or archetype == null:
-			valid = false
 			continue
 		var circle := shape.shape as CircleShape2D
 		var expected_radius := archetype.collision_radius * placement.scale_factor
@@ -98,8 +96,7 @@ func _verify_shape_contract(collisions: OfftrackObjectCollisions, placements: Ar
 		_check(circle != null and is_equal_approx(circle.radius, expected_radius), "%s radius follows catalog radius and placement scale" % placement.stable_id)
 		_check(shape.position.is_equal_approx(placement.transform.origin), "%s shape copies placement origin" % placement.stable_id)
 		_check(is_equal_approx(shape.rotation, placement.transform.get_rotation()), "%s shape copies placement rotation" % placement.stable_id)
-		valid = valid and circle != null and is_equal_approx(circle.radius, expected_radius) and shape.position.is_equal_approx(placement.transform.origin) and is_equal_approx(shape.rotation, placement.transform.get_rotation())
-	return valid
+	return true
 
 
 func _remove_first_shape(collisions: OfftrackObjectCollisions) -> void:
@@ -123,20 +120,19 @@ func _verify_sweep(collisions: OfftrackObjectCollisions, start: Vector2, motion:
 	body.safe_margin = 0.05
 	var collision_shape := CollisionShape2D.new()
 	var circle := CircleShape2D.new()
-	circle.radius = 4.0
+	circle.radius = WorldScale.metres(0.32)
 	collision_shape.shape = circle
 	body.add_child(collision_shape)
 	root.add_child(body)
 	body.global_position = start
 	await physics_frame
 	var collision := body.move_and_collide(motion)
-	var target := TREE_POSITION if target_name == "tree" else ROCK_POSITION
+	var target := _tree_position if target_name == "tree" else _rock_position
 	_check(collision != null, "%s sweep returns a real collision" % target_name)
 	_check(body.global_position.x < target.x, "%s sweep stops before target center (%.2f < %.2f)" % [target_name, body.global_position.x, target.x])
-	var stopped_before_target := body.global_position.x < target.x
 	body.queue_free()
 	await process_frame
-	return collision != null and stopped_before_target
+	return true
 
 
 func _verify_car_impact(collisions: OfftrackObjectCollisions) -> bool:
@@ -145,7 +141,7 @@ func _verify_car_impact(collisions: OfftrackObjectCollisions) -> bool:
 	_check(vehicle_scene != null, "real CCD-enabled car scene loads")
 	_check(tuning != null, "default car tuning loads for impact")
 	if vehicle_scene == null or tuning == null:
-		return false
+		return true
 	var car := vehicle_scene.instantiate() as TopDownCar
 	car.global_position = Vector2.ZERO
 	car.linear_velocity = Vector2.RIGHT * tuning.max_safe_speed
@@ -157,11 +153,10 @@ func _verify_car_impact(collisions: OfftrackObjectCollisions) -> bool:
 			break
 	_check(car.get_collision_count() >= 1, "real car records an object collision")
 	_check(car.get_speed() <= tuning.max_safe_speed * 1.05, "car impact speed remains bounded (%.2f)" % car.get_speed())
-	_check(car.global_position.x < TREE_POSITION.x, "CCD car remains short of tree center (%.2f < %.2f)" % [car.global_position.x, TREE_POSITION.x])
-	var valid := car.get_collision_count() >= 1 and car.get_speed() <= tuning.max_safe_speed * 1.05 and car.global_position.x < TREE_POSITION.x
+	_check(car.global_position.x < _tree_position.x, "CCD car remains short of tree center (%.2f < %.2f)" % [car.global_position.x, _tree_position.x])
 	car.queue_free()
 	await process_frame
-	return valid
+	return true
 
 
 func _check(condition: bool, message: String) -> void:
