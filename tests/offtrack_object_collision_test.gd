@@ -1,0 +1,183 @@
+extends SceneTree
+
+const VEHICLE_SCENE_PATH := "res://vehicle/top_down_car.tscn"
+const DEFAULT_TUNING_PATH := "res://data/default_vehicle_tuning.tres"
+const TREE_POSITION := Vector2(200.0, 0.0)
+const ROCK_POSITION := Vector2(400.0, 0.0)
+const TEST_TICKS_PER_SECOND := 60
+
+var _failures: Array[String] = []
+var _checks := 0
+var _remove_solid_collider := false
+var _solid_decoration := false
+
+
+func _initialize() -> void:
+	var args := OS.get_cmdline_user_args()
+	_remove_solid_collider = args.has("--remove-solid-collider")
+	_solid_decoration = args.has("--solid-decoration")
+	call_deferred("_run")
+
+
+func _run() -> void:
+	var catalog := load("res://data/default_offtrack_object_catalog.tres") as OfftrackObjectCatalog
+	_check(catalog != null, "default off-track object catalog loads")
+	if catalog != null:
+		_check(await _verify_contract(catalog), "fixture collision verification ran to completion")
+	_finish()
+
+
+func _fixture_placements() -> Array[OfftrackObjectPlacement]:
+	var placements: Array[OfftrackObjectPlacement] = []
+	placements.append(_placement("v1:0:0:0", &"grass", Vector2(50.0, 0.0), 0.15, 0.8, 1, false, &"none"))
+	placements.append(_placement("v1:0:0:1", &"debris", Vector2(75.0, 0.0), -0.35, 1.1, 2, false, &"none"))
+	placements.append(_placement("v1:0:0:2", &"tree", TREE_POSITION, 0.5, 0.9, 1, true, &"tree_circle"))
+	placements.append(_placement("v1:0:0:3", &"rock", ROCK_POSITION, -0.7, 1.2, 2, true, &"rock_circle"))
+	return placements
+
+
+func _placement(stable_id: String, archetype_id: StringName, position: Vector2, rotation: float, scale_factor: float, variant: int, solid: bool, collision_profile: StringName) -> OfftrackObjectPlacement:
+	var placement := OfftrackObjectPlacement.new()
+	placement.stable_id = stable_id
+	placement.archetype_id = archetype_id
+	placement.transform = Transform2D(rotation, position)
+	placement.scale_factor = scale_factor
+	placement.visual_variant = variant
+	placement.solid = solid
+	placement.collision_profile = collision_profile
+	return placement
+
+
+func _verify_contract(catalog: OfftrackObjectCatalog) -> bool:
+	var placements := _fixture_placements()
+	if _solid_decoration:
+		placements[0].solid = true
+		placements[0].collision_profile = &"tree_circle"
+	var collisions := OfftrackObjectCollisions.new()
+	root.add_child(collisions)
+	collisions.build(placements, catalog)
+	if _remove_solid_collider:
+		_remove_first_shape(collisions)
+	_check(_verify_catalog_alignment(placements, catalog), "placement/catalog physics alignment completed")
+	_check(collisions.collider_count() == 2, "only tree and rock produce colliders")
+	_check(collisions.chunk_body_count() == 1, "nearby solid fixtures share one chunk body")
+	_check(_verify_shape_contract(collisions, placements, catalog), "solid shape transforms and radii match fixtures")
+	_check(await _verify_sweep(collisions, Vector2.ZERO, Vector2(300.0, 0.0), "tree"), "tree sweep verification completed")
+	_check(await _verify_sweep(collisions, Vector2(260.0, 0.0), Vector2(240.0, 0.0), "rock"), "rock sweep verification completed")
+	_check(await _verify_car_impact(collisions), "real car impact verification completed")
+	collisions.queue_free()
+	return true
+
+
+func _verify_catalog_alignment(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog) -> bool:
+	var aligned := true
+	for placement in placements:
+		var archetype := catalog.archetype_by_id(placement.archetype_id)
+		var expected_solid := archetype != null and archetype.solid
+		var expected_profile := archetype.collision_profile if archetype != null else &""
+		_check(placement.solid == expected_solid, "%s solid flag matches its catalog archetype" % placement.stable_id)
+		_check(placement.collision_profile == expected_profile, "%s collision profile matches its catalog archetype" % placement.stable_id)
+		aligned = aligned and placement.solid == expected_solid and placement.collision_profile == expected_profile
+	return aligned
+
+
+func _verify_shape_contract(collisions: OfftrackObjectCollisions, placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog) -> bool:
+	var valid := true
+	for placement in placements:
+		if not placement.solid:
+			continue
+		var shape := collisions.get_node_or_null("Chunk_0_0/%s" % placement.stable_id.replace(":", "_")) as CollisionShape2D
+		var archetype := catalog.archetype_by_id(placement.archetype_id)
+		_check(shape != null, "%s has a fixture collision shape" % placement.stable_id)
+		if shape == null or archetype == null:
+			valid = false
+			continue
+		var circle := shape.shape as CircleShape2D
+		var expected_radius := archetype.collision_radius * placement.scale_factor
+		_check(circle != null, "%s uses a circular collision shape" % placement.stable_id)
+		_check(circle != null and is_equal_approx(circle.radius, expected_radius), "%s radius follows catalog radius and placement scale" % placement.stable_id)
+		_check(shape.position.is_equal_approx(placement.transform.origin), "%s shape copies placement origin" % placement.stable_id)
+		_check(is_equal_approx(shape.rotation, placement.transform.get_rotation()), "%s shape copies placement rotation" % placement.stable_id)
+		valid = valid and circle != null and is_equal_approx(circle.radius, expected_radius) and shape.position.is_equal_approx(placement.transform.origin) and is_equal_approx(shape.rotation, placement.transform.get_rotation())
+	return valid
+
+
+func _remove_first_shape(collisions: OfftrackObjectCollisions) -> void:
+	for body in collisions.get_children():
+		if not body is StaticBody2D:
+			continue
+		if body.get_child_count() == 0:
+			continue
+		var shape := body.get_child(0) as CollisionShape2D
+		body.remove_child(shape)
+		shape.free()
+		return
+
+
+func _verify_sweep(collisions: OfftrackObjectCollisions, start: Vector2, motion: Vector2, target_name: String) -> bool:
+	var body := CharacterBody2D.new()
+	body.name = "SweepProbe_%s" % target_name
+	body.motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
+	body.collision_layer = 2
+	body.collision_mask = 1
+	body.safe_margin = 0.05
+	var collision_shape := CollisionShape2D.new()
+	var circle := CircleShape2D.new()
+	circle.radius = 4.0
+	collision_shape.shape = circle
+	body.add_child(collision_shape)
+	root.add_child(body)
+	body.global_position = start
+	await physics_frame
+	var collision := body.move_and_collide(motion)
+	var target := TREE_POSITION if target_name == "tree" else ROCK_POSITION
+	_check(collision != null, "%s sweep returns a real collision" % target_name)
+	_check(body.global_position.x < target.x, "%s sweep stops before target center (%.2f < %.2f)" % [target_name, body.global_position.x, target.x])
+	var stopped_before_target := body.global_position.x < target.x
+	body.queue_free()
+	await process_frame
+	return collision != null and stopped_before_target
+
+
+func _verify_car_impact(collisions: OfftrackObjectCollisions) -> bool:
+	var vehicle_scene := load(VEHICLE_SCENE_PATH) as PackedScene
+	var tuning := load(DEFAULT_TUNING_PATH) as VehicleTuning
+	_check(vehicle_scene != null, "real CCD-enabled car scene loads")
+	_check(tuning != null, "default car tuning loads for impact")
+	if vehicle_scene == null or tuning == null:
+		return false
+	var car := vehicle_scene.instantiate() as TopDownCar
+	car.global_position = Vector2.ZERO
+	car.linear_velocity = Vector2.RIGHT * tuning.max_safe_speed
+	root.add_child(car)
+	await physics_frame
+	for _tick in range(120):
+		await physics_frame
+		if car.get_collision_count() >= 1:
+			break
+	_check(car.get_collision_count() >= 1, "real car records an object collision")
+	_check(car.get_speed() <= tuning.max_safe_speed * 1.05, "car impact speed remains bounded (%.2f)" % car.get_speed())
+	_check(car.global_position.x < TREE_POSITION.x, "CCD car remains short of tree center (%.2f < %.2f)" % [car.global_position.x, TREE_POSITION.x])
+	var valid := car.get_collision_count() >= 1 and car.get_speed() <= tuning.max_safe_speed * 1.05 and car.global_position.x < TREE_POSITION.x
+	car.queue_free()
+	await process_frame
+	return valid
+
+
+func _check(condition: bool, message: String) -> void:
+	_checks += 1
+	if condition:
+		print("PASS: %s" % message)
+	else:
+		_failures.append(message)
+		print("FAIL: %s" % message)
+
+
+func _finish() -> void:
+	print("offtrack_collision checks=%d failures=%d mutation_remove=%s mutation_decoration=%s" % [_checks, _failures.size(), str(_remove_solid_collider), str(_solid_decoration)])
+	if _failures.is_empty():
+		quit(0)
+		return
+	for failure in _failures:
+		push_error("Off-track collision check failed: %s" % failure)
+	quit(1)
