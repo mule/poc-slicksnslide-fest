@@ -14,6 +14,10 @@ func _run() -> void:
 	var main_scene := load(MAIN_SCENE_PATH) as PackedScene
 	_check(main_scene != null, "main session scene loads for off-track seed restart coverage")
 	_check(_verify_generated_runtime(), "generated off-track runtime verification completed")
+	var catalog := load("res://data/default_offtrack_object_catalog.tres") as OfftrackObjectCatalog
+	_check(catalog != null, "default catalog loads for invalid-placement coverage")
+	if catalog != null:
+		_check(_verify_invalid_placement_atomicity(catalog), "invalid-placement atomicity verification completed")
 	if main_scene != null:
 		_check(await _verify_seed_restart(main_scene), "seed restart off-track runtime verification completed")
 	_finish()
@@ -67,6 +71,7 @@ func _verify_seed_restart(main_scene: PackedScene) -> bool:
 	var first_runtime := session.get_node_or_null("World/TrackMount/GeneratedTrack") as TrackRuntime
 	_check(first_runtime != null, "session mounts the initial generated track runtime")
 	_check(_verify_single_runtime_mount(session, first_runtime, "initial seed"), "initial seed mount integrity verification completed")
+	_check(await _verify_shared_draw_order(session, first_runtime), "car and solid draw-order verification completed")
 	var first_snapshot: Dictionary = session.get_session_snapshot()
 	var first_fingerprint: String = str(first_snapshot.get("offtrack_object_fingerprint", ""))
 	_check(first_fingerprint.length() == 64, "session snapshot exposes the initial object fingerprint")
@@ -157,11 +162,131 @@ func _verify_solid_transforms(objects: Node, placements: Array[OfftrackObjectPla
 			return false
 		_check(visual.position.is_equal_approx(placement.transform.origin), "%s visual position copies placement origin" % placement.stable_id)
 		_check(is_equal_approx(visual.rotation, placement.transform.get_rotation()), "%s visual rotation copies placement rotation" % placement.stable_id)
-		_check(collider.position.is_equal_approx(placement.transform.origin), "%s collider position copies placement origin" % placement.stable_id)
+		var body := collider.get_parent() as StaticBody2D
+		_check(body != null, "%s collider belongs to a chunk body" % placement.stable_id)
+		if body == null:
+			return false
+		_check(collider.position.is_equal_approx(placement.transform.origin - body.position), "%s collider stores a chunk-local position" % placement.stable_id)
+		_check(collider.global_position.is_equal_approx(placement.transform.origin), "%s collider global position copies placement origin" % placement.stable_id)
 		_check(is_equal_approx(collider.rotation, placement.transform.get_rotation()), "%s collider rotation copies placement rotation" % placement.stable_id)
 		var circle := collider.shape as CircleShape2D
 		_check(circle != null and is_equal_approx(circle.radius, archetype.collision_radius * placement.scale_factor), "%s collider radius follows catalog and scale" % placement.stable_id)
 	return true
+
+
+func _verify_invalid_placement_atomicity(catalog: OfftrackObjectCatalog) -> bool:
+	var contract_probe := OfftrackObjectRuntime.new([], catalog)
+	var has_validation_contract := contract_probe.has_method("validation_errors")
+	_check(has_validation_contract, "off-track runtime exposes centralized validation errors")
+	contract_probe.free()
+	if not has_validation_contract:
+		return false
+
+	var valid_grass := _placement("valid:grass", &"grass", Vector2(WorldScale.metres(4.0), WorldScale.metres(4.0)), 0.1, 1.0, false, &"none")
+	var valid_tree := _placement("valid:tree", &"tree", Vector2(WorldScale.metres(96.0), WorldScale.metres(8.0)), -0.2, 1.0, true, &"tree_circle")
+	var placements: Array[OfftrackObjectPlacement] = [valid_grass, valid_tree, null]
+	placements.append(_placement("invalid:unknown", &"unknown", Vector2.ZERO, 0.0, 1.0, true, &"tree_circle"))
+	placements.append(_placement("invalid:position", &"tree", Vector2(NAN, 0.0), 0.0, 1.0, true, &"tree_circle"))
+	placements.append(_placement("invalid:rotation", &"tree", Vector2.ZERO, NAN, 1.0, true, &"tree_circle"))
+	placements.append(_placement("invalid:scale_nan", &"tree", Vector2.ZERO, 0.0, NAN, true, &"tree_circle"))
+	placements.append(_placement("invalid:scale_zero", &"tree", Vector2.ZERO, 0.0, 0.0, true, &"tree_circle"))
+	placements.append(_placement("invalid:scale_negative", &"tree", Vector2.ZERO, 0.0, -1.0, true, &"tree_circle"))
+
+	var objects := OfftrackObjectRuntime.new(placements, catalog)
+	root.add_child(objects)
+	var metrics := objects.get_metrics()
+	var errors: Array[String] = objects.validation_errors()
+	_check(int(metrics.get("visuals", -1)) == 2, "only valid records create visuals")
+	_check(int(metrics.get("solid_visuals", -1)) == 1, "only the valid solid creates a solid visual")
+	_check(int(metrics.get("colliders", -1)) == 1, "only the valid solid creates a collider")
+	_check(int(metrics.get("invalid_placements", -1)) == 7, "every invalid class is reported")
+	_check(errors.size() == 7, "central validation reports one error per invalid record")
+	for invalid_id in ["invalid:unknown", "invalid:position", "invalid:rotation", "invalid:scale_nan", "invalid:scale_zero", "invalid:scale_negative"]:
+		_check(_messages_contain(errors, invalid_id), "%s is identified in validation errors" % invalid_id)
+		_check(_find_node_named(objects, invalid_id.replace(":", "_")) == null, "%s creates no partial visual or collider" % invalid_id)
+	_check(_messages_contain(errors, "placement[2]"), "the null record is identified by placement index")
+	_check(_find_node_named(objects, "valid_tree") != null, "valid records still build beside rejected records")
+	objects.free()
+	return true
+
+
+func _verify_shared_draw_order(session: MainSession, runtime: TrackRuntime) -> bool:
+	var car := session.get_node_or_null("World/VehicleMount/PlayerCar") as TopDownCar
+	var solid_placement: OfftrackObjectPlacement
+	for placement in runtime.definition.offtrack_objects:
+		if placement != null and placement.solid:
+			solid_placement = placement
+			break
+	_check(car != null and solid_placement != null, "draw-order fixture has the real car and a generated solid")
+	if car == null or solid_placement == null:
+		return false
+	var solid_name := solid_placement.stable_id.replace(":", "_")
+	var solid := runtime.get_node_or_null("OfftrackObjects/Visuals/SolidObjects/%s" % solid_name) as Node2D
+	var world := session.get_node_or_null("World") as Node2D
+	_check(solid != null and world != null, "draw-order fixture resolves the solid and shared world root")
+	if solid == null or world == null:
+		return false
+	_check(_verify_y_sort_path(car, world, "car"), "car participates in the shared Y-sort hierarchy")
+	_check(_verify_y_sort_path(solid, world, "solid"), "solid participates in the shared Y-sort hierarchy")
+	_check(_effective_z_index(car, world) == _effective_z_index(solid, world), "car and solid share the same effective Z layer")
+	car.freeze = true
+	car.global_position = solid.global_position - Vector2(0.0, WorldScale.metres(1.0))
+	await process_frame
+	_check(car.global_position.y < solid.global_position.y, "car above the solid sorts behind it")
+	car.global_position = solid.global_position + Vector2(0.0, WorldScale.metres(1.0))
+	await process_frame
+	_check(car.global_position.y > solid.global_position.y, "car below the solid sorts in front of it")
+	car.freeze = false
+	return true
+
+
+func _verify_y_sort_path(item: CanvasItem, common_parent: Node2D, label: String) -> bool:
+	var current := item.get_parent()
+	while current != null:
+		if current is Node2D:
+			_check(current.y_sort_enabled, "%s Y-sort ancestor %s is enabled" % [label, current.name])
+		if current == common_parent:
+			return true
+		current = current.get_parent()
+	return false
+
+
+func _effective_z_index(item: CanvasItem, common_parent: Node2D) -> int:
+	var effective := item.z_index
+	var current := item.get_parent()
+	while current != null and current != common_parent:
+		if current is CanvasItem and item.z_as_relative:
+			effective += current.z_index
+		current = current.get_parent()
+	return effective
+
+
+func _placement(stable_id: String, archetype_id: StringName, position: Vector2, rotation: float, scale_factor: float, solid: bool, collision_profile: StringName) -> OfftrackObjectPlacement:
+	var placement := OfftrackObjectPlacement.new()
+	placement.stable_id = stable_id
+	placement.archetype_id = archetype_id
+	placement.transform = Transform2D(rotation, position)
+	placement.scale_factor = scale_factor
+	placement.solid = solid
+	placement.collision_profile = collision_profile
+	return placement
+
+
+func _messages_contain(messages: Array[String], needle: String) -> bool:
+	for message in messages:
+		if message.contains(needle):
+			return true
+	return false
+
+
+func _find_node_named(node: Node, node_name: String) -> Node:
+	for child in node.get_children():
+		if child.name == node_name:
+			return child
+		var found := _find_node_named(child, node_name)
+		if found != null:
+			return found
+	return null
 
 
 func _find_collision_shape(node: Node, stable_name: String) -> CollisionShape2D:

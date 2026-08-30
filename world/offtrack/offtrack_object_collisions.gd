@@ -25,6 +25,7 @@ func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCa
 		if body == null:
 			body = StaticBody2D.new()
 			body.name = "Chunk_%d_%d" % [chunk.x, chunk.y]
+			body.position = Vector2(chunk) * catalog.chunk_size
 			body.collision_layer = 1
 			body.collision_mask = 0
 			add_child(body)
@@ -32,7 +33,7 @@ func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCa
 			_chunk_body_count += 1
 		var shape := CollisionShape2D.new()
 		shape.name = placement.stable_id.replace(":", "_")
-		shape.position = placement.transform.origin
+		shape.position = placement.transform.origin - body.position
 		shape.rotation = placement.transform.get_rotation()
 		var circle := CircleShape2D.new()
 		circle.radius = archetype.collision_radius * placement.scale_factor

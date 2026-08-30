@@ -6,6 +6,10 @@ var _decorative_batch_count := 0
 var _solid_visual_count := 0
 
 
+func _init() -> void:
+	y_sort_enabled = true
+
+
 func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog) -> void:
 	_clear_children()
 	var decorative := Node2D.new()
@@ -68,9 +72,11 @@ func _add_batch(parent: Node2D, key: String, group: Array[OfftrackObjectPlacemen
 		var instance_transform := placement.transform.scaled_local(Vector2.ONE * placement.scale_factor)
 		multimesh.set_instance_transform_2d(index, instance_transform)
 	var chunk := Vector2i(floori(first.transform.origin.x / catalog.chunk_size), floori(first.transform.origin.y / catalog.chunk_size))
+	var chunk_origin := Vector2(chunk) * catalog.chunk_size
+	var mesh_extent := _maximum_scaled_mesh_extent(mesh, group)
 	multimesh.custom_aabb = AABB(
-		Vector3(chunk.x * catalog.chunk_size, chunk.y * catalog.chunk_size, -1.0),
-		Vector3(catalog.chunk_size, catalog.chunk_size, 2.0)
+		Vector3(chunk_origin.x - mesh_extent, chunk_origin.y - mesh_extent, WorldScale.metres(-0.08)),
+		Vector3(catalog.chunk_size + mesh_extent * 2.0, catalog.chunk_size + mesh_extent * 2.0, WorldScale.metres(0.16))
 	)
 	var instance := MultiMeshInstance2D.new()
 	instance.name = key
@@ -79,6 +85,18 @@ func _add_batch(parent: Node2D, key: String, group: Array[OfftrackObjectPlacemen
 	parent.add_child(instance)
 	_decorative_batch_count += 1
 	_visual_count += group.size()
+
+
+func _maximum_scaled_mesh_extent(mesh: ArrayMesh, group: Array[OfftrackObjectPlacement]) -> float:
+	var mesh_bounds := mesh.get_aabb()
+	var prototype_extent := maxf(
+		maxf(absf(mesh_bounds.position.x), absf(mesh_bounds.end.x)),
+		maxf(absf(mesh_bounds.position.y), absf(mesh_bounds.end.y)),
+	)
+	var maximum_scale := 0.0
+	for placement in group:
+		maximum_scale = maxf(maximum_scale, placement.scale_factor)
+	return prototype_extent * maximum_scale
 
 
 func _build_solids(placements: Array[OfftrackObjectPlacement], _catalog: OfftrackObjectCatalog, parent: Node2D) -> void:

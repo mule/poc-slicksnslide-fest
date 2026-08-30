@@ -23,6 +23,7 @@ var _next_checkpoint := 0
 
 
 func _init(initial_definition = null) -> void:
+	y_sort_enabled = true
 	definition = initial_definition
 
 
@@ -85,7 +86,7 @@ func _build_checkpoint_markers() -> void:
 			checkpoint.origin + lateral * half_width,
 		])
 		line.antialiased = true
-		line.z_index = 0
+		line.z_index = -1
 		add_child(line)
 		_checkpoint_markers.append(line)
 	set_next_checkpoint(_next_checkpoint)

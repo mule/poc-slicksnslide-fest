@@ -64,6 +64,7 @@ func _verify_contract(catalog: OfftrackObjectCatalog) -> bool:
 	_check(collisions.collider_count() == 2, "only tree and rock produce colliders")
 	_check(collisions.chunk_body_count() == 1, "nearby solid fixtures share one chunk body")
 	_check(_verify_shape_contract(collisions, placements, catalog), "solid shape transforms and radii match fixtures")
+	_check(_verify_chunk_local_alignment(catalog), "non-zero chunk alignment verification completed")
 	_check(await _verify_sweep(collisions, Vector2.ZERO, Vector2(WorldScale.metres(24.0), 0.0), "tree"), "tree sweep verification completed")
 	_check(await _verify_sweep(collisions, Vector2(WorldScale.metres(20.8), 0.0), Vector2(WorldScale.metres(19.2), 0.0), "rock"), "rock sweep verification completed")
 	_check(await _verify_car_impact(collisions), "real car impact verification completed")
@@ -85,18 +86,50 @@ func _verify_shape_contract(collisions: OfftrackObjectCollisions, placements: Ar
 	for placement in placements:
 		if not placement.solid:
 			continue
-		var shape := collisions.get_node_or_null("Chunk_0_0/%s" % placement.stable_id.replace(":", "_")) as CollisionShape2D
+		var shape := _find_collision_shape(collisions, placement.stable_id.replace(":", "_"))
+		var body := shape.get_parent() as StaticBody2D if shape != null else null
 		var archetype := catalog.archetype_by_id(placement.archetype_id)
+		var chunk := Vector2i(
+			floori(placement.transform.origin.x / catalog.chunk_size),
+			floori(placement.transform.origin.y / catalog.chunk_size)
+		)
+		var expected_chunk_origin := Vector2(chunk) * catalog.chunk_size
+		_check(body != null, "%s belongs to its chunk body" % placement.stable_id)
 		_check(shape != null, "%s has a fixture collision shape" % placement.stable_id)
-		if shape == null or archetype == null:
+		if body == null or shape == null or archetype == null:
 			continue
 		var circle := shape.shape as CircleShape2D
 		var expected_radius := archetype.collision_radius * placement.scale_factor
 		_check(circle != null, "%s uses a circular collision shape" % placement.stable_id)
 		_check(circle != null and is_equal_approx(circle.radius, expected_radius), "%s radius follows catalog radius and placement scale" % placement.stable_id)
-		_check(shape.position.is_equal_approx(placement.transform.origin), "%s shape copies placement origin" % placement.stable_id)
+		_check(body.position.is_equal_approx(expected_chunk_origin), "%s chunk body is positioned at its chunk origin" % placement.stable_id)
+		_check(shape.position.is_equal_approx(placement.transform.origin - expected_chunk_origin), "%s shape stores a chunk-local origin" % placement.stable_id)
+		_check(shape.global_position.is_equal_approx(placement.transform.origin), "%s shape global position preserves the placement origin" % placement.stable_id)
 		_check(is_equal_approx(shape.rotation, placement.transform.get_rotation()), "%s shape copies placement rotation" % placement.stable_id)
 	return true
+
+
+func _verify_chunk_local_alignment(catalog: OfftrackObjectCatalog) -> bool:
+	var placements: Array[OfftrackObjectPlacement] = []
+	placements.append(_placement("chunk:tree", &"tree", Vector2(WorldScale.metres(96.0), 0.0), 0.5, 0.9, 1, true, &"tree_circle"))
+	placements.append(_placement("chunk:rock", &"rock", Vector2(WorldScale.metres(112.0), 0.0), -0.7, 1.2, 2, true, &"rock_circle"))
+	var collisions := OfftrackObjectCollisions.new()
+	root.add_child(collisions)
+	collisions.build(placements, catalog)
+	_check(collisions.chunk_body_count() == 1, "non-zero fixtures share one chunk body")
+	_check(_verify_shape_contract(collisions, placements, catalog), "non-zero fixture shapes preserve local/global alignment")
+	collisions.free()
+	return true
+
+
+func _find_collision_shape(node: Node, stable_name: String) -> CollisionShape2D:
+	for child in node.get_children():
+		if child is CollisionShape2D and child.name == stable_name:
+			return child
+		var found := _find_collision_shape(child, stable_name)
+		if found != null:
+			return found
+	return null
 
 
 func _remove_first_shape(collisions: OfftrackObjectCollisions) -> void:
