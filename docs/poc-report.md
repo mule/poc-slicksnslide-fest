@@ -102,6 +102,8 @@ Android evidence report as historical evidence, not replacement proof.
 
 ## Known limitations and open defects
 
+- **Epic #1: OPEN.** The parent epic cannot close while either independent
+  physical-platform gate below remains incomplete.
 - Issue #23 is open: an SM-X710 with an external controller must install and
   drive the exact Android APK above across at least three seeds for ten minutes,
   then record performance/memory, current captures, lifecycle, collisions, and
