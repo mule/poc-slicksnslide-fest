@@ -6,6 +6,38 @@ This report records the Android evidence collected from the issue #6 feature
 branch. It deliberately separates verified results from the controller-only
 criteria that could not be exercised without an external gamepad.
 
+## Task 7 current-revision reconciliation
+
+Validation date: 2026-08-30 (Europe/Helsinki)
+
+The physical-platform target is pinned to
+`0e0b90305dfe3510dd644e57f6be12eac452d915`. At the pin, `git status
+--short --branch` had no tracked modifications; only generated, ignored build
+artifacts and untracked Godot/graph sidecars were present. The only change
+between the desktop runtime revision
+`412db6a1d3b285ba9cf7acb147bda7b5052058ab` and this pin is the desktop
+evidence document, so this pin contains the measured runtime tree.
+
+A reproducible local export from the pinned revision completed with Godot
+`4.7.1.stable.official.a13da4feb`:
+
+| Field | Local build result (not physical validation) |
+| --- | --- |
+| APK | `builds/android/slicksnslide-fest-debug.apk` |
+| Size | 28,527,062 bytes |
+| SHA-256 | `0e98e78fe17ea4ff7bee4cacfcdc8a14c169bdb127d57ad8ee6b32a56a804819` |
+| Package / version | `com.mule.slicksnslidefest` / `0.1.0-poc` (code `1`) |
+| SDK / ABI | min `24`, target/compile `36`, `arm64-v8a` |
+| Signature check | `apksigner verify --verbose`: v2 and v3 verified |
+
+`adb devices -l` reported no attached device or emulator, and `/proc/bus/input/devices`
+and USB discovery reported no external game controller. No APK was installed or launched.
+Accordingly, the historical device observations below are retained as historical issue #6
+evidence only; they do not satisfy issue #23 for this object-enabled revision. The required
+SM-X710 plus external-controller run, updated captures, three-seed/ten-minute observations,
+tree and rock collisions, recovery-corridor usability, and lifecycle evidence remain open.
+See the cross-platform [PoC report](../../poc-report.md) for the reconciled decision.
+
 ## Build artifact
 
 | Field | Verified value |

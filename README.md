@@ -64,6 +64,8 @@ These checks keep placement deterministic and separate from road geometry, requi
 solid runtime consumers to agree on every placement, and exercise the real seed-restart path.
 The independent performance test enforces one-time placement p95 <= 80 ms and runtime construction
 p95 <= 100 ms on the documented desktop reference machine; see [desktop validation evidence](docs/evidence/offtrack-objects/desktop-validation.md).
+The [cross-platform PoC report](docs/poc-report.md) records the current revision and keeps the
+desktop result conditional until Android #23 and Steam Deck #7 each complete their physical gates.
 
 Refresh and inspect the deterministic 1280x720 off-track object captures for seeds 0, 4, and 9 in a graphical session:
 
@@ -137,3 +139,6 @@ The session owns `TrackMount` and `VehicleMount` integration points. Track and v
 - `Linux x86_64`, producing `builds/linux/slicksnslide-fest.x86_64` once issue #7 validates the Steam Deck package.
 
 No SDK paths, signing material, generated binaries, or local credentials belong in the repository. Android and Steam Deck completion still require their issue-specific physical-hardware evidence.
+The [cross-platform PoC report](docs/poc-report.md) is the authoritative reconciliation of those
+independent gates; a successful local export does not replace device installation, controller, or
+Gaming Mode evidence.
