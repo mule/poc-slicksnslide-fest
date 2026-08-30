@@ -2,9 +2,10 @@
 
 ## Revision and environment
 
-- **Tested content revision:** `12a9198519aaa8cee0d7c1e7089f962b303a6456`
-  (`docs: validate off-track objects on desktop`). This commit contains the catalog, integrated
-  runtime, measurement script, capture script, documentation, and captured PNGs used below.
+- **Tested content revision:** `412db6a1d3b285ba9cf7acb147bda7b5052058ab`
+  (`test: prevent vacuous off-track performance passes`). This commit contains the strengthened
+  measurement script, catalog/integrated runtime, capture script, documentation, and captured PNGs
+  used below.
 - **Evidence-record method:** this document is committed immediately after that content revision so
   it can cite an immutable SHA without claiming that a yet-to-be-created commit was measured. It
   changes documentation only; the product/runtime tree tested here is the revision above.
@@ -20,33 +21,33 @@ Timing measures the already-recorded one-time placement generation and separate
 
 | Seed | Placement | Runtime | Placements | Decorative batches | Solid visuals | Colliders | Collision chunks |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 0 | 52648 | 11326 | 530 | 263 | 174 | 174 | 96 |
-| 1 | 65930 | 14352 | 698 | 340 | 248 | 248 | 128 |
-| 2 | 49983 | 10950 | 510 | 240 | 193 | 193 | 96 |
-| 3 | 66316 | 13375 | 647 | 287 | 267 | 267 | 122 |
-| 4 | 70760 | 15605 | 672 | 335 | 231 | 231 | 115 |
-| 5 | 65284 | 14640 | 684 | 324 | 246 | 246 | 120 |
-| 6 | 56122 | 12180 | 595 | 271 | 239 | 239 | 108 |
-| 7 | 61597 | 12808 | 630 | 310 | 219 | 219 | 117 |
-| 8 | 50977 | 10937 | 507 | 236 | 196 | 196 | 98 |
-| 9 | 78050 | 15002 | 690 | 330 | 264 | 264 | 121 |
-| 10 | 70785 | 14380 | 713 | 336 | 265 | 265 | 118 |
-| 11 | 52620 | 12288 | 539 | 269 | 198 | 198 | 88 |
-| 12 | 63970 | 13272 | 642 | 315 | 235 | 235 | 117 |
-| 13 | 68704 | 15387 | 722 | 317 | 286 | 286 | 134 |
-| 14 | 55681 | 11770 | 584 | 280 | 224 | 224 | 102 |
-| 15 | 55924 | 11242 | 622 | 310 | 212 | 212 | 105 |
-| 16 | 59153 | 12241 | 608 | 295 | 202 | 202 | 101 |
-| 17 | 44582 | 11207 | 626 | 306 | 225 | 225 | 106 |
-| 18 | 51871 | 11219 | 522 | 254 | 192 | 192 | 99 |
-| 19 | 55210 | 11979 | 686 | 338 | 224 | 224 | 116 |
+| 0 | 52015 | 11000 | 530 | 263 | 174 | 174 | 96 |
+| 1 | 66320 | 15114 | 698 | 340 | 248 | 248 | 128 |
+| 2 | 45277 | 10832 | 510 | 240 | 193 | 193 | 96 |
+| 3 | 62765 | 13308 | 647 | 287 | 267 | 267 | 122 |
+| 4 | 69439 | 12133 | 672 | 335 | 231 | 231 | 115 |
+| 5 | 61238 | 11596 | 684 | 324 | 246 | 246 | 120 |
+| 6 | 45769 | 10570 | 595 | 271 | 239 | 239 | 108 |
+| 7 | 54100 | 10371 | 630 | 310 | 219 | 219 | 117 |
+| 8 | 45193 | 8887 | 507 | 236 | 196 | 196 | 98 |
+| 9 | 67803 | 15236 | 690 | 330 | 264 | 264 | 121 |
+| 10 | 67528 | 13993 | 713 | 336 | 265 | 265 | 118 |
+| 11 | 50525 | 11099 | 539 | 269 | 198 | 198 | 88 |
+| 12 | 61061 | 10760 | 642 | 315 | 235 | 235 | 117 |
+| 13 | 59362 | 12636 | 722 | 317 | 286 | 286 | 134 |
+| 14 | 49278 | 10404 | 584 | 280 | 224 | 224 | 102 |
+| 15 | 57277 | 17538 | 622 | 310 | 212 | 212 | 105 |
+| 16 | 53816 | 15861 | 608 | 295 | 202 | 202 | 101 |
+| 17 | 42804 | 10929 | 626 | 306 | 225 | 225 | 106 |
+| 18 | 42574 | 9163 | 522 | 254 | 192 | 192 | 99 |
+| 19 | 50380 | 11479 | 686 | 338 | 224 | 224 | 116 |
 
 | Statistic | Placement generation | Runtime construction |
 | --- | ---: | ---: |
-| p50 | 56122 us (56.122 ms) | 12241 us (12.241 ms) |
-| p95 | 70785 us (70.785 ms) | 15387 us (15.387 ms) |
+| p50 | 53816 us (53.816 ms) | 11099 us (11.099 ms) |
+| p95 | 67803 us (67.803 ms) | 15861 us (15.861 ms) |
 | Budget | 80000 us (80 ms) | 100000 us (100 ms) |
-| Result | PASS, 9.215 ms headroom | PASS, 84.613 ms headroom |
+| Result | PASS, 12.197 ms headroom | PASS, 84.139 ms headroom |
 
 | Count statistic | Placements | Decorative batches | Solid visuals | Colliders | Collision chunks |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -54,7 +55,8 @@ Timing measures the already-recorded one-time placement generation and separate
 | Median | 628 | 308 | 224.5 | 224.5 | 111.5 |
 | Max | 722 | 340 | 286 | 286 | 134 |
 
-No catalog tuning was attempted: both approved budgets passed on the first measurement. In
+No catalog tuning was attempted: both approved budgets passed on the initial and strengthened
+measurements. In
 particular, the 20 m solid clearance, 40 m spawn/checkpoint exclusion, containment buffer, and
 runtime construction budget were not weakened.
 
@@ -86,6 +88,12 @@ runtime/restart. The four mutation modes all exited 1 as intended: `--break-seed
 `--break-clearance`, `--remove-solid-collider`, and `--solid-decoration`. Every CI-relevant Godot
 suite passed twice, including the 17,918-physics-tick containment sweep for seeds 0, 4, and 9 and
 the Issue 4 vehicle maneuvers. `git diff --check` was clean before commit.
+
+The strengthened performance test records 144 checks: every seed must produce non-empty placements,
+matching total and solid visual counts, matching collider count, decorative batches, and collision
+chunks before its timing is accepted. Its `--break-runtime-integrity` probe intentionally constructs
+an empty runtime from otherwise non-empty generated placements; it exited 1 with 100 failed
+integrity assertions, proving that an empty/incomplete runtime can no longer pass the budget path.
 
 **Result: desktop code-complete.** This is not physical-platform acceptance. Android #23 and Steam
 Deck #7 still require their own current-revision build, controller, frame-time, collision, recovery,
