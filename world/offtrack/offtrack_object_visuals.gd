@@ -88,11 +88,12 @@ func _add_batch(parent: Node2D, key: String, group: Array[OfftrackObjectPlacemen
 
 
 func _maximum_scaled_mesh_extent(mesh: ArrayMesh, group: Array[OfftrackObjectPlacement]) -> float:
-	var mesh_bounds := mesh.get_aabb()
-	var prototype_extent := maxf(
-		maxf(absf(mesh_bounds.position.x), absf(mesh_bounds.end.x)),
-		maxf(absf(mesh_bounds.position.y), absf(mesh_bounds.end.y)),
-	)
+	var prototype_extent := 0.0
+	for surface_index in range(mesh.get_surface_count()):
+		var arrays := mesh.surface_get_arrays(surface_index)
+		var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+		for vertex in vertices:
+			prototype_extent = maxf(prototype_extent, Vector2(vertex.x, vertex.y).length())
 	var maximum_scale := 0.0
 	for placement in group:
 		maximum_scale = maxf(maximum_scale, placement.scale_factor)

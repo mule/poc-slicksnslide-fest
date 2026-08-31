@@ -23,6 +23,15 @@ func _fixture_placements() -> Array[OfftrackObjectPlacement]:
 	placements.append(_placement("v1:0:4:0", &"tree", Vector2(1200.0, 100.0), 0.5, 0.9, 1, true))
 	placements.append(_placement("v1:0:5:0", &"rock", Vector2(1300.0, 100.0), -0.7, 1.2, 2, true))
 	placements.append(_placement("v1:0:1:2", &"grass", Vector2(WorldScale.metres(79.92), WorldScale.metres(79.92)), -0.1, 1.3, 1, false))
+	placements.append(_placement(
+		"v1:0:1:3",
+		&"debris",
+		Vector2(WorldScale.metres(79.992), WorldScale.metres(20.0)),
+		atan2(0.16, 0.56),
+		1.2,
+		2,
+		false,
+	))
 	return placements
 
 
@@ -43,12 +52,12 @@ func _verify_visuals(catalog: OfftrackObjectCatalog) -> bool:
 	var visuals := OfftrackObjectVisuals.new()
 	root.add_child(visuals)
 	visuals.build(placements, catalog)
-	_check(visuals.visual_count() == 5, "every fixture placement has a visual")
+	_check(visuals.visual_count() == 6, "every fixture placement has a visual")
 	_check(visuals.solid_visual_count() == 2, "tree and rock use solid visual nodes")
 	_check(visuals.decorative_batch_count() == 2, "grass and debris create separate archetype batches")
 	_check(visuals.get_node_or_null("SolidObjects/v1_0_4_0") != null, "tree stable ID names its visual node")
 	_check(visuals.get_node_or_null("SolidObjects/v1_0_5_0") != null, "rock stable ID names its visual node")
-	_check(_verify_decorative_batch_bounds(visuals, catalog), "decorative batch bounds verification completed")
+	_check(_verify_decorative_batch_bounds(visuals, catalog, placements[5]), "decorative batch bounds verification completed")
 	_check(_verify_solid_transform(visuals, placements[2]), "tree transform verification completed")
 	visuals.queue_free()
 	return true
@@ -88,9 +97,10 @@ func _verify_prototype_dimensions() -> bool:
 	return true
 
 
-func _verify_decorative_batch_bounds(visuals: OfftrackObjectVisuals, catalog: OfftrackObjectCatalog) -> bool:
+func _verify_decorative_batch_bounds(visuals: OfftrackObjectVisuals, catalog: OfftrackObjectCatalog, rotated_debris: OfftrackObjectPlacement) -> bool:
 	var batches := visuals.get_node_or_null("DecorativeBatches")
 	var grass: MultiMeshInstance2D
+	var debris: MultiMeshInstance2D
 	if batches != null:
 		for child in batches.get_children():
 			if not child is MultiMeshInstance2D or child.multimesh == null or child.multimesh.mesh == null:
@@ -98,22 +108,38 @@ func _verify_decorative_batch_bounds(visuals: OfftrackObjectVisuals, catalog: Of
 			var vertices: PackedVector3Array = child.multimesh.mesh.surface_get_arrays(0)[Mesh.ARRAY_VERTEX]
 			if not vertices.is_empty() and vertices[0].is_equal_approx(Vector3(WorldScale.metres(-0.32), WorldScale.metres(0.4), 0.0)):
 				grass = child
-				break
+			elif not vertices.is_empty() and vertices[0].is_equal_approx(Vector3(WorldScale.metres(-0.48), WorldScale.metres(-0.24), 0.0)):
+				debris = child
 	_check(grass != null, "grass fixture exposes its decorative batch")
-	if grass == null or grass.multimesh == null:
+	_check(debris != null, "debris fixture exposes its decorative batch")
+	if grass == null or grass.multimesh == null or debris == null or debris.multimesh == null:
 		return false
-	var bounds := grass.multimesh.custom_aabb
+	var grass_bounds := grass.multimesh.custom_aabb
 	var expected_extent := WorldScale.metres(0.8) * 1.3
 	_check(
-		is_equal_approx(bounds.position.x, -expected_extent)
-			and is_equal_approx(bounds.position.y, -expected_extent),
+		is_equal_approx(grass_bounds.position.x, -expected_extent)
+			and is_equal_approx(grass_bounds.position.y, -expected_extent),
 		"grass batch bounds begin one maximum scaled mesh extent before the chunk"
 	)
 	_check(
-		is_equal_approx(bounds.size.x, catalog.chunk_size + expected_extent * 2.0)
-			and is_equal_approx(bounds.size.y, catalog.chunk_size + expected_extent * 2.0),
+		is_equal_approx(grass_bounds.size.x, catalog.chunk_size + expected_extent * 2.0)
+			and is_equal_approx(grass_bounds.size.y, catalog.chunk_size + expected_extent * 2.0),
 		"grass batch bounds extend one maximum scaled mesh extent past every chunk edge"
 	)
+	var farthest_debris_vertex := Vector2(WorldScale.metres(0.56), WorldScale.metres(-0.16))
+	var expected_debris_extent := farthest_debris_vertex.length() * 1.2
+	var debris_bounds := debris.multimesh.custom_aabb
+	_check(
+		is_equal_approx(debris_bounds.position.x, -expected_debris_extent)
+			and is_equal_approx(debris_bounds.size.x, catalog.chunk_size + expected_debris_extent * 2.0),
+		"rotated debris batch bounds use the maximum scaled vertex distance"
+	)
+	var projected_edge_vertex := rotated_debris.transform.origin + Vector2(expected_debris_extent, 0.0)
+	var debris_bounds_2d := Rect2(
+		Vector2(debris_bounds.position.x, debris_bounds.position.y),
+		Vector2(debris_bounds.size.x, debris_bounds.size.y),
+	)
+	_check(debris_bounds_2d.has_point(projected_edge_vertex), "rotated debris vertex at the positive chunk edge remains inside custom bounds")
 	return true
 
 
