@@ -10,18 +10,18 @@ criteria that could not be exercised without an external gamepad.
 
 Validation date: 2026-08-30 (Europe/Helsinki)
 
-The physical-platform target is pinned to
-`0e0b90305dfe3510dd644e57f6be12eac452d915`. At the pin, `git status
---short --branch` had no tracked modifications; only generated, ignored build
-artifacts and untracked Godot/graph sidecars were present. The only change
-between the desktop runtime revision
-`412db6a1d3b285ba9cf7acb147bda7b5052058ab` and this pin is the desktop
-evidence document, so this pin contains the measured runtime tree.
+The former Task 7 reconciliation pin
+`0e0b90305dfe3510dd644e57f6be12eac452d915` and its APK hash below are
+historical local-export evidence only. They are not an installation target for
+the final off-track-object physical validation.
 
-A reproducible local export from the pinned revision completed with Godot
-`4.7.1.stable.official.a13da4feb`:
+Before any Issue #23 installation, check out the final approved revision
+`c3d92569c41c1b2485dca22c565a2edcfaf2076d`, produce a new Android export,
+and record that new APK's SHA-256. The following older Godot
+`4.7.1.stable.official.a13da4feb` export is retained only as historical
+inspection data:
 
-| Field | Local build result (not physical validation) |
+| Field | Historical local build result (not physical validation) |
 | --- | --- |
 | APK | `builds/android/slicksnslide-fest-debug.apk` |
 | Size | 28,527,062 bytes |
@@ -33,12 +33,13 @@ A reproducible local export from the pinned revision completed with Godot
 `adb devices -l` reported no attached device or emulator, and `/proc/bus/input/devices`
 and USB discovery reported no external game controller. No APK was installed or launched.
 Accordingly, the historical device observations below are retained as historical issue #6
-evidence only; they do not satisfy issue #23 for this object-enabled revision. The required
-SM-X710 plus external-controller run, updated captures, three-seed/ten-minute observations,
-tree and rock collisions, recovery-corridor usability, and lifecycle evidence remain open.
+evidence only; they do not satisfy issue #23 for the final object-enabled revision. After the
+fresh final-revision APK hash is recorded, the required SM-X710 plus external-controller run,
+updated captures, three-seed/ten-minute observations, tree and rock collisions,
+recovery-corridor usability, and lifecycle evidence remain open.
 See the cross-platform [PoC report](../../poc-report.md) for the reconciled decision.
 
-## Build artifact
+## Historical build artifact
 
 | Field | Verified value |
 | --- | --- |
@@ -138,8 +139,10 @@ separately.
 
 ## Remaining acceptance blockers
 
-Issue #6 must remain open until an external controller is connected and the
-following physical evidence is added:
+Issue #6/#23 must remain open. Before an external controller is connected or
+any APK is installed for final validation, export a fresh APK from
+`c3d92569c41c1b2485dca22c565a2edcfaf2076d` and record its SHA-256. Then add
+the following physical evidence:
 
 - full analog stick/trigger ranges, polarity, neutral return, and drift;
 - controller-only title/session flow, one complete valid lap, pause, reset,

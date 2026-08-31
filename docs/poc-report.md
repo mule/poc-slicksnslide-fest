@@ -13,13 +13,15 @@ record cites that immutable content SHA; no runtime code is changed by the
 record itself. Android and Steam Deck artifact hashes below remain historical
 export inspection only, not current physical-platform acceptance evidence.
 
-Godot `4.7.1.stable.official.a13da4feb` reproduced both exports locally:
+The following Godot `4.7.1.stable.official.a13da4feb` exports and hashes are
+historical local-inspection records only; they are not packages to install for
+the final physical validation:
 
 | Target | Artifact | SHA-256 | Local inspection |
 | --- | --- | --- | --- |
-| Android Debug | `slicksnslide-fest-debug.apk` (28,527,062 bytes) | `0e98e78fe17ea4ff7bee4cacfcdc8a14c169bdb127d57ad8ee6b32a56a804819` | arm64-v8a; min SDK 24; target/compile SDK 36; v2/v3 signature verified |
-| Linux x86_64 | `slicksnslide-fest.x86_64` (73,470,264 bytes) | `2cb27aee3f7fdf763d0ae16972f6975606959a071f4cd33f6ef1429eb8385049` | ELF x86-64, dynamically linked for GNU/Linux 5.15.0 |
-| Linux data | `slicksnslide-fest.pck` (1,508,680 bytes) | `a33c0ff2294d9c4fd77506e3019854f2795bb152fa3e5f2ef93e69fa1a842f55` | paired with the Linux executable |
+| Historical Android Debug | `slicksnslide-fest-debug.apk` (28,527,062 bytes) | `0e98e78fe17ea4ff7bee4cacfcdc8a14c169bdb127d57ad8ee6b32a56a804819` | arm64-v8a; min SDK 24; target/compile SDK 36; v2/v3 signature verified |
+| Historical Linux x86_64 | `slicksnslide-fest.x86_64` (73,470,264 bytes) | `2cb27aee3f7fdf763d0ae16972f6975606959a071f4cd33f6ef1429eb8385049` | ELF x86-64, dynamically linked for GNU/Linux 5.15.0 |
+| Historical Linux data | `slicksnslide-fest.pck` (1,508,680 bytes) | `a33c0ff2294d9c4fd77506e3019854f2795bb152fa3e5f2ef93e69fa1a842f55` | paired with the Linux executable |
 
 These ignored local build outputs are reproducibility checks, not installation,
 launch, or platform acceptance evidence.
@@ -66,8 +68,8 @@ tests also verify that each object fingerprint repeats for the same seed.
 | Platform | Revision / package | Verified | Unavailable or open | Issue state |
 | --- | --- | --- | --- | --- |
 | Desktop Linux | Runtime tree at `c52b58d...` | headless suites, graphical captures, warmed frame-time/memory/count traces, generated-solid production-car impact, generation/construction budgets | physical controller is not a desktop substitute | desktop code-complete |
-| Android SM-X710 | current APK hash above | export, manifest, ABI, and v2/v3 signing only | no connected device, controller, install, launch, current capture, collision, lifecycle, or 10-minute run | #23 OPEN |
-| Steam Deck | current Linux binary and PCK hashes above | native package export and ELF inspection only | no Deck, Gaming Mode, built-in controls, non-Steam shortcut, capture, suspend/resume, or 10-minute run | #7 OPEN |
+| Android SM-X710 | no final-revision APK; listed hash is historical only | historical export, manifest, ABI, and v2/v3 signing inspection | checkout `c3d92569c41c1b2485dca22c565a2edcfaf2076d`, export a new APK, record its SHA-256, then install and validate hardware | #23 OPEN |
+| Steam Deck | no final-revision Linux package; listed hashes are historical only | historical native package and ELF inspection | checkout `c3d92569c41c1b2485dca22c565a2edcfaf2076d`, export new executable/PCK, record both SHA-256 values, then validate Gaming Mode hardware | #7 OPEN |
 
 ## Generation, construction, frame-time, memory, and object counts
 
@@ -110,20 +112,25 @@ is also 1280x720, graphically captured, and visually inspected.
 
 - **Epic #1: OPEN.** The parent epic cannot close while either independent
   physical-platform gate below remains incomplete.
-- Issue #23 is open: an SM-X710 with an external controller must install and
-  drive the exact Android APK above across at least three seeds for ten minutes,
-  then record performance/memory, current captures, lifecycle, collisions, and
-  recovery-corridor observations.
-- Issue #7 is open: the exact Linux package above must be added as a non-Steam
-  game and exercised in Steam Deck Gaming Mode at 1280x800 with built-in
-  controls, including focus/pause/back and suspend/resume evidence.
+- Issue #23 is open: first check out the final approved revision
+  `c3d92569c41c1b2485dca22c565a2edcfaf2076d`, export a new Android APK, and
+  record its SHA-256. Only then may an SM-X710 with an external controller
+  install and drive that recorded artifact across at least three seeds for ten
+  minutes, recording performance/memory, current captures, lifecycle,
+  collisions, and recovery-corridor observations.
+- Issue #7 is open: first check out the same final approved revision, export a
+  new Linux executable and PCK, and record both SHA-256 values. Only then may
+  that recorded package be added as a non-Steam game and exercised in Steam
+  Deck Gaming Mode at 1280x800 with built-in controls, including
+  focus/pause/back and suspend/resume evidence.
 - Installing, launching, deploying to either device, and changing GitHub issue
   or epic state were outside this reconciliation's authority and were not done.
 
 ## Go, conditional go, or no-go recommendation
 
 **Conditional go for desktop code completeness; no-go for cross-platform
-acceptance.** The current revision is reproducibly exportable and desktop
-budgets/captures are evidence-backed. Android #23 and Steam Deck #7 must stay
-open until their own physical hardware evidence is collected at this identical
-revision. Desktop proof must not be averaged into a platform acceptance claim.
+acceptance.** Desktop budgets/captures are evidence-backed, but no
+final-revision Android or Steam Deck package has been produced. Android #23
+and Steam Deck #7 must stay open until fresh artifacts are exported from the
+same recorded final revision and their own physical hardware evidence is
+collected. Desktop proof must not be averaged into a platform acceptance claim.
