@@ -6,13 +6,12 @@ validation separate. It does not close issue #23 or issue #7.
 
 ## Revision and reproducible builds
 
-Both platform lanes are pinned to
-`0e0b90305dfe3510dd644e57f6be12eac452d915` (`docs: record non-vacuous
-off-track validation`). The recorded pin had no tracked modifications. The
-only change since the tested runtime revision
-`412db6a1d3b285ba9cf7acb147bda7b5052058ab` is
-`docs/evidence/offtrack-objects/desktop-validation.md`; the product/runtime
-tree is therefore the same measured tree.
+Desktop evidence is pinned to
+`c52b58d9235e0a2231976e3d76a93522d0b314ae` (`test: capture warmed off-track
+desktop evidence`). Its immediately following documentation-only evidence
+record cites that immutable content SHA; no runtime code is changed by the
+record itself. Android and Steam Deck artifact hashes below remain historical
+export inspection only, not current physical-platform acceptance evidence.
 
 Godot `4.7.1.stable.official.a13da4feb` reproduced both exports locally:
 
@@ -66,17 +65,21 @@ tests also verify that each object fingerprint repeats for the same seed.
 
 | Platform | Revision / package | Verified | Unavailable or open | Issue state |
 | --- | --- | --- | --- | --- |
-| Desktop Linux | Runtime tree at pinned revision; desktop measurements recorded at `412db6a...` | headless suites, mutations, graphical captures, generation/construction budgets | physical controller is not a desktop substitute | desktop code-complete |
+| Desktop Linux | Runtime tree at `c52b58d...` | headless suites, graphical captures, warmed frame-time/memory/count traces, generated-solid production-car impact, generation/construction budgets | physical controller is not a desktop substitute | desktop code-complete |
 | Android SM-X710 | current APK hash above | export, manifest, ABI, and v2/v3 signing only | no connected device, controller, install, launch, current capture, collision, lifecycle, or 10-minute run | #23 OPEN |
 | Steam Deck | current Linux binary and PCK hashes above | native package export and ELF inspection only | no Deck, Gaming Mode, built-in controls, non-Steam shortcut, capture, suspend/resume, or 10-minute run | #7 OPEN |
 
 ## Generation, construction, frame-time, memory, and object counts
 
-Desktop evidence over seeds 0-19 reports placement p50/p95 of 53.816/67.803
-ms against the 80 ms budget and runtime construction p50/p95 of 11.099/15.861
-ms against the 100 ms budget. Placement count min/median/max is 507/628/722;
-solid collider count is 192/224.5/286; decorative batch count is 236/308/340.
-The desktop evidence records no sustained gameplay frame-time or memory trace.
+Desktop evidence over seeds 0-19 reports placement p50/p95 of 64.934/77.180
+ms against the unchanged 80 ms budget and runtime construction p50/p95 of
+17.932/21.936 ms against the unchanged 100 ms budget. The warmed graphical
+production-session traces are 240 frames per seed after a 120-frame warm-up:
+seed 0 p50/p95 is 16.662/19.591 ms at 40.378–40.392 MiB; seed 4 is
+16.639/18.539 ms at 41.901–41.915 MiB; seed 9 is 16.668/21.201 ms at
+42.327–42.341 MiB. Their total node counts are 1,120, 1,439, and 1,572.
+See the [desktop evidence](evidence/offtrack-objects/desktop-validation.md)
+for the raw trace and complete count breakdown.
 
 Android and Steam Deck frame time, spikes, memory, thermal/TDP context, and
 current object/collider observations are **not measured**. Historical Android
@@ -85,11 +88,12 @@ data in the issue #6 report predates this revision and is not used here.
 ## Driving observations
 
 Desktop capture inspection confirms a dirt road, decorative shoulder, readable
-recovery corridor, and a deeper tree or rock for seeds 0, 4, and 9. No current
-Android or Steam Deck driving observation exists. In particular, controller-only
-flow, full analog range/neutral return, a valid lap, pause/reset/restart,
-tree-and-rock collision, recovery-corridor usability, focus/lifecycle, and
-Android/Deck suspend-resume remain unverified on their required hardware.
+recovery corridor, and a deeper tree or rock for seeds 0, 4, and 9. The new
+desktop still also proves the production CCD car contacted generated tree
+`v1:0:-10:1` in seed 0. No current Android or Steam Deck driving observation
+exists. In particular, controller-only flow, full analog range/neutral return,
+a valid lap, pause/reset/restart, recovery-corridor usability, focus/lifecycle,
+and Android/Deck suspend-resume remain unverified on their required hardware.
 
 ## Captures
 
@@ -99,6 +103,8 @@ Desktop captures are [seed 0](evidence/offtrack-objects/seed-0.png),
 a graphical session. No current-revision Android capture and no Steam Deck
 Gaming Mode capture exists. The older Android images are retained in the
 Android evidence report as historical evidence, not replacement proof.
+The [generated-solid impact](evidence/offtrack-objects/seed-0-generated-solid-impact.png)
+is also 1280x720, graphically captured, and visually inspected.
 
 ## Known limitations and open defects
 
