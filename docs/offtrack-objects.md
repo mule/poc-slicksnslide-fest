@@ -98,6 +98,19 @@ Refresh desktop graphical evidence in a graphical Godot session, then inspect ea
 /home/japurane/.local/bin/godot --path . --script res://tests/capture_offtrack_objects.gd
 ```
 
+Record the warmed desktop trace and the real production-car impact against a generated solid
+placement (also graphical, not headless):
+
+```sh
+/home/japurane/.local/bin/godot --path . --script res://tests/capture_offtrack_desktop_evidence.gd
+```
+
+This writes the deterministic seed `0`, `4`, and `9` trace to
+[`desktop-trace-seeds-0-4-9.txt`](evidence/offtrack-objects/desktop-trace-seeds-0-4-9.txt)
+and the seed `0` impact still beside the standard captures. The helper warms each production
+session, records frame-time, static-memory, node, and runtime-count samples, and proves a
+`TopDownCar` physics contact with the selected generated solid before it saves the impact PNG.
+
 See [desktop validation evidence](evidence/offtrack-objects/desktop-validation.md) for the recorded
 desktop run. That result is code-completeness evidence only: Android #23 and Steam Deck #7 still
 own their physical-device/controller and platform-performance gates.

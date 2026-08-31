@@ -73,6 +73,16 @@ Refresh and inspect the deterministic 1280x720 off-track object captures for see
 godot --path . --script res://tests/capture_offtrack_objects.gd
 ```
 
+For the warmed desktop trace plus the production-car/generated-solid impact still, use the same
+graphical renderer (not `--headless`):
+
+```sh
+godot --path . --script res://tests/capture_offtrack_desktop_evidence.gd
+```
+
+It writes the raw seed 0/4/9 samples and the deterministic impact PNG under
+[`docs/evidence/offtrack-objects/`](docs/evidence/offtrack-objects/).
+
 Run the issue #5 input/session and integrated-scene checks:
 
 ```sh
