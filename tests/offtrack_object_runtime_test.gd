@@ -109,7 +109,7 @@ func _verify_object_diagnostics(diagnostics: Dictionary, placements: Array[Offtr
 	var accepted_total := 0
 	for zone_name in ["near_shoulder", "hazard"]:
 		var zone: Dictionary = zones.get(zone_name, {})
-		for counter in ["valid_cells", "occupied_draws", "accepted", "road_or_recovery", "containment", "spawn_checkpoint", "solid_overlap"]:
+		for counter in ["valid_cells", "occupied_draws", "accepted", "road_or_recovery", "zone_boundary", "containment", "spawn_checkpoint", "solid_overlap"]:
 			_check(zone.has(counter) and int(zone.get(counter, -1)) >= 0, "%s diagnostics include non-negative %s" % [zone_name, counter])
 		accepted_total += int(zone.get("accepted", 0))
 	_check(accepted_total == placements.size(), "object diagnostic accepted counts equal generated placements")
@@ -191,6 +191,8 @@ func _verify_invalid_placement_atomicity(catalog: OfftrackObjectCatalog) -> bool
 	placements.append(_placement("invalid:scale_nan", &"tree", Vector2.ZERO, 0.0, NAN, true, &"tree_circle"))
 	placements.append(_placement("invalid:scale_zero", &"tree", Vector2.ZERO, 0.0, 0.0, true, &"tree_circle"))
 	placements.append(_placement("invalid:scale_negative", &"tree", Vector2.ZERO, 0.0, -1.0, true, &"tree_circle"))
+	placements.append(_placement("invalid:tree_decorative", &"tree", Vector2.ZERO, 0.0, 1.0, false, &"tree_circle"))
+	placements.append(_placement("invalid:tree_no_collision", &"tree", Vector2.ZERO, 0.0, 1.0, true, &"none"))
 
 	var objects := OfftrackObjectRuntime.new(placements, catalog)
 	root.add_child(objects)
@@ -199,11 +201,13 @@ func _verify_invalid_placement_atomicity(catalog: OfftrackObjectCatalog) -> bool
 	_check(int(metrics.get("visuals", -1)) == 2, "only valid records create visuals")
 	_check(int(metrics.get("solid_visuals", -1)) == 1, "only the valid solid creates a solid visual")
 	_check(int(metrics.get("colliders", -1)) == 1, "only the valid solid creates a collider")
-	_check(int(metrics.get("invalid_placements", -1)) == 7, "every invalid class is reported")
-	_check(errors.size() == 7, "central validation reports one error per invalid record")
-	for invalid_id in ["invalid:unknown", "invalid:position", "invalid:rotation", "invalid:scale_nan", "invalid:scale_zero", "invalid:scale_negative"]:
+	_check(int(metrics.get("invalid_placements", -1)) == 9, "every invalid class is reported")
+	_check(errors.size() == 9, "central validation reports one error per invalid record")
+	for invalid_id in ["invalid:unknown", "invalid:position", "invalid:rotation", "invalid:scale_nan", "invalid:scale_zero", "invalid:scale_negative", "invalid:tree_decorative", "invalid:tree_no_collision"]:
 		_check(_messages_contain(errors, invalid_id), "%s is identified in validation errors" % invalid_id)
 		_check(_find_node_named(objects, invalid_id.replace(":", "_")) == null, "%s creates no partial visual or collider" % invalid_id)
+	_check(_messages_contain(errors, "solid does not match catalog"), "tree mislabeled decorative is rejected for its catalog solid classification")
+	_check(_messages_contain(errors, "collision profile does not match catalog"), "tree mislabeled no-collision is rejected for its catalog collision profile")
 	_check(_messages_contain(errors, "placement[2]"), "the null record is identified by placement index")
 	_check(_find_node_named(objects, "valid_tree") != null, "valid records still build beside rejected records")
 	objects.free()

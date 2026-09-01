@@ -132,6 +132,12 @@ evidence without changing the component boundaries.
 Distances are measured from the road edge, not merely the centerline. Object footprint radius is
 included when testing every boundary.
 
+The cell center determines the deterministic zone draw before an archetype is selected. Once the
+archetype and scale are known, a footprint crossing the 12 m near-shoulder boundary is rejected;
+the existing center-zone `valid_cells` and `occupied_draws` diagnostics remain unchanged, while the
+rejection is counted as `zone_boundary` in that candidate zone. The 20 m recovery rule continues to
+exclude solid footprints only.
+
 | Zone | Distance beyond road edge | Allowed objects |
 | --- | --- | --- |
 | Near shoulder | 0-12 m | Grass and small debris only |
@@ -154,7 +160,8 @@ These are prototype starting values, not claims of final driving quality.
 - Solid objects are excluded within 40 m of the spawn transform and every checkpoint origin.
 - Solid collision circles may not overlap each other.
 - Decorative footprints may overlap lightly, but no cell produces more than one placement.
-- Non-finite transforms, non-positive scale, and unknown archetypes are invalid.
+- Non-finite transforms, non-positive scale, unknown archetypes, and placement physics fields that
+  disagree with the resolved catalog archetype are invalid.
 
 Placement is bounded by the finite grid: there is no unbounded retry loop. Diagnostics record total
 cells, valid-zone cells, occupied draws, accepted placements, and rejection counts by rule. A zone
@@ -188,8 +195,9 @@ new runtime is mounted. No object state survives the rebuild.
 
 - An empty placement set is valid and renders nothing.
 - Density underfill is diagnostic and does not fail track generation.
-- Unknown archetypes and invalid transforms are rejected by tests; runtime skips them and reports
-  an error rather than creating partial physics state.
+- Unknown archetypes, invalid transforms, and catalog-mismatched `solid` or `collision_profile`
+  fields are rejected by tests; runtime skips them and reports an error rather than creating partial
+  physics state.
 - Failure to render an object cannot modify collision placement, road geometry, lap progress, or
   reset state.
 - A mismatch between placement count and visual count, or between solid-placement count and
@@ -206,6 +214,7 @@ new runtime is mounted. No object state survives the rebuild.
 - repeatable placements and SHA-256 fingerprints;
 - unchanged road geometry fingerprints with placement enabled or disabled;
 - correct near-shoulder, recovery, hazard, and containment zones;
+- fully contained footprints on both sides of the 12 m boundary, with straddling candidates rejected;
 - spawn and checkpoint exclusions;
 - non-overlapping solid collision circles;
 - finite transforms and positive scales;
@@ -228,6 +237,7 @@ mutation that remains green is failure.
 - post-impact energy remains bounded;
 - the recovery corridor is physically empty;
 - seed restart removes the prior field before mounting the next one.
+- rejected catalog-mismatched records create no visual or collider while valid siblings still build.
 
 Mutation modes remove a solid collider and make a decorative object solid, proving both sides of
 the collision contract are observed.

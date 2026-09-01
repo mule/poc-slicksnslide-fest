@@ -56,8 +56,13 @@ func _placement_error(placement: OfftrackObjectPlacement, catalog: OfftrackObjec
 	if placement == null:
 		return "placement[%d]: null record" % index
 	var record := "placement[%d] %s" % [index, placement.stable_id]
-	if catalog.archetype_by_id(placement.archetype_id) == null:
+	var archetype := catalog.archetype_by_id(placement.archetype_id)
+	if archetype == null:
 		return "%s: unknown archetype %s" % [record, placement.archetype_id]
+	if placement.solid != archetype.solid:
+		return "%s: solid does not match catalog" % record
+	if placement.collision_profile != archetype.collision_profile:
+		return "%s: collision profile does not match catalog" % record
 	var origin := placement.transform.origin
 	if not is_finite(origin.x) or not is_finite(origin.y):
 		return "%s: position must be finite" % record

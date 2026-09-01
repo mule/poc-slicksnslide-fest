@@ -18,6 +18,11 @@ checked for seeds 0-19.
 
 All distances are beyond the dirt-road edge and include each object's scaled footprint.
 
+The cell's center distance selects its deterministic occupancy draw and weighted archetype list. After
+the archetype and scale are chosen, an accepted footprint must be wholly on one side of the 12 m
+boundary; a footprint that would straddle it is rejected. This leaves the 20 m rule unchanged:
+it excludes only solid footprints, not decorative ones.
+
 | Zone | Rule |
 | --- | --- |
 | Decorative band | 0-12 m: grass and debris only. |
@@ -50,6 +55,11 @@ archetype, and variant. Trees and rocks remain individual nodes in a Y-sorted co
 depth relationship with the car stays readable. Solid circles are grouped beneath chunk-local
 `StaticBody2D` nodes.
 
+Before either consumer builds a record, runtime validation resolves its catalog archetype once and
+requires its `solid` and `collision_profile` fields to agree with that archetype. A rejected record
+reports a validation error and creates neither a visual nor a collider; valid sibling records still
+build.
+
 There is no object streaming, persistence across a restart, destructibility, damage, pickup
 system, shadow gameplay, or height/jump behavior. Restarting a seed frees the old generated track
 and its visual and collision children before mounting the replacement.
@@ -59,8 +69,10 @@ and its visual and collision children before mounting the replacement.
 `OfftrackObjectPlacementResult` reports `placements`, its SHA-256 `fingerprint`,
 `generation_usec`, and diagnostics. Diagnostics include the finite `total_cells` count and, for
 both `near_shoulder` and `hazard`, `valid_cells`, `occupied_draws`, `accepted`, rejection counts
-(`road_or_recovery`, `containment`, `spawn_checkpoint`, and `solid_overlap`), and `underfilled`.
-Invalid input instead reports `invalid_input`.
+(`road_or_recovery`, `zone_boundary`, `containment`, `spawn_checkpoint`, and `solid_overlap`), and
+`underfilled`. The zone counters remain the center-cell zone used for the deterministic draw; a
+post-selection `zone_boundary` rejection therefore remains in that candidate zone. Invalid input
+instead reports `invalid_input`.
 
 An underfilled zone means its accepted/occupied-draw ratio is below the catalog's 0.75 target; it
 does not change the road or retry generation. A zero-draw zone is not marked underfilled.

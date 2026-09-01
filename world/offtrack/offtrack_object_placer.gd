@@ -156,11 +156,17 @@ func _consider_cell(cell: Vector2i, domain_seed: int, definition: TrackDefinitio
 	if not exact_distance_known and not (lower_distance >= minimum_distance and upper_distance <= maximum_distance):
 		centerline_distance = _exact_distance_to_centerline(position, distance_index)
 		exact_distance_known = true
+	if not exact_distance_known and lower_distance < near_boundary + footprint and upper_distance > near_boundary - footprint:
+		centerline_distance = _exact_distance_to_centerline(position, distance_index)
+		exact_distance_known = true
 	if exact_distance_known:
 		lower_distance = centerline_distance
 		upper_distance = centerline_distance
 	if not is_finite(lower_distance) or lower_distance < minimum_distance or upper_distance > maximum_distance:
 		zone["road_or_recovery"] = int(zone.get("road_or_recovery", 0)) + 1
+		return
+	if lower_distance - footprint < near_boundary and upper_distance + footprint > near_boundary:
+		zone["zone_boundary"] = int(zone.get("zone_boundary", 0)) + 1
 		return
 	if not contracted_play_area.has_point(position):
 		zone["containment"] = int(zone.get("containment", 0)) + 1
@@ -293,6 +299,7 @@ func _new_zone_diagnostics() -> Dictionary:
 		"occupied_draws": 0,
 		"accepted": 0,
 		"road_or_recovery": 0,
+		"zone_boundary": 0,
 		"containment": 0,
 		"spawn_checkpoint": 0,
 		"solid_overlap": 0,

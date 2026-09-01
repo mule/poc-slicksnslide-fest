@@ -107,6 +107,8 @@ func _verify_per_zone_catalog_behavior(definition: TrackDefinition, placer: Offt
 func _verify_zones(definition: TrackDefinition, placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog, seed: int) -> bool:
 	var surface := TrackSurfaceMap.new(definition)
 	var epsilon := WorldScale.metres(0.001)
+	var fully_near_count := 0
+	var fully_hazard_count := 0
 	for placement in placements:
 		var archetype := catalog.archetype_by_id(placement.archetype_id)
 		_check(archetype != null, "seed %d placement uses a known archetype" % seed)
@@ -122,10 +124,16 @@ func _verify_zones(definition: TrackDefinition, placements: Array[OfftrackObject
 		_check(is_finite(edge_distance) and edge_distance - footprint >= -epsilon, "seed %d object footprint stays off the road" % seed)
 		_check(edge_distance + footprint <= catalog.hazard_max_distance + epsilon, "seed %d object footprint stays in the hazard bound" % seed)
 		_check(contracted_play_area.has_point(position), "seed %d object footprint stays inside containment" % seed)
-		if edge_distance <= catalog.near_max_distance + epsilon:
+		var footprint_minimum := edge_distance - footprint
+		var footprint_maximum := edge_distance + footprint
+		if footprint_maximum <= catalog.near_max_distance + epsilon:
+			fully_near_count += 1
 			_check(archetype.near_weight > 0.0, "seed %d near-shoulder object is allowed by catalog" % seed)
-		else:
+		elif footprint_minimum >= catalog.near_max_distance - epsilon:
+			fully_hazard_count += 1
 			_check(archetype.hazard_weight > 0.0, "seed %d hazard object is allowed by catalog" % seed)
+		else:
+			_check(false, "seed %d placement %s footprint does not straddle the 12 m zone boundary" % [seed, placement.stable_id])
 		if placement.solid:
 			_check(archetype.solid, "seed %d solid placement matches archetype" % seed)
 			_check(edge_distance - footprint >= catalog.solid_clearance - epsilon, "seed %d solid placement leaves the recovery corridor" % seed)
@@ -134,6 +142,8 @@ func _verify_zones(definition: TrackDefinition, placements: Array[OfftrackObject
 				_check(position.distance_to(checkpoint.origin) >= catalog.spawn_checkpoint_exclusion + footprint - epsilon, "seed %d solid placement leaves checkpoint exclusion" % seed)
 		else:
 			_check(not archetype.solid, "seed %d decorative placement is non-solid" % seed)
+	_check(fully_near_count > 0, "seed %d keeps fully contained near-shoulder fixtures on the road side of 12 m" % seed)
+	_check(fully_hazard_count > 0, "seed %d keeps fully contained hazard fixtures beyond 12 m" % seed)
 	return true
 
 
@@ -177,7 +187,7 @@ func _verify_diagnostics(result: OfftrackObjectPlacementResult, definition: Trac
 		var zone: Dictionary = result.diagnostics.zones.get(zone_name, {})
 		for field in [&"valid_cells", &"occupied_draws", &"accepted"]:
 			_check(zone.has(field) and int(zone.get(field, -1)) >= 0, "seed %d %s diagnostics report %s" % [seed, zone_name, field])
-		for rule in [&"road_or_recovery", &"containment", &"spawn_checkpoint", &"solid_overlap"]:
+		for rule in [&"road_or_recovery", &"zone_boundary", &"containment", &"spawn_checkpoint", &"solid_overlap"]:
 			_check(zone.has(rule) and int(zone.get(rule, -1)) >= 0, "seed %d %s diagnostics report %s rejections" % [seed, zone_name, rule])
 		var occupied := int(zone.get("occupied_draws", 0))
 		var accepted := int(zone.get("accepted", 0))
@@ -187,7 +197,7 @@ func _verify_diagnostics(result: OfftrackObjectPlacementResult, definition: Trac
 		_check(occupied == int(expected_zone.occupied_draws), "seed %d %s occupied_draws matches the deterministic density oracle" % [seed, zone_name])
 		_check(accepted == int(exact_accepted[zone_name]), "seed %d %s accepted count matches exact placement zones" % [seed, zone_name])
 		_check(int(zone.valid_cells) > 0 and occupied > 0 and accepted > 0, "seed %d %s diagnostics are non-vacuous" % [seed, zone_name])
-		var rejection_total := int(zone.road_or_recovery) + int(zone.containment) + int(zone.spawn_checkpoint) + int(zone.solid_overlap)
+		var rejection_total := int(zone.road_or_recovery) + int(zone.zone_boundary) + int(zone.containment) + int(zone.spawn_checkpoint) + int(zone.solid_overlap)
 		_check(accepted + rejection_total == occupied, "seed %d %s every occupied draw is accepted or rejected once" % [seed, zone_name])
 		_check(underfilled == (occupied > 0 and float(accepted) / float(occupied) < catalog.minimum_fill_ratio), "seed %d %s underfill diagnostic is accurate" % [seed, zone_name])
 		total_accepted += accepted
