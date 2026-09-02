@@ -1,6 +1,6 @@
 # Cross-platform PoC report
 
-Reconciled on 2026-08-30 (Europe/Helsinki). This report deliberately keeps
+Reconciled on 2026-09-02 (Europe/Helsinki). This report deliberately keeps
 desktop reproducibility, Android hardware validation, and Steam Deck hardware
 validation separate. It does not close issue #23 or issue #7.
 

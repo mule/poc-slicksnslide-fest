@@ -8,7 +8,7 @@ criteria that could not be exercised without an external gamepad.
 
 ## Task 7 current-revision reconciliation
 
-Validation date: 2026-08-30 (Europe/Helsinki)
+Follow-up reconciliation date: 2026-09-02 (Europe/Helsinki)
 
 The former Task 7 reconciliation pin
 `0e0b90305dfe3510dd644e57f6be12eac452d915` and its APK hash below are
