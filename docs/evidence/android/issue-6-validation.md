@@ -15,9 +15,11 @@ The former Task 7 reconciliation pin
 historical local-export evidence only. They are not an installation target for
 the final off-track-object physical validation.
 
-Before any Issue #23 installation, check out the final approved revision
-`c3d92569c41c1b2485dca22c565a2edcfaf2076d`, produce a new Android export,
-and record that new APK's SHA-256. The following older Godot
+Before any Issue #23 installation, check out the fixed behavior revision
+`f713cf733874d706f08fbc480c958f4f2a2d9b23`, produce a new Android export,
+and record that new APK's SHA-256. Its desktop evidence-only record is
+`f5b34f0d18d0749d185345c9938b393bb18c5271`; it is not an Android package.
+The following older Godot
 `4.7.1.stable.official.a13da4feb` export is retained only as historical
 inspection data:
 
@@ -141,7 +143,7 @@ separately.
 
 Issue #6/#23 must remain open. Before an external controller is connected or
 any APK is installed for final validation, export a fresh APK from
-`c3d92569c41c1b2485dca22c565a2edcfaf2076d` and record its SHA-256. Then add
+`f713cf733874d706f08fbc480c958f4f2a2d9b23` and record its SHA-256. Then add
 the following physical evidence:
 
 - full analog stick/trigger ranges, polarity, neutral return, and drift;

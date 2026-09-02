@@ -72,9 +72,11 @@ contacts, emitted `body_entered` for that chunk, finished with one physics conta
 ## Regression gate and result
 
 Passed for this refreshed evidence: the evidence harness (24 checks), standard graphical seed
-captures (14 checks), and independent performance gate (144 checks). The separate remediation
-report records the runtime, placement, visual, collision, restart/session, mutation, graph-update,
-and final-diff results for this revision.
+captures (14 checks), and independent performance gate (144 checks). The tracked regression gates
+also cover runtime/restart (1,673 checks), placement/determinism (700,321 checks), visuals (24),
+collision (61), contracts (15), and the integrated session (36). Mutation proof removed each runtime
+catalog-consistency check and the footprint-boundary rejection in turn: each corresponding regression
+exited non-zero, so a catalog-mismatched record or 12 m-straddling footprint cannot silently return.
 
 **Result: desktop code-complete.** Epic #1, Android #23, and Steam Deck #7 remain open/blocked on
 their required physical hardware, controller, lifecycle, and current-revision performance evidence.
