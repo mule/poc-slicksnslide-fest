@@ -57,6 +57,7 @@ func _run() -> void:
 		_check(_verify_bounds_body_exists(runtime, seed), "the bounds body exists verification ran to completion")
 		if _break_collision:
 			_remove_containment(runtime)
+		_check(_isolate_containment_probe(runtime), "the containment probe ignores independent off-track hazards")
 		_check(await _verify_probe_stays_inside(world, definition, seed), "the probe stays inside verification ran to completion")
 		world.queue_free()
 		await process_frame
@@ -83,6 +84,20 @@ func _remove_containment(runtime: Node) -> void:
 	for child in body.get_children():
 		body.remove_child(child)
 		child.queue_free()
+
+
+## Solid off-track hazards now share the world collision layer with the vehicle. This probe's
+## contract is narrower: it verifies the outer containment rectangle rather than hazard response,
+## which is covered by tests/offtrack_object_collision_test.gd. Disable those independent bodies
+## so an otherwise correct hazard cannot make the probe stop short of the play-area edge.
+func _isolate_containment_probe(runtime: Node) -> bool:
+	var collisions := runtime.get_node_or_null("OfftrackObjects/Collisions")
+	if collisions == null:
+		return true
+	for child in collisions.get_children():
+		if child is StaticBody2D:
+			child.collision_layer = 0
+	return true
 
 
 ## Drive a probe outward from the track towards each side of the play area and confirm it

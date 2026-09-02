@@ -168,6 +168,7 @@ func get_session_snapshot() -> Dictionary:
 		"best_lap_time": _trial.best_lap_time,
 		"paused": _trial.paused,
 		"geometry_fingerprint": _track_definition.geometry_fingerprint,
+		"offtrack_object_fingerprint": _track_definition.offtrack_object_fingerprint,
 	}
 
 

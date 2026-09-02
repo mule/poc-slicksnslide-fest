@@ -6,7 +6,42 @@ This report records the Android evidence collected from the issue #6 feature
 branch. It deliberately separates verified results from the controller-only
 criteria that could not be exercised without an external gamepad.
 
-## Build artifact
+## Task 7 current-revision reconciliation
+
+Follow-up reconciliation date: 2026-09-02 (Europe/Helsinki)
+
+The former Task 7 reconciliation pin
+`0e0b90305dfe3510dd644e57f6be12eac452d915` and its APK hash below are
+historical local-export evidence only. They are not an installation target for
+the final off-track-object physical validation.
+
+Before any Issue #23 installation, check out the fixed behavior revision
+`f713cf733874d706f08fbc480c958f4f2a2d9b23`, produce a new Android export,
+and record that new APK's SHA-256. Its desktop evidence-only record is
+`f5b34f0d18d0749d185345c9938b393bb18c5271`; it is not an Android package.
+The following older Godot
+`4.7.1.stable.official.a13da4feb` export is retained only as historical
+inspection data:
+
+| Field | Historical local build result (not physical validation) |
+| --- | --- |
+| APK | `builds/android/slicksnslide-fest-debug.apk` |
+| Size | 28,527,062 bytes |
+| SHA-256 | `0e98e78fe17ea4ff7bee4cacfcdc8a14c169bdb127d57ad8ee6b32a56a804819` |
+| Package / version | `com.mule.slicksnslidefest` / `0.1.0-poc` (code `1`) |
+| SDK / ABI | min `24`, target/compile `36`, `arm64-v8a` |
+| Signature check | `apksigner verify --verbose`: v2 and v3 verified |
+
+`adb devices -l` reported no attached device or emulator, and `/proc/bus/input/devices`
+and USB discovery reported no external game controller. No APK was installed or launched.
+Accordingly, the historical device observations below are retained as historical issue #6
+evidence only; they do not satisfy issue #23 for the final object-enabled revision. After the
+fresh final-revision APK hash is recorded, the required SM-X710 plus external-controller run,
+updated captures, three-seed/ten-minute observations, tree and rock collisions,
+recovery-corridor usability, and lifecycle evidence remain open.
+See the cross-platform [PoC report](../../poc-report.md) for the reconciled decision.
+
+## Historical build artifact
 
 | Field | Verified value |
 | --- | --- |
@@ -106,8 +141,10 @@ separately.
 
 ## Remaining acceptance blockers
 
-Issue #6 must remain open until an external controller is connected and the
-following physical evidence is added:
+Issue #6/#23 must remain open. Before an external controller is connected or
+any APK is installed for final validation, export a fresh APK from
+`f713cf733874d706f08fbc480c958f4f2a2d9b23` and record its SHA-256. Then add
+the following physical evidence:
 
 - full analog stick/trigger ranges, polarity, neutral return, and drift;
 - controller-only title/session flow, one complete valid lap, pause, reset,

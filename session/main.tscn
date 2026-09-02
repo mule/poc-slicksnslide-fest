@@ -43,12 +43,15 @@ color = Color(0.12549, 0.227451, 0.117647, 1)
 
 [node name="World" type="Node2D" parent="."]
 process_mode = 1
+y_sort_enabled = true
 
 [node name="TrackMount" type="Node2D" parent="World"]
 unique_name_in_owner = true
+y_sort_enabled = true
 
 [node name="VehicleMount" type="Node2D" parent="World"]
 unique_name_in_owner = true
+y_sort_enabled = true
 
 [node name="SessionUI" type="CanvasLayer" parent="."]
 layer = 5

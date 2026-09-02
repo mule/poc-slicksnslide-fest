@@ -23,6 +23,7 @@ var _next_checkpoint := 0
 
 
 func _init(initial_definition = null) -> void:
+	y_sort_enabled = true
 	definition = initial_definition
 
 
@@ -36,6 +37,11 @@ func _ready() -> void:
 	_build_boundary_line("RightEdge", definition.right_boundary)
 	_build_checkpoint_markers()
 	_build_collision()
+	var object_runtime := OfftrackObjectRuntime.new(
+		definition.offtrack_objects,
+		preload("res://data/default_offtrack_object_catalog.tres"),
+	)
+	add_child(object_runtime)
 
 
 func _build_line(line_name: String, width: float, color: Color, z_layer: int) -> void:
@@ -80,7 +86,7 @@ func _build_checkpoint_markers() -> void:
 			checkpoint.origin + lateral * half_width,
 		])
 		line.antialiased = true
-		line.z_index = 0
+		line.z_index = -1
 		add_child(line)
 		_checkpoint_markers.append(line)
 	set_next_checkpoint(_next_checkpoint)

@@ -1,6 +1,6 @@
 # Slicks 'n Slide Fest
 
-A Godot proof of concept for a single-viewport, top-down dirt-racing game. It now launches directly into a deterministic generated circuit with a force-based car, controller-first input, ordered lap timing, safe reset, pause, and seed restart.
+A Godot proof of concept for a single-viewport, top-down dirt-racing game. It now launches directly into a deterministic generated circuit with a force-based car, controller-first input, ordered lap timing, safe reset, pause, seed restart, and deterministic off-track scenery. Grass and debris make the shoulder readable while trees and rocks populate the deeper hazard field without blocking the 20 m solid recovery corridor; see [Off-track objects](docs/offtrack-objects.md).
 
 ## Required Godot version
 
@@ -46,8 +46,42 @@ Run the world-scale contract and spatial-indexing checks:
 
 ```sh
 godot --headless --path . --script res://tests/world_scale_contract_test.gd
+godot --headless --path . --script res://tests/offtrack_object_contract_test.gd
 godot --headless --path . --script res://tests/segment_grid_test.gd
 ```
+
+Run the deterministic off-track object placement, visual, collision, and generated-session checks:
+
+```sh
+godot --headless --path . --script res://tests/offtrack_object_placement_test.gd
+godot --headless --path . --script res://tests/offtrack_object_visuals_test.gd
+godot --headless --path . --script res://tests/offtrack_object_collision_test.gd
+godot --headless --path . --script res://tests/offtrack_object_runtime_test.gd
+godot --headless --path . --script res://tests/offtrack_object_performance_test.gd
+```
+
+These checks keep placement deterministic and separate from road geometry, require decorative and
+solid runtime consumers to agree on every placement, and exercise the real seed-restart path.
+The independent performance test enforces one-time placement p95 <= 80 ms and runtime construction
+p95 <= 100 ms on the documented desktop reference machine; see [desktop validation evidence](docs/evidence/offtrack-objects/desktop-validation.md).
+The [cross-platform PoC report](docs/poc-report.md) records the current revision and keeps the
+desktop result conditional until Android #23 and Steam Deck #7 each complete their physical gates.
+
+Refresh and inspect the deterministic 1280x720 off-track object captures for seeds 0, 4, and 9 in a graphical session:
+
+```sh
+godot --path . --script res://tests/capture_offtrack_objects.gd
+```
+
+For the warmed desktop trace plus the production-car/generated-solid impact still, use the same
+graphical renderer (not `--headless`):
+
+```sh
+godot --path . --script res://tests/capture_offtrack_desktop_evidence.gd
+```
+
+It writes the raw seed 0/4/9 samples and the deterministic impact PNG under
+[`docs/evidence/offtrack-objects/`](docs/evidence/offtrack-objects/).
 
 Run the issue #5 input/session and integrated-scene checks:
 
@@ -92,6 +126,7 @@ assertions silently skipped and still exit 0. Every verification function is the
 | Directory | Responsibility |
 | --- | --- |
 | `world/` | The pixel-per-metre scale contract and shared spatial indexing |
+| `world/offtrack/` | Deterministic off-track placement, prototype visuals, and chunked solid collisions; see [Off-track objects](docs/offtrack-objects.md) |
 | `track/` | Deterministic generated track data, runtime geometry/collision, lap order, and surface queries |
 | `vehicle/` | Tunable force-based car dynamics, reset safety, feedback, and diagnostics |
 | `input/` | InputMap polling, deadzone processing, and hardware-independent normalized vehicle input |
@@ -114,3 +149,6 @@ The session owns `TrackMount` and `VehicleMount` integration points. Track and v
 - `Linux x86_64`, producing `builds/linux/slicksnslide-fest.x86_64` once issue #7 validates the Steam Deck package.
 
 No SDK paths, signing material, generated binaries, or local credentials belong in the repository. Android and Steam Deck completion still require their issue-specific physical-hardware evidence.
+The [cross-platform PoC report](docs/poc-report.md) is the authoritative reconciliation of those
+independent gates; a successful local export does not replace device installation, controller, or
+Gaming Mode evidence.

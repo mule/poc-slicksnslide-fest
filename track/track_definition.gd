@@ -22,3 +22,7 @@ extends Resource
 @export var generation_usec: int = 0
 @export var used_fallback: bool = false
 @export var diagnostic_reason: String = ""
+@export var offtrack_objects: Array[OfftrackObjectPlacement] = []
+@export var offtrack_object_fingerprint: String = ""
+@export var offtrack_object_generation_usec: int = 0
+@export var offtrack_object_diagnostics: Dictionary = {}
