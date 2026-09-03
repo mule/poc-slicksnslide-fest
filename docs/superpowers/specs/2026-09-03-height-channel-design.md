@@ -97,8 +97,10 @@ Versioned tuning data, checked in as `data/default_height_channel_catalog.tres`:
 | `landing_clearance` | 80 m | Straight run required after the hump |
 | `spawn_exclusion` | 80 m | No ramp face within this of the spawn origin |
 | `checkpoint_exclusion` | 40 m | No ramp face within this of a gate origin |
-| `minimum_spacing` | 120 m | Between crests, measured along the centerline |
-| `low_obstacle_height` | 1.0 m | Obstacles at or below this are on the low layer |
+| `minimum_spacing` | 120 m | Between crest origins |
+
+The obstacle threshold lives beside the objects it classifies: `OfftrackObjectCatalog` gains
+`low_obstacle_height` (1.0 m), and `OfftrackObjectArchetype` gains `obstacle_height`.
 
 The exact values are data and may be tuned by evidence without changing component boundaries.
 
@@ -151,13 +153,15 @@ continuous elevation later.
 
 Godot 2D has no per-shape height, so height levels are collision layers, the discrete-levels model
 from the recorded engine path. `OfftrackObjectArchetype` gains `obstacle_height`; rocks are 1.0 m,
-trees 6.0 m. `OfftrackObjectCollisions` puts a shape on layer 2 when its archetype's
-`obstacle_height` is at or below the catalog's `low_obstacle_height`, otherwise layer 1. The play
+trees 6.0 m. Layers belong to bodies, not shapes, so `OfftrackObjectCollisions` builds one body per
+chunk per level: a shape goes on the chunk's low body (layer 2) when its archetype's
+`obstacle_height` is at or below `OfftrackObjectCatalog.low_obstacle_height`, otherwise on the
+chunk's tall body (layer 1). The play
 area boundary stays on layer 1. The car's mask is layers 1 and 2 while its height is below
 `VehicleTuning.low_obstacle_clearance`, and layer 1 alone above it. A car descending through the
 clearance height over a rock regains the rock and lands on it; that is a collision, not a bug.
 
-`low_obstacle_clearance` and the catalog's `low_obstacle_height` must agree. The contract test
+`VehicleTuning.low_obstacle_clearance` and `OfftrackObjectCatalog.low_obstacle_height` must agree. The contract test
 asserts equality, the same way `auto_reset_lost_distance < PLAY_AREA_MARGIN` is asserted today.
 
 ### Landing costs speed and grip, nothing else
