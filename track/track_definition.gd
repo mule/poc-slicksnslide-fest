@@ -26,3 +26,7 @@ extends Resource
 @export var offtrack_object_fingerprint: String = ""
 @export var offtrack_object_generation_usec: int = 0
 @export var offtrack_object_diagnostics: Dictionary = {}
+@export var jump_ramps: Array[JumpRampPlacement] = []
+@export var height_fingerprint: String = ""
+@export var height_generation_usec: int = 0
+@export var height_diagnostics: Dictionary = {}

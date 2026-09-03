@@ -51,6 +51,23 @@ extends Resource
 @export_range(0.0, 5.0, 0.01) var off_track_drag_multiplier: float = 2.6
 @export_range(0.0, 1.0, 0.01) var off_track_engine_multiplier: float = 0.62
 
+@export_group("Height channel")
+## WorldScale.metres(9.81). Baked so the resource holds the value the integrator uses.
+@export_range(0.0, 1000.0, 0.001) var gravity: float = 122.625
+## Fraction of the ground steering rate available in the air. Zero means the car flies straight.
+@export_range(0.0, 1.0, 0.01) var airborne_steering_authority: float = 0.0
+## Fraction of speed lost per metre-per-second of landing impact, clamped so a landing never
+## removes more than 70% of speed.
+@export_range(0.0, 0.2, 0.001) var landing_speed_loss: float = 0.03
+@export_range(0.0, 2.0, 0.01) var landing_recovery_seconds: float = 0.35
+@export_range(0.0, 1.0, 0.01) var landing_recovery_grip_multiplier: float = 0.5
+## Height above which low obstacles (rocks) stop colliding. Must equal
+## OfftrackObjectCatalog.low_obstacle_height; the contract test asserts it.
+@export_range(0.0, 500.0, 0.1) var low_obstacle_clearance: float = 12.5
+@export_range(0.0, 5.0, 0.05) var air_time_notice_seconds: float = 0.5
+@export_range(0.0, 3.0, 0.05) var lift_pixels_per_pixel: float = 1.0
+@export_range(0.0, 0.5, 0.005) var scale_per_metre: float = 0.04
+
 @export_group("Presentation")
 @export_range(0.0, 1.0, 0.01) var camera_lead_seconds: float = 0.38
 @export_range(0.2, 2.0, 0.01) var camera_zoom: float = 0.8
