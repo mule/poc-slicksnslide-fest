@@ -354,9 +354,9 @@ The vertical half of the behaviour is sound. A production car crossing a generat
 speed it can actually hold on dirt peaks at **14.48 px (1.159 m)** against a `low_obstacle_clearance`
 of 12.5 px, and its mask does drop the low layer up there. Slower crossings do not: the sweep
 above brackets the floor between a crest speed of **473.8 px/s** (apex below the clearance) and
-**502.1 px/s** (apex above it), so roughly 136-145 km/h at the crest is what it takes against a
-172 km/h ceiling. That is the top third of the speed range — a fair price for a stunt, and not the
-problem.
+**502.1 px/s** (apex above it), so roughly 136-145 km/h at the crest is what it takes, against the
+172.0 km/h a full-throttle approach reaches. The floor sits at about 79% of that ceiling, so only
+the top fifth of the speed range clears — a fair price for a stunt, and not the problem.
 
 The horizontal half is what makes it unreachable. A flight lasts about 0.767 s, cannot be steered
 (`airborne_steering_authority` is 0), and a ramp always sits on a straight run, so the car comes
@@ -412,9 +412,11 @@ real chunked static collider on the low layer — holds the production car at **
 the apex a real ramp produced in the runs above, and drives it over the rock at 57.6 km/h. The
 height comes from `HeightChannelTestHeightProvider` in plateau mode, not from a ramp, because as
 measured above no generated ramp is near enough to a rock to supply it. The car's mask holds only
-the tall layer on all 15 physics ticks on which the two collision circles overlap, and the
-collision count does not move. The car drives through the rock's centre rather than grazing it:
-closest approach 0.01 px. See
+the tall layer on every one of the 17 physics ticks on which the two collision circles overlap, and
+the collision count does not move. The still is taken only once the car is clear of that window:
+waiting for a frame to be drawn lets several physics ticks pass, so taking it inside the window
+would skip ticks the check is meant to cover. The car drives through the rock's centre rather than
+grazing it — closest approach 0.01 px. See
 [`seed-0-rock-cleared.png`](evidence/height-channel/seed-0-rock-cleared.png).
 `tests/airborne_obstacle_level_test.gd` proves the other half of the same rule: the same raised
 car still collides with a tree, and a car that has fallen back through the clearance hits the rock.

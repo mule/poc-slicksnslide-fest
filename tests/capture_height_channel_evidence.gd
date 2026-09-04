@@ -418,12 +418,11 @@ func _capture_rock_clearance(main_scene: PackedScene, lines: Array[String]) -> b
 	var minimum_distance := INF
 	var mask_dropped_low := true
 	# Every tick on which the two collision circles overlap is a tick a grounded car would have
-	# been stopped on, so the mask is checked on all of them -- and the check is kept off the frame
-	# that waits for a draw, because a draw wait lets several physics ticks pass between loop
-	# iterations and would silently sample only a handful of the overlap.
-	#
-	# The still is taken once the car is just past the rock: the body is drawn offset along the
-	# car's heading, so only with the rock behind it is the rock visible rather than underneath it.
+	# been stopped on, so the mask is checked on all of them. A draw wait lets several physics
+	# ticks pass between loop iterations, so the still is taken only once the car is clear of the
+	# overlap window -- inside it, the wait would skip ticks the check is supposed to cover.
+	# Taking it from behind the rock is also the only way the rock is visible at all: the body is
+	# drawn offset along the car's heading, and over the rock it covers it.
 	var contact_distance := ROCK_COLLISION_RADIUS * rock.scale_factor + CAR_COLLISION_RADIUS
 	for tick in range(MAX_TICKS):
 		car.linear_velocity = Vector2(ROCK_PROBE_SPEED, 0.0)
@@ -436,7 +435,7 @@ func _capture_rock_clearance(main_scene: PackedScene, lines: Array[String]) -> b
 			if car.get_collision_level_mask() != TopDownCar.TALL_LAYER:
 				mask_dropped_low = false
 		var past := car.global_position.x - rock.transform.origin.x
-		if over_image == null and past >= contact_distance * 0.6 and past <= contact_distance * 1.2:
+		if over_image == null and distance > contact_distance and past >= contact_distance and past <= contact_distance * 2.5:
 			camera.global_position = car.global_position
 			await RenderingServer.frame_post_draw
 			over_image = viewport.get_texture().get_image()
@@ -450,6 +449,7 @@ func _capture_rock_clearance(main_scene: PackedScene, lines: Array[String]) -> b
 	_check(car.global_position.x > rock.transform.origin.x, "the car is past the generated rock %s" % rock.stable_id)
 	_check(car.get_collision_count() == before, "clearing the generated rock registers no collision")
 	_check(mask_dropped_low, "the car's mask held only the tall layer on every overlapping tick")
+	_check(over_image != null, "the rock clearance frame was captured")
 	if over_image != null:
 		_check(over_image.save_png(ProjectSettings.globalize_path("%s/seed-0-rock-cleared.png" % OUTPUT_DIRECTORY)) == OK, "rock clearance image saved")
 	lines.append("rock seed=0 rock=%s scale=%.2f held_height_px=%.2f held_height_m=%.3f clearance_px=%.2f contact_distance_px=%.1f overlapping_ticks=%d min_distance_px=%.2f speed_kph=%.1f collisions=%d source=scripted_plateau_at_measured_apex" % [

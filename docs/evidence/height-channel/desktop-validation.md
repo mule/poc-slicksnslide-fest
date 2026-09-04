@@ -43,26 +43,26 @@ Every seed places at least one ramp. Mean 2.40, maximum 4, total 48.
 
 | Seed | Ramps | Requested | Eligible runs | Placement (us) | Height fingerprint |
 | ---: | ---: | ---: | ---: | ---: | --- |
-| 0 | 3 | 4 | 3 | 1219 | `6831dab8217f2bd2a407a9d2caf3cb7946c1671b3b3947d6b98ebde1b8537571` |
-| 1 | 3 | 3 | 5 | 1380 | `9f1c710cdeeb30dc42a32d8e1ec301f58be9773e9a6a2b17e9b9c2ebc4a31a9c` |
-| 2 | 1 | 4 | 3 | 1120 | `605602a82d56acdeca82f15c3a21fb5027badf331afd279d841561dd15ab6578` |
-| 3 | 3 | 3 | 4 | 1805 | `be4eeef9dc1a7bfd33a079936574ee5f9ec19bf5203b4b9a4d31580560a0adae` |
-| 4 | 4 | 4 | 11 | 1332 | `bc1b6b7292003777c764d44b9cb4220992588a101ebf36c041c752d5929ef71f` |
-| 5 | 2 | 2 | 7 | 895 | `bf4188c776f2b2ae44c87f649734e69036cc23a57bf2989d02e9a300fd29d2b8` |
-| 6 | 2 | 4 | 2 | 954 | `e13abf9d5acd3f2d2f7b6712bba7512ed1d23a00214220f0728ea6068e245009` |
-| 7 | 4 | 4 | 4 | 1408 | `01b34f74e5e185293c1b6111e3a53995a8eb93735b875b997f1801560d35a4f0` |
-| 8 | 2 | 3 | 3 | 1002 | `b704d6f0b745f71da5a47b24c1d6d504420d4e88f60c930b18ad74fc1766c4be` |
-| 9 | 4 | 4 | 7 | 1385 | `443869d91e6ff837e081ef3e50aef759946bf2bf101312e89e4a2d091ab85c9e` |
-| 10 | 3 | 3 | 5 | 1444 | `ab36c60bb88410129bbe15244c0f7ea37c53b45d59ef64ee57ad7cc10f13f336` |
-| 11 | 1 | 4 | 2 | 1049 | `e9ed445b2926eae68b1e57f35087c43a8eb01e617bb1db042697ce9fe50d5a6f` |
-| 12 | 1 | 2 | 1 | 1198 | `db6d8bdb4cd91b54f7ea631b3d62429d2dcdec18a26c918a5b201454b8b197ef` |
-| 13 | 2 | 2 | 5 | 1258 | `1b9690103b4c9e03cffa08c1d4e301edd31c79a72f8ab5c8dd5a34ab3939275c` |
-| 14 | 2 | 4 | 2 | 1188 | `fee3ceaac918daf9740baba1976ca2e9d32471137f25cb714f0d90b81b5deff9` |
-| 15 | 1 | 2 | 3 | 1090 | `9f18398c73c00acfe11f2ca007b629c974bb4210fb7859e431615a6a9a968818` |
-| 16 | 2 | 2 | 6 | 1100 | `6352695a13800db1c3f94fa9356d7f009f9a36558314977ee07b099bc8999bc1` |
-| 17 | 2 | 2 | 1 | 803 | `6a2f187aada88834c671fd147c17de8dc93dbb0bfb9d864592600b03a35d8596` |
-| 18 | 2 | 2 | 2 | 871 | `aa3f167e270c8cbbac0eb4b6881afb84e44b6f23fd64e8c4217333c6e29f1672` |
-| 19 | 4 | 4 | 5 | 1085 | `a173fe174f3a2ce3d1b93ca14827ed92af72d25f7e4e69c65357076f391d8af1` |
+| 0 | 3 | 4 | 3 | 1230 | `6831dab8217f2bd2a407a9d2caf3cb7946c1671b3b3947d6b98ebde1b8537571` |
+| 1 | 3 | 3 | 5 | 1371 | `9f1c710cdeeb30dc42a32d8e1ec301f58be9773e9a6a2b17e9b9c2ebc4a31a9c` |
+| 2 | 1 | 4 | 3 | 1247 | `605602a82d56acdeca82f15c3a21fb5027badf331afd279d841561dd15ab6578` |
+| 3 | 3 | 3 | 4 | 1464 | `be4eeef9dc1a7bfd33a079936574ee5f9ec19bf5203b4b9a4d31580560a0adae` |
+| 4 | 4 | 4 | 11 | 1435 | `bc1b6b7292003777c764d44b9cb4220992588a101ebf36c041c752d5929ef71f` |
+| 5 | 2 | 2 | 7 | 1123 | `bf4188c776f2b2ae44c87f649734e69036cc23a57bf2989d02e9a300fd29d2b8` |
+| 6 | 2 | 4 | 2 | 1087 | `e13abf9d5acd3f2d2f7b6712bba7512ed1d23a00214220f0728ea6068e245009` |
+| 7 | 4 | 4 | 4 | 1156 | `01b34f74e5e185293c1b6111e3a53995a8eb93735b875b997f1801560d35a4f0` |
+| 8 | 2 | 3 | 3 | 970 | `b704d6f0b745f71da5a47b24c1d6d504420d4e88f60c930b18ad74fc1766c4be` |
+| 9 | 4 | 4 | 7 | 1449 | `443869d91e6ff837e081ef3e50aef759946bf2bf101312e89e4a2d091ab85c9e` |
+| 10 | 3 | 3 | 5 | 1123 | `ab36c60bb88410129bbe15244c0f7ea37c53b45d59ef64ee57ad7cc10f13f336` |
+| 11 | 1 | 4 | 2 | 885 | `e9ed445b2926eae68b1e57f35087c43a8eb01e617bb1db042697ce9fe50d5a6f` |
+| 12 | 1 | 2 | 1 | 1054 | `db6d8bdb4cd91b54f7ea631b3d62429d2dcdec18a26c918a5b201454b8b197ef` |
+| 13 | 2 | 2 | 5 | 1014 | `1b9690103b4c9e03cffa08c1d4e301edd31c79a72f8ab5c8dd5a34ab3939275c` |
+| 14 | 2 | 4 | 2 | 937 | `fee3ceaac918daf9740baba1976ca2e9d32471137f25cb714f0d90b81b5deff9` |
+| 15 | 1 | 2 | 3 | 1174 | `9f18398c73c00acfe11f2ca007b629c974bb4210fb7859e431615a6a9a968818` |
+| 16 | 2 | 2 | 6 | 927 | `6352695a13800db1c3f94fa9356d7f009f9a36558314977ee07b099bc8999bc1` |
+| 17 | 2 | 2 | 1 | 866 | `6a2f187aada88834c671fd147c17de8dc93dbb0bfb9d864592600b03a35d8596` |
+| 18 | 2 | 2 | 2 | 884 | `aa3f167e270c8cbbac0eb4b6881afb84e44b6f23fd64e8c4217333c6e29f1672` |
+| 19 | 4 | 4 | 5 | 1122 | `a173fe174f3a2ce3d1b93ca14827ed92af72d25f7e4e69c65357076f391d8af1` |
 
 A seed placing fewer ramps than it requested is not a fault: the request is drawn first and the
 spawn, checkpoint, and 120 m spacing exclusions are applied afterwards, so a track with few long
@@ -104,9 +104,9 @@ The clearance floor is bracketed between a crest speed of 473.8 px/s (apex below
 
 Launch headings from 0 to 85 degrees off the ramp axis in 5-degree steps, each from five lateral
 seats across the road (-1.0 to +1.0 of the half width, so the extremes sit exactly on the road
-edge), at a 600 px/s seat, over seed 0's first ramp. The arc is a property of the ramp shape and
-the car rather than of the seed, so one ramp is swept and the corridor is then checked against
-every seed from placement data.
+edge), at a 600 px/s seat, over seed 0's first
+ramp. The arc is a property of the ramp shape and the car rather than of the seed, so one ramp is
+swept and the corridor is then checked against every seed from placement data.
 
 | Headings | Lateral seats | Passes | Launched | Half width (px) | Max drift while airborne (px) | Max drift above clearance (px) | Max past road edge, airborne (px) | Max past road edge, above clearance (px) |
 | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -149,13 +149,15 @@ from a generated ramp, and the capture asserts it in both directions rather than
 
 | Rock | Scale | Held height | Clearance threshold | Contact distance | Closest approach | Overlapping ticks | Speed | Collisions |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `v1:0:-10:12` | 0.89 | 14.48 px (1.159 m) | 12.50 px | 28.3 px | 0.01 px | 15 | 57.6 km/h | 0 |
+| `v1:0:-10:12` | 0.89 | 14.48 px (1.159 m) | 12.50 px | 28.3 px | 0.01 px | 17 | 57.6 km/h | 0 |
 
-The car drives through the rock's centre -- closest approach 0.01 px against a 0.89 px collider --
-and the mask is checked on every one of the 15 physics ticks on which the two collision circles
+The car drives through the rock's centre -- closest approach 0.01 px against a 13.34 px collider --
+and the mask is checked on every one of the 17 physics ticks on which the two collision circles
 overlap, each of which is a tick a grounded car would have been stopped on. The still is taken
-once the car is just past the rock, because the raised body is drawn offset along the car's
-heading and the rock is only visible from behind it.
+only once the car is clear of that window: waiting for a frame to be drawn lets several physics
+ticks pass, so taking it inside the window would skip ticks the check is meant to cover. Behind
+the rock is also the only place it is visible, because the raised body is drawn offset along the
+car's heading and covers the rock while over it.
 
 The rock is a generated placement from seed 0 with a real chunked static collider on the low
 layer, and the car is the production `TopDownCar` with its real mask logic. The height is
