@@ -3,6 +3,7 @@ extends RefCounted
 
 const TrackDefinitionScript := preload("res://track/track_definition.gd")
 const DEFAULT_OFFTRACK_CATALOG := preload("res://data/default_offtrack_object_catalog.tres")
+const DEFAULT_HEIGHT_CATALOG := preload("res://data/default_height_channel_catalog.tres")
 
 const DEFAULT_MAX_ATTEMPTS := 30
 const SAMPLE_SPACING := 25.0
@@ -45,14 +46,25 @@ func generate(requested_seed: int, limit_overrides: Dictionary = {}):
 		if last_reason.is_empty():
 			candidate.diagnostic_reason = "accepted"
 			candidate.generation_usec = Time.get_ticks_usec() - started_usec
-			return _attach_offtrack_objects(candidate)
+			return _attach_offtrack_objects(_attach_jump_ramps(candidate))
 
 	var fallback = _build_definition(requested_seed, _sample_stadium(FALLBACK_HALF_STRAIGHT, FALLBACK_RADIUS), FALLBACK_WIDTH)
 	fallback.generation_attempts = maximum_attempts
 	fallback.used_fallback = true
 	fallback.diagnostic_reason = "retry_exhausted:%s; fallback=known_valid_stadium" % last_reason
 	fallback.generation_usec = Time.get_ticks_usec() - started_usec
-	return _attach_offtrack_objects(fallback)
+	return _attach_offtrack_objects(_attach_jump_ramps(fallback))
+
+
+## Ramps come before objects. Both are domain-seeded and share nothing, but if a later catalog
+## wants objects to avoid landing zones the ramps must already exist.
+func _attach_jump_ramps(definition: TrackDefinition) -> TrackDefinition:
+	var result := JumpRampPlacer.new().place(definition, DEFAULT_HEIGHT_CATALOG)
+	definition.jump_ramps = result.placements
+	definition.height_fingerprint = result.fingerprint
+	definition.height_generation_usec = result.generation_usec
+	definition.height_diagnostics = result.diagnostics
+	return definition
 
 
 func _attach_offtrack_objects(definition: TrackDefinition) -> TrackDefinition:

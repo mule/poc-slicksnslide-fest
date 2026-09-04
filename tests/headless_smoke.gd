@@ -107,6 +107,9 @@ func _verify_default_resources() -> bool:
 	if vehicle_tuning != null:
 		_check(float(vehicle_tuning.get("mass_kg")) > 0.0, "vehicle physics tuning has an explicit resource home")
 
+	var height_catalog := load("res://data/default_height_channel_catalog.tres") as HeightChannelCatalog
+	_check(height_catalog != null and height_catalog.version >= 1, "the default height channel catalog loads")
+
 	var offtrack_catalog := load("res://data/default_offtrack_object_catalog.tres") as OfftrackObjectCatalog
 	_check(offtrack_catalog != null, "default off-track object catalog loads")
 	if offtrack_catalog != null:

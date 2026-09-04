@@ -75,6 +75,15 @@ func _physics_process(delta: float) -> void:
 		_checkpoint_detector.reset(_vehicle.get_safe_reset_pose().origin)
 		_show_status("Returned to the track")
 		reset_this_tick = true
+	# Polled ahead of the reset early-return below: the notice is an unbounded latch that only a
+	# consumer clears, so a tick that returns early without draining it would let a stale flight
+	# raise its status line at an arbitrary later moment. Draining and reporting are separated for
+	# that reason: a reset clears the car's air time but not this latch, so a flight that ends in
+	# an off-track reset would otherwise overwrite "Returned to the track" with its own air time in
+	# the same tick. The latch still drains on every simulated tick; only the message is suppressed.
+	var air_time := _vehicle.consume_air_time_notice()
+	if air_time > 0.0 and not reset_this_tick:
+		_show_status("Air time  ·  %.2f s" % air_time)
 	if reset_this_tick:
 		# A reset only sets a flag the vehicle honours on the *next* physics tick, so
 		# `_vehicle.global_position` still holds the pre-teleport pose right now. Sampling against
@@ -129,6 +138,7 @@ func restart_with_seed(seed: int) -> void:
 	_vehicle.global_transform = _track_definition.spawn_transform
 	install_vehicle(_vehicle)
 	_vehicle.set_surface_query(TrackSurfaceMap.new(_track_definition))
+	_vehicle.set_height_query(TrackHeightMap.new(_track_definition))
 	_vehicle.set_input_state(_controller_input.apply_raw_values(0.0, 0.0, 0.0, false))
 	_vehicle.set_safe_reset_pose(_track_definition.spawn_transform)
 	_vehicle.set_auto_reset_enabled(bool(session_settings.get("auto_reset_enabled")))
@@ -169,6 +179,7 @@ func get_session_snapshot() -> Dictionary:
 		"paused": _trial.paused,
 		"geometry_fingerprint": _track_definition.geometry_fingerprint,
 		"offtrack_object_fingerprint": _track_definition.offtrack_object_fingerprint,
+		"height_fingerprint": _track_definition.height_fingerprint,
 	}
 
 
@@ -200,6 +211,13 @@ func _refresh_diagnostics() -> void:
 		float(metrics.get("throttle", 0.0)),
 		float(metrics.get("brake", 0.0)),
 		float(metrics.get("handbrake", 0.0)),
+	)
+	_diagnostics_overlay.call(
+		"set_height_metrics",
+		float(metrics.get("height_m", 0.0)),
+		float(metrics.get("vertical_speed_mps", 0.0)),
+		bool(metrics.get("airborne", false)),
+		float(metrics.get("air_time", 0.0)),
 	)
 
 

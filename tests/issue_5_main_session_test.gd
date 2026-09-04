@@ -28,6 +28,7 @@ func _run() -> void:
 	await process_frame
 	await physics_frame
 	_check(await _verify_automatic_reset_does_not_leak_checkpoint_progress(session), "the automatic reset does not leak checkpoint progress verification ran to completion")
+	_check(await _verify_height_channel_is_wired(session), "the height channel wiring verification ran to completion")
 	paused = false
 	session.queue_free()
 	await process_frame
@@ -159,6 +160,84 @@ func _verify_automatic_reset_does_not_leak_checkpoint_progress(session: Node) ->
 		int(after.get("next_checkpoint", -1)) == 1 and int(after.get("lap_count", -1)) == 0,
 		"the automatic reset's off-track-to-safe-pose teleport is not credited as a driven checkpoint crossing"
 	)
+	return true
+
+
+func _verify_height_channel_is_wired(session: Node) -> bool:
+	# The file keeps `session` typed as Node like its sibling verifications, so calls go through
+	# call() rather than static member access.
+	session.call("restart_with_seed", 3)
+	await process_frame
+	var snapshot: Dictionary = session.call("get_session_snapshot")
+	_check(str(snapshot.get("height_fingerprint", "")).length() == 64, "the snapshot reports a SHA-256 height fingerprint")
+	var runtime := session.get_node_or_null("World/TrackMount/GeneratedTrack") as TrackRuntime
+	var ramps := runtime.get_node_or_null("JumpRamps") as JumpRampVisuals if runtime != null else null
+	_check(ramps != null, "the generated track mounts a JumpRamps visual layer")
+	var definition: TrackDefinition = runtime.definition
+	_check(ramps != null and ramps.visual_count() == definition.jump_ramps.size(), "one wedge per generated ramp")
+	# The placer's fingerprint hashes only the catalog version and the placements, so every
+	# rampless seed hashes alike. Seeds 3 and 4 are chosen because both place ramps -- one and two
+	# respectively -- which is what keeps the wedge counts and the fingerprint comparison below
+	# from passing vacuously on two empty tracks.
+	_check(not definition.jump_ramps.is_empty(), "seed 3 places at least one ramp, so its wedge count is not vacuously zero")
+	var first_fingerprint := str(snapshot.get("height_fingerprint", ""))
+	var first_ramps := ramps
+
+	# Seed restart replaces the ramp set entirely.
+	session.call("restart_with_seed", 4)
+	await process_frame
+	var second: Dictionary = session.call("get_session_snapshot")
+	_check(str(second.get("height_fingerprint", "")) != first_fingerprint, "restarting with another seed changes the height fingerprint")
+	_check(session.get_node("World/TrackMount").get_child_count() == 1, "the previous track, including its ramps, is freed on restart")
+	_check(not is_instance_valid(first_ramps), "the previous track's wedge layer is freed with it, not merely detached")
+	var second_runtime := session.get_node_or_null("World/TrackMount/GeneratedTrack") as TrackRuntime
+	var second_ramps := second_runtime.get_node_or_null("JumpRamps") as JumpRampVisuals if second_runtime != null else null
+	var second_definition: TrackDefinition = second_runtime.definition
+	_check(
+		second_ramps != null and second_ramps.visual_count() == second_definition.jump_ramps.size(),
+		"the restarted track's wedges match the new definition's ramps, not the old one's"
+	)
+
+	var car := session.get_node("World/VehicleMount/PlayerCar") as TopDownCar
+
+	# The height query the *session* installed, exercised without replacing it -- coverage for the
+	# one line this wiring owns. A parked car cannot climb onto a crest, because the grounded
+	# branch caps its rise at the rate the ground under it rises and that rate is zero at a
+	# standstill. `_apply_safe_reset` is the exception: it re-seats the ride height by sampling the
+	# pose it teleports to, through whatever query the car already holds. So a car reset onto a
+	# crest reports that crest's height only if the session installed a TrackHeightMap built from
+	# this definition; with no query installed it reads flat ground and stays at zero.
+	var crest_ramp: JumpRampPlacement = second_definition.jump_ramps[0] if not second_definition.jump_ramps.is_empty() else null
+	_check(crest_ramp != null, "seed 4 places at least one ramp to reset the car onto")
+	if crest_ramp != null:
+		_check(car.set_safe_reset_pose(Transform2D(0.0, crest_ramp.transform.origin)), "the ramp crest is a collision-clear safe pose")
+		car.request_safe_reset()
+		await physics_frame
+		_check(
+			absf(car.get_height() - crest_ramp.crest_height) < 0.001,
+			"the session's own height query seats the car on the crest (height %.3f px, crest %.3f px)" % [car.get_height(), crest_ramp.crest_height]
+		)
+
+	# A scripted fall long enough for the notice proves the car is wired to the session's status.
+	# This one deliberately replaces the query, to isolate the car-to-session-to-HUD latch path
+	# from whatever the generated track happens to place.
+	var provider := HeightChannelTestHeightProvider.new()
+	provider.mode = HeightChannelTestHeightProvider.Mode.PLATEAU
+	provider.plateau_height = 40.0
+	car.set_height_query(provider)
+	# Two ticks on the plateau so the car snaps up to 40 px, then pull the ground away everywhere.
+	await physics_frame
+	await physics_frame
+	provider.plateau_end_x = -INF
+	var label := session.get_node("%StatusLabel") as Label
+	var saw_air_time := false
+	for tick in range(180):
+		await physics_frame
+		await process_frame
+		if label.text.begins_with("Air time"):
+			saw_air_time = true
+			break
+	_check(saw_air_time, "a flight of at least half a second shows the air time status line")
 	return true
 
 
