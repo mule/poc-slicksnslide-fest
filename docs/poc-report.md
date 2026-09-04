@@ -48,23 +48,26 @@ after road acceptance, and is independent of the object catalog version 1 above.
 | 3 | 3 | 3 | 8 | 2 | 3 | 13 | 2 | 2 | 18 | 2 | 2 |
 | 4 | 4 | 4 | 9 | 4 | 4 | 14 | 2 | 4 | 19 | 4 | 4 |
 
-Three seeds were driven over their first ramp at 600 px/s with the throttle down, in a graphical
-1280x720 `SubViewport`, and the approach, apex, and landing frames captured:
+Three seeds were driven over their first ramp in a graphical 1280x720 `SubViewport` and the
+approach, apex, and landing frames captured. Speeds are measured at the crest, not at the 600 px/s
+seat the car was placed on 420 px earlier, because the throttle is down over the approach:
 
-| Seed | Ramp | Apex | Air time | Speed before / after landing |
-| ---: | --- | ---: | ---: | --- |
-| 0 | `h3:0:0:2` | 14.48 px (1.159 m) | 0.767 s | 143.6 / 122.4 km/h |
-| 4 | `h3:4:0:4` | 14.48 px (1.159 m) | 0.767 s | 143.6 / 122.4 km/h |
-| 9 | `h3:9:0:0` | 14.48 px (1.159 m) | 0.767 s | 143.6 / 122.4 km/h |
+| Seed | Ramp | Crest speed | Apex | Air time | Speed before / after landing |
+| ---: | --- | ---: | ---: | ---: | --- |
+| 0 | `h3:0:0:2` | 172.0 km/h | 14.48 px (1.159 m) | 0.767 s | 143.6 / 122.4 km/h |
+| 4 | `h3:4:0:4` | 172.0 km/h | 14.48 px (1.159 m) | 0.767 s | 143.6 / 122.4 km/h |
+| 9 | `h3:9:0:0` | 172.0 km/h | 14.48 px (1.159 m) | 0.767 s | 143.6 / 122.4 km/h |
 
 An airborne car above `low_obstacle_clearance` (12.5 px) drops the low collision layer, so it
-clears a rock and still hits a tree; that is proven against generated rock `v1:0:-10:12` from seed 0
-in [`seed-0-rock-cleared.png`](evidence/height-channel/seed-0-rock-cleared.png). It is not
-reachable from a generated ramp, and that is a measured limitation rather than a defect in the
-channel: a flight carries the car at most 60.2 px sideways while above the clearance height, and
-the off-track catalog never places a solid closer than 352.5 px from the centreline. The full
-measurement, and why the clearance value was left alone, are in
-[The height channel](height-channel.md).
+clears a rock and still hits a tree. That is proven against generated rock `v1:0:-10:12` from seed 0
+in [`seed-0-rock-cleared.png`](evidence/height-channel/seed-0-rock-cleared.png) — with the car
+held at the measured ramp apex by a **scripted height provider rather than by a ramp**, because
+no generated ramp is near enough to a rock to supply the height. It is a capability, not
+something that happens in play, and that is a measured limitation rather than a defect in the
+channel: measured outward from the road edge, a flight carries the car at most 95.4 px past the
+edge while above the clearance height, and the off-track catalog never places a solid nearer the
+edge than 250 px. The gap is about 155 px. The full measurement, and why the clearance value was
+left alone, are in [The height channel](height-channel.md).
 
 See [height channel desktop validation](evidence/height-channel/desktop-validation.md) for the
 raw trace, the environment, and the complete per-seed ledger.

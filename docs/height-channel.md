@@ -227,8 +227,9 @@ Ramp placement is a separate deterministic domain from the road and from off-tra
   wedge instead of onto it. Deferred by decision, not an accident: the alternative shapes cost
   either a query per side or a fake barrier.
 - **No rock can be cleared from a generated ramp.** The behaviour works — a car above the clearance
-  height passes over a rock and still hits a tree — but on a generated track there is nowhere to
-  do it. See the tuning notes below for the measurement.
+  height passes over a rock and still hits a tree — but ramp placement and object placement never
+  bring the two within reach of each other, so it is a capability rather than something that
+  happens in play. See the tuning notes below for the measurement.
 - **No elevation anywhere else.** The ground is flat except on a ramp. There is no terrain field
   and no elevation on the road itself.
 - **No mid-air control.** `airborne_steering_authority` is data and defaults to 0.0. Any non-zero
@@ -272,7 +273,7 @@ godot --headless --path . --script res://tests/track_collision_physics_test.gd -
 | Flag | Breaks | First failing assertion |
 | --- | --- | --- |
 | `--break-height-seed` | reuses the road seed for the height domain | `seed 0 height fingerprint repeats` |
-| `--break-clearance` | drops the spawn/checkpoint/spacing clearances | `seed 10 height fingerprint repeats` |
+| `--break-clearance` | zeroes the checkpoint exclusion only; the spawn and spacing exclusions are untouched | `seed 1 height fingerprint repeats` |
 | `--break-gravity` | zeroes gravity, so nothing ever lands | `the car lands within 300 ticks` |
 | `--break-landing` | zeroes the landing speed loss and recovery | `the landing is hard enough that the loss assertion is live` |
 | `--break-height-layers` | puts every solid on the tall layer | `the rock is a low collider` |
@@ -281,53 +282,65 @@ godot --headless --path . --script res://tests/track_collision_physics_test.gd -
 ## Tuning notes
 
 These come from driving the production session on seeds 0, 4, and 9 in a graphical run: the car
-placed on each ramp's approach at 600 px/s — the speed a full-throttle car actually holds on
-dirt, not the 640 px/s `max_safe_speed` clamp — with the throttle down, and every frame of the
-approach, the flight, and the landing rendered and measured. The stills below are the frames the
-numbers were read from. **No tuning value was moved by this pass**; the reasoning for the one
-value that was questioned is at the end of this section.
+placed on each ramp's approach 420 px out at 600 px/s — the speed a full-throttle car actually
+holds on dirt, not the 640 px/s `max_safe_speed` clamp — with the throttle down, and every frame
+of the approach, the flight, and the landing rendered and measured. The stills below are the
+frames the numbers were read from. **No tuning value was moved by this pass**; the reasoning for
+the one value that was questioned is at the end of this section.
+
+Two measurement frames are used deliberately and should not be mixed:
+
+- **Speeds attached to a jump are crest speeds**, measured on the first airborne tick, not the
+  speed the car was seated at. The car is under throttle over the approach, so the two differ by
+  a lot — a 200 px/s seat crosses the crest at 383.8 px/s.
+- **Sideways distances are measured outward from the road edge.** That is the frame the
+  off-track catalog's `solid_clearance` is expressed in. A distance measured from the crest
+  would double-count the road's half width when compared against it, because a ramp spans the
+  full road width and a car can launch anywhere across it.
 
 ### Does the approach read as a ramp before you reach it?
 
 Yes, comfortably. At 250 px (20 m) out — about a third of a second at speed — the wedge, its
 crest line, and the chevron pointing at the crest are all on screen well ahead of the car, and
-the lighter dirt of the ramp separates cleanly from the road around it. See
+the lighter dirt separates cleanly from the road. See
 [`seed-0-approach.png`](evidence/height-channel/seed-0-approach.png). The ramp spans the whole
 road width, so there is no line to choose around it; the only decision the approach offers is how
-fast to take it, which is the right one for this geometry.
+fast to take it, which is the right decision for this shape.
 
 ### Is lift-off tied to speed?
 
-Directly, and legibly. Lift-off vertical speed is `slope * speed`, so the apex is quadratic in the
-approach. The same ramp on seed 0 at five approach speeds:
+Directly. Lift-off vertical speed is `slope * speed_at_the_crest`, so the apex is quadratic in
+the crest speed. The same ramp on seed 0, seated at nine speeds and measured at the crest:
 
-| Approach | Apex | Air time |
-| ---: | ---: | ---: |
-| 200 px/s (57.6 km/h) | 11.04 px (0.883 m) | 0.600 s |
-| 300 px/s (86.4 km/h) | 11.49 px (0.919 m) | 0.617 s |
-| 400 px/s (115.2 km/h) | 12.38 px (0.990 m) | 0.667 s |
-| 500 px/s (144.0 km/h) | 13.06 px (1.045 m) | 0.700 s |
-| 600 px/s (172.8 km/h) | 14.48 px (1.159 m) | 0.767 s |
+| Seat | Crest speed | Apex | Air time | Above the 12.5 px clearance? |
+| ---: | ---: | ---: | ---: | --- |
+| 200 px/s | 383.8 px/s (110.5 km/h) | 11.04 px (0.883 m) | 0.600 s | no |
+| 250 px/s | 400.9 px/s (115.5 km/h) | 11.17 px (0.893 m) | 0.600 s | no |
+| 300 px/s | 422.6 px/s (121.7 km/h) | 11.49 px (0.919 m) | 0.617 s | no |
+| 350 px/s | 447.0 px/s (128.7 km/h) | 11.86 px (0.949 m) | 0.650 s | no |
+| 400 px/s | 473.8 px/s (136.5 km/h) | 12.38 px (0.990 m) | 0.667 s | no |
+| 450 px/s | 502.1 px/s (144.6 km/h) | 12.60 px (1.008 m) | 0.683 s | yes |
+| 500 px/s | 532.4 px/s (153.3 km/h) | 13.06 px (1.045 m) | 0.700 s | yes |
+| 550 px/s | 564.4 px/s (162.5 km/h) | 13.86 px (1.109 m) | 0.733 s | yes |
+| 600 px/s | 597.2 px/s (172.0 km/h) | 14.48 px (1.159 m) | 0.767 s | yes |
 
-A car crawling over the crest still leaves the ground — that is deliberate, and `LIFT_OFF_TOLERANCE`
-is tuned for it. What changes with speed is mostly how far the jump goes: air time grows from
-0.600 s to 0.767 s and the apex from 11.04 px to 14.48 px, but the car keeps its speed in the air,
-so the 200 px/s run covers roughly 120 px of ground and the 600 px/s run roughly 430 px. Arriving
-fast buys a jump across the far face rather than a bounce over the crest.
+A crawl still leaves the ground — that is deliberate, and `LIFT_OFF_TOLERANCE` is tuned for it —
+but it is a bounce. What grows with speed is mostly distance: the car keeps its speed in the air,
+so the slowest row covers roughly 230 px of ground and the fastest roughly 458 px.
 
 ### Does the landing feel like a cost rather than a wall?
 
 A cost. Across the three driven seeds:
 
-| Seed | Ramp | Apex | Air time | Speed before | Speed after | Kept |
-| ---: | --- | ---: | ---: | ---: | ---: | ---: |
-| 0 | `h3:0:0:2` | 14.48 px (1.159 m) | 0.767 s | 143.6 km/h | 122.4 km/h | 0.852 |
-| 4 | `h3:4:0:4` | 14.48 px (1.159 m) | 0.767 s | 143.6 km/h | 122.4 km/h | 0.852 |
-| 9 | `h3:9:0:0` | 14.48 px (1.159 m) | 0.767 s | 143.6 km/h | 122.4 km/h | 0.852 |
+| Seed | Ramp | Crest speed | Apex | Air time | Speed before | Speed after | Kept |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | `h3:0:0:2` | 172.0 km/h | 14.48 px (1.159 m) | 0.767 s | 143.6 km/h | 122.4 km/h | 0.852 |
+| 4 | `h3:4:0:4` | 172.0 km/h | 14.48 px (1.159 m) | 0.767 s | 143.6 km/h | 122.4 km/h | 0.852 |
+| 9 | `h3:9:0:0` | 172.0 km/h | 14.48 px (1.159 m) | 0.767 s | 143.6 km/h | 122.4 km/h | 0.852 |
 
 The impact term takes a slice, not a stop: the 30% floor is nowhere near being approached, and
-most of the drop from the approach speed is the aerodynamic drag of the flight itself rather than
-the landing. What is actually felt is the 0.35 s of halved grip afterwards — the car lands
+most of the drop between the crest and the landing is the aerodynamic drag of the flight rather
+than the impact. What is actually paid is the 0.35 s of halved grip afterwards — the car lands
 pointing where it was pointing and then slides for a third of a second, so a jump taken into a
 corner costs a line. The dust burst and the air-time notice both fire, so the landing reads as
 having been paid for. Driving away under power on the far side is the normal outcome.
@@ -337,34 +350,40 @@ having been paid for. Driving away under power on the far side is the normal out
 **No — and not for the reason it looked like.** This is the finding of the drive, so the numbers
 are here in full.
 
-The vertical half of the behaviour is sound. A production car taking a generated ramp at the speed
-it can actually hold on dirt peaks at **14.48 px (1.159 m)** against a `low_obstacle_clearance` of
-12.5 px, and its mask does drop the low layer up there. Slower than that it does not: in the speed
-sweep above the apex crosses 12.5 px somewhere between the 400 px/s (12.38 px) and 500 px/s
-(13.06 px) runs, so roughly 115-144 km/h is the floor. The clearance threshold is reachable, but
-only in the top third of the speed range — a fair price for a stunt, and not the problem.
+The vertical half of the behaviour is sound. A production car crossing a generated crest at the
+speed it can actually hold on dirt peaks at **14.48 px (1.159 m)** against a `low_obstacle_clearance`
+of 12.5 px, and its mask does drop the low layer up there. Slower crossings do not: the sweep
+above brackets the floor between a crest speed of **473.8 px/s** (apex below the clearance) and
+**502.1 px/s** (apex above it), so roughly 136-145 km/h at the crest is what it takes against a
+172 km/h ceiling. That is the top third of the speed range — a fair price for a stunt, and not the
+problem.
 
 The horizontal half is what makes it unreachable. A flight lasts about 0.767 s, cannot be steered
 (`airborne_steering_authority` is 0), and a ramp always sits on a straight run, so the car comes
-down on the road it took off from. Sweeping every launch heading from 0° to 85° in 5° steps at
-600 px/s over seed 0's first ramp, 18 of 18 headings left the ground, and the extremes were:
+down on the road it took off from. The sweep covers every launch heading from 0° to 85° in 5°
+steps at five lateral seats across the road — a ramp spans the full road width, so a car crossing
+it near the edge launches that far off the centreline and carries the offset through the flight.
+68 of 90 passes left the ground. Measured outward from the road edge:
 
 | Measurement | Value |
 | --- | ---: |
-| Furthest sideways from the crest while airborne | 149.9 px |
-| Furthest sideways from the crest while above the 12.5 px clearance | 60.2 px |
-| Nearest any generated solid actually sits to the road centreline, seeds 0-19 | 372.9 px |
-| Nearest a generated solid may ever sit to the centreline | 352.5 px |
+| Furthest past the road edge while airborne at any height | 192.2 px |
+| Furthest past the road edge while above the 12.5 px clearance | 95.4 px |
+| Nearest an off-track solid may sit to the road edge (`solid_clearance`) | 250 px |
+| Nearest one actually sits, measured over seeds 0-19 | 267.8 px |
 
-A solid may never be placed closer to the centreline than half the road width plus the off-track
-catalog's `solid_clearance` — the 20 m solid recovery corridor. The furthest a flight can carry
-the car sideways while it is high enough to clear a rock is 60.2 px. The gap is about 292 px wide,
-and it is horizontal. Per-seed corridor figures are in the trace.
+The same sweep in the frame-independent form: a flight drifts at most 95.4 px sideways from the
+line it launched on while above the clearance height, and 192.2 px over the whole flight.
+
+So: **a solid sits at least 250 px outside the road edge; a flight carries the car at most
+95.4 px past that edge while it is high enough to clear a rock; the gap is about 155 px.**
+Even ignoring height entirely, the whole flight envelope reaches 192.2 px past the edge against the
+267.8 px where the nearest solid actually sits, so the margin survives that reading too.
 
 **Why `low_obstacle_clearance` was not lowered.** The obvious remedy is to lower the clearance so
 the car counts as "up" sooner. It cannot work, because the clearance is a vertical threshold and
-the missing distance is horizontal: even a clearance of zero would only extend the sideways reach
-to 149.9 px, the furthest-while-airborne figure above, which is still short of the corridor.
+the missing distance is horizontal: even a clearance of zero would only extend the reach past the
+edge to 192.2 px, the whole-envelope figure above, which is still short of the corridor.
 Lowering it would also force the rock archetype's `obstacle_height` down with it — otherwise
 rocks leave the low layer entirely and become permanently unclearable — which redefines a 1 m
 boulder as a pebble that still stops a car dead on the ground. That is a cost with no benefit, so
@@ -380,33 +399,45 @@ geometry, which was just rebalanced against the landing guarantee. Both are plac
 not tuning, and neither belongs in an evidence pass.
 
 `tests/capture_height_channel_evidence.gd` asserts the gap rather than merely reporting it, in two
-directions: against the closest a solid may ever sit, and against the closest one actually does
-sit in seeds 0-19. A later placement change that brings a solid within reach of a flight fails
-that check and sends whoever made it back to this section.
+directions and in one frame: the above-clearance reach past the edge against the catalog rule, and
+the whole-envelope reach past the edge against the nearest solid seeds 0-19 actually place. A
+later placement change that brings a solid within reach of a flight fails that check and sends
+whoever made it back to this section.
 
 ### What the rock-clearance still actually shows
 
-The layer behaviour itself is proven against a real generated rock. The capture takes rock
-`v1:0:-10:12` from seed 0 — a real placement with a real chunked static collider on the low layer —
-holds the production car at **14.48 px (1.159 m)**, the apex a real ramp produced in the runs above,
-and drives it straight over the rock at 57.6 km/h. The height comes from
-`HeightChannelTestHeightProvider` in plateau mode rather than from a ramp, because as measured
-above no generated ramp is near enough to a rock to supply it. The car's mask holds only the tall
-layer for the whole pass and the collision count does not move. See
+The layer behaviour itself is proven against a real generated rock, with a scripted height source
+rather than a ramp. The capture takes rock `v1:0:-10:12` from seed 0 — a generated placement with a
+real chunked static collider on the low layer — holds the production car at **14.48 px (1.159 m)**,
+the apex a real ramp produced in the runs above, and drives it over the rock at 57.6 km/h. The
+height comes from `HeightChannelTestHeightProvider` in plateau mode, not from a ramp, because as
+measured above no generated ramp is near enough to a rock to supply it. The car's mask holds only
+the tall layer on all 15 physics ticks on which the two collision circles overlap, and the
+collision count does not move. The car drives through the rock's centre rather than grazing it:
+closest approach 0.01 px. See
 [`seed-0-rock-cleared.png`](evidence/height-channel/seed-0-rock-cleared.png).
 `tests/airborne_obstacle_level_test.gd` proves the other half of the same rule: the same raised
 car still collides with a tree, and a car that has fallen back through the clearance hits the rock.
+
+### One thing the capture had to work around
+
+`ApplicationLifecycle` pauses the whole `SceneTree` on `NOTIFICATION_APPLICATION_FOCUS_OUT`, which
+is correct for a game and fatal for an unattended capture: a paused tree still emits
+`physics_frame`, so a drive loop keeps counting ticks while the car sits still and the run
+silently measures nothing. The capture disconnects that one signal for the life of each session it
+opens and asserts the tree is running before it measures anything. Nothing else about the session
+is modified.
 
 ## Evidence
 
 Everything below is under [`docs/evidence/height-channel/`](evidence/height-channel/) and is
 regenerated by one graphical command; see
 [`desktop-validation.md`](evidence/height-channel/desktop-validation.md) for the environment,
-method, and the complete per-seed ledger.
+method, and the complete per-seed tables.
 
 | File | Shows |
 | --- | --- |
-| [`desktop-trace-seeds-0-4-9.txt`](evidence/height-channel/desktop-trace-seeds-0-4-9.txt) | the seeds 0-19 ramp ledger with all three fingerprints, the three driven jumps, the speed sweep, the flight-reach and corridor measurements, and the rock pass |
+| [`desktop-trace-seeds-0-4-9.txt`](evidence/height-channel/desktop-trace-seeds-0-4-9.txt) | the seeds 0-19 ramp ledger with all three fingerprints, the three driven jumps, the crest-speed sweep, the flight-reach and corridor measurements, and the rock pass |
 | [`seed-0-approach.png`](evidence/height-channel/seed-0-approach.png) | the ramp 250 px out, car grounded at speed |
 | [`seed-0-apex.png`](evidence/height-channel/seed-0-apex.png) | the apex, body lifted clear of its own shadow, height and air time on the overlay |
 | [`seed-0-landing.png`](evidence/height-channel/seed-0-landing.png) | the first grounded frame, air-time notice showing |

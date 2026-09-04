@@ -1,6 +1,6 @@
 # Slicks 'n Slide Fest
 
-A Godot proof of concept for a single-viewport, top-down dirt-racing game. It now launches directly into a deterministic generated circuit with a force-based car, controller-first input, ordered lap timing, safe reset, pause, seed restart, and deterministic off-track scenery. Grass and debris make the shoulder readable while trees and rocks populate the deeper hazard field without blocking the 20 m solid recovery corridor; see [Off-track objects](docs/offtrack-objects.md). Deterministic jump ramps give the circuit its one vertical axis: the car crests, flies, and pays for the landing, and while it is high enough it clears a rock but never a tree; see [The height channel](docs/height-channel.md).
+A Godot proof of concept for a single-viewport, top-down dirt-racing game. It now launches directly into a deterministic generated circuit with a force-based car, controller-first input, ordered lap timing, safe reset, pause, seed restart, and deterministic off-track scenery. Grass and debris make the shoulder readable while trees and rocks populate the deeper hazard field without blocking the 20 m solid recovery corridor; see [Off-track objects](docs/offtrack-objects.md). Deterministic jump ramps give the circuit its one vertical axis: the car crests, flies, and pays for the landing. While it is high enough it clears a rock but never a tree — a capability the current ramp and object placement never actually bring together, so it is not something you will see in play; see [The height channel](docs/height-channel.md) and its [limitations](docs/height-channel.md#limitations).
 
 ## Required Godot version
 
@@ -64,6 +64,10 @@ These checks keep placement deterministic and separate from road geometry, requi
 solid runtime consumers to agree on every placement, and exercise the real seed-restart path.
 The independent performance test enforces one-time placement p95 <= 80 ms and runtime construction
 p95 <= 100 ms on the documented desktop reference machine; see [desktop validation evidence](docs/evidence/offtrack-objects/desktop-validation.md).
+The 80 ms placement budget is genuinely tight on that machine: under other CPU load the p95 has
+been observed anywhere between roughly 67 ms and 165 ms, so `offtrack_object_placement_test` and
+`offtrack_object_performance_test` fail between a third and two thirds of the time on a busy
+host. Re-run either alone on an idle machine before reading a red result as a regression.
 The [cross-platform PoC report](docs/poc-report.md) records the current revision and keeps the
 desktop result conditional until Android #23 and Steam Deck #7 each complete their physical gates.
 

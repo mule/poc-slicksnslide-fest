@@ -63,7 +63,10 @@ build.
 There is no object streaming, persistence across a restart, destructibility, damage, pickup
 system, or shadow gameplay. Height and jump behaviour is no longer out of scope: it was
 implemented as sub-project C, and an object's `obstacle_height` is what decides whether an
-airborne car can pass over it. See [The height channel](height-channel.md).
+airborne car *could* pass over it. It stays a capability rather than something that happens:
+the solid clearance above keeps every solid far enough outside the road edge that no flight
+from a generated ramp ever reaches one. See [The height channel](height-channel.md) and its
+[limitations](height-channel.md#limitations).
 
 Restarting a seed frees the old generated track and its visual and collision children before
 mounting the replacement.
@@ -103,7 +106,11 @@ desktop budgets:
 ```
 
 The one-time placement p95 budget is 80 ms and runtime-construction p95 budget is 100 ms over
-seeds 0-19. Mutation checks must fail (exit 1):
+seeds 0-19. The 80 ms placement budget is tight on the desktop reference machine: under other
+CPU load its p95 has been observed between roughly 67 ms and 165 ms, so
+`offtrack_object_placement_test` and `offtrack_object_performance_test` fail between a third and
+two thirds of the time on a busy host. Re-run either alone on an idle machine before reading a
+red result as a regression. Mutation checks must fail (exit 1):
 
 ```sh
 /home/japurane/.local/bin/godot --headless --path . --script res://tests/offtrack_object_placement_test.gd -- --break-seed
