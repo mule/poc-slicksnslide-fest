@@ -62,7 +62,7 @@ func _verify_contract(catalog: OfftrackObjectCatalog) -> bool:
 		_remove_first_shape(collisions)
 	_check(_verify_catalog_alignment(placements, catalog), "placement/catalog physics alignment completed")
 	_check(collisions.collider_count() == 2, "only tree and rock produce colliders")
-	_check(collisions.chunk_body_count() == 1, "nearby solid fixtures share one chunk body")
+	_check(collisions.chunk_body_count() == 2, "nearby solid fixtures build one low and one tall chunk body")
 	_check(_verify_shape_contract(collisions, placements, catalog), "solid shape transforms and radii match fixtures")
 	_check(_verify_chunk_local_alignment(catalog), "non-zero chunk alignment verification completed")
 	_check(await _verify_sweep(collisions, Vector2.ZERO, Vector2(WorldScale.metres(24.0), 0.0), "tree"), "tree sweep verification completed")
@@ -116,7 +116,7 @@ func _verify_chunk_local_alignment(catalog: OfftrackObjectCatalog) -> bool:
 	var collisions := OfftrackObjectCollisions.new()
 	root.add_child(collisions)
 	collisions.build(placements, catalog)
-	_check(collisions.chunk_body_count() == 1, "non-zero fixtures share one chunk body")
+	_check(collisions.chunk_body_count() == 2, "nearby solid fixtures build one low and one tall chunk body")
 	_check(_verify_shape_contract(collisions, placements, catalog), "non-zero fixture shapes preserve local/global alignment")
 	collisions.free()
 	return true
@@ -148,8 +148,8 @@ func _verify_sweep(collisions: OfftrackObjectCollisions, start: Vector2, motion:
 	var body := CharacterBody2D.new()
 	body.name = "SweepProbe_%s" % target_name
 	body.motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
-	body.collision_layer = 2
-	body.collision_mask = 1
+	body.collision_layer = 4
+	body.collision_mask = OfftrackObjectCollisions.TALL_LAYER | OfftrackObjectCollisions.LOW_LAYER
 	body.safe_margin = 0.05
 	var collision_shape := CollisionShape2D.new()
 	var circle := CircleShape2D.new()

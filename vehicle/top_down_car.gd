@@ -4,6 +4,9 @@ extends RigidBody2D
 ## Force-based top-down car. Hardware input stays outside this class: callers
 ## provide a normalized VehicleInputState and a SurfaceQuery implementation.
 
+const TALL_LAYER := 1
+const LOW_LAYER := 2
+
 ## Predicted ballistic height must exceed the ground ahead by this much before the car counts as
 ## airborne. Small enough that a car cresting at walking pace still lifts off; large enough that
 ## float noise on flat ground never does.
@@ -59,6 +62,21 @@ func _ready() -> void:
 	_follow_camera.zoom = Vector2.ONE * tuning.camera_zoom
 	_follow_camera.global_position = global_position
 	body_entered.connect(_on_body_entered)
+
+
+## The mask is a body property, not part of the integrator's state, so it is applied from
+## _physics_process before the step rather than from inside _integrate_forces. It reflects the
+## previous tick's height; at 60 Hz that is at most 2 px of vertical travel.
+func _physics_process(_delta: float) -> void:
+	if tuning == null:
+		return
+	collision_mask = get_collision_level_mask()
+
+
+func get_collision_level_mask() -> int:
+	if _height > tuning.low_obstacle_clearance:
+		return TALL_LAYER
+	return TALL_LAYER | LOW_LAYER
 
 
 func _process(delta: float) -> void:
