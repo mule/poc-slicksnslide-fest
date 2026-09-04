@@ -11,6 +11,10 @@ var _throttle := 0.0
 var _brake := 0.0
 var _handbrake := 0.0
 var _memory_peak_bytes := 0.0
+var _height_m := 0.0
+var _vertical_speed_mps := 0.0
+var _airborne := false
+var _air_time := 0.0
 
 @onready var _metrics_label: Label = %MetricsLabel
 
@@ -66,6 +70,14 @@ func set_metrics(
 	_refresh_text()
 
 
+func set_height_metrics(height_m: float, vertical_speed_mps: float, airborne: bool, air_time: float) -> void:
+	_height_m = height_m
+	_vertical_speed_mps = vertical_speed_mps
+	_airborne = airborne
+	_air_time = air_time
+	_refresh_text()
+
+
 func _refresh_text(delta: float = 0.0) -> void:
 	if not is_instance_valid(_metrics_label):
 		return
@@ -81,5 +93,6 @@ func _refresh_text(delta: float = 0.0) -> void:
 		+ "seed: %d   speed: %.1f km/h\n" % [_seed, _speed_kph]
 		+ "surface: %s   slip: %.2f\n" % [_surface, _slip]
 		+ "steer: %.2f   throttle: %.2f\n" % [_steering, _throttle]
-		+ "brake: %.2f   handbrake: %.2f" % [_brake, _handbrake]
+		+ "brake: %.2f   handbrake: %.2f\n" % [_brake, _handbrake]
+		+ "height: %.2f m   vz: %.2f m/s   %s" % [_height_m, _vertical_speed_mps, ("air: %.2f s" % _air_time) if _airborne else "grounded"]
 	)
