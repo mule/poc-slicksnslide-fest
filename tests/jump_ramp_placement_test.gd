@@ -116,6 +116,9 @@ func _verify_rules(definition: TrackDefinition, placements: Array[JumpRampPlacem
 		_check(not stable_ids.has(ramp.stable_id), "seed %d ramp id %s is unique" % [seed, ramp.stable_id])
 		stable_ids[ramp.stable_id] = true
 		_check(ramp.stable_id.begins_with("h%d:%d:" % [catalog.version, seed]), "seed %d ramp id carries version and seed" % seed)
+		var stable_id_fields := ramp.stable_id.split(":")
+		var stable_id_has_shape := stable_id_fields.size() == 4 and stable_id_fields[3].is_valid_int()
+		_check(stable_id_has_shape, "seed %d ramp id has four fields and an integer attempt ordinal" % seed)
 		_check(is_equal_approx(ramp.half_length, catalog.half_length), "seed %d ramp uses the catalog half length" % seed)
 		_check(is_equal_approx(ramp.crest_height, catalog.crest_height()), "seed %d ramp uses the catalog crest height" % seed)
 		_check(is_equal_approx(ramp.width, definition.track_width), "seed %d ramp spans the road width" % seed)
@@ -148,8 +151,10 @@ func _verify_rules(definition: TrackDefinition, placements: Array[JumpRampPlacem
 
 func _verify_diagnostics(result: JumpRampPlacementResult, catalog: HeightChannelCatalog, seed: int) -> bool:
 	var diagnostics := result.diagnostics
-	for key in ["eligible_runs", "requested", "placed", "rejected_spawn", "rejected_checkpoint", "rejected_spacing", "underfilled"]:
+	for key in ["eligible_runs", "requested", "placed", "rejected_spawn_candidates", "rejected_checkpoint_candidates", "rejected_spacing_candidates", "underfilled"]:
 		_check(diagnostics.has(key), "seed %d diagnostics report %s" % [seed, key])
+	for key in ["rejected_spawn_candidates", "rejected_checkpoint_candidates", "rejected_spacing_candidates"]:
+		_check(int(diagnostics.get(key, -1)) >= 0, "seed %d diagnostics report a non-negative candidate count for %s" % [seed, key])
 	var requested := int(diagnostics.get("requested", -1))
 	var placed := int(diagnostics.get("placed", -1))
 	_check(requested >= catalog.ramps_per_lap_min and requested <= catalog.ramps_per_lap_max, "seed %d requested count is inside the catalog range" % seed)
@@ -185,8 +190,8 @@ func _verify_geometry_isolation() -> bool:
 
 
 ## Seed 4 has several separated eligible runs. With a deliberately high request ceiling it visits
-## all of them; moving the spawn onto another run's attempt-zero crest forces that first candidate
-## to reject without changing the chosen crest or attempt ordinal in a distant run.
+## all of them; adding a gate on a later run's attempt-zero crest forces that first candidate to
+## reject without changing the chosen crest or attempt ordinal in an earlier, distant run.
 func _verify_retry_stream_isolation() -> bool:
 	var definition: TrackDefinition = TrackGenerator.new().generate(4)
 	var catalog := (load(CATALOG_PATH) as HeightChannelCatalog).duplicate(true) as HeightChannelCatalog
@@ -197,27 +202,30 @@ func _verify_retry_stream_isolation() -> bool:
 	var repeated := placer.place(definition, catalog)
 	_check(_placements_equal(first.placements, repeated.placements), "retry placement repeats exactly with the same catalog")
 	var rejected_candidate: JumpRampPlacement = null
-	for placement in first.placements:
-		if placement.stable_id.get_slice(":", 3) == "0":
-			rejected_candidate = placement
+	var isolated_candidate: JumpRampPlacement = null
+	for candidate in first.placements:
+		if candidate.stable_id.get_slice(":", 3) != "0":
+			continue
+		var candidate_run := int(candidate.stable_id.get_slice(":", 2))
+		for placement in first.placements:
+			var placement_run := int(placement.stable_id.get_slice(":", 2))
+			if placement_run >= candidate_run:
+				continue
+			if placement.transform.origin.distance_to(candidate.transform.origin) > catalog.minimum_spacing + catalog.checkpoint_exclusion + catalog.half_length:
+				rejected_candidate = candidate
+				isolated_candidate = placement
+				break
+		if rejected_candidate != null:
 			break
-	_check(rejected_candidate != null, "the isolation fixture accepts an attempt-zero candidate to reject")
+	_check(rejected_candidate != null, "the isolation fixture accepts a later run's attempt-zero candidate to reject")
 	if rejected_candidate == null:
 		return false
-	var rejected_run := rejected_candidate.stable_id.get_slice(":", 2)
-	var isolated_candidate: JumpRampPlacement = null
-	for placement in first.placements:
-		if placement.stable_id.get_slice(":", 2) == rejected_run:
-			continue
-		if placement.transform.origin.distance_to(rejected_candidate.transform.origin) > catalog.minimum_spacing + catalog.spawn_exclusion + catalog.half_length:
-			isolated_candidate = placement
-			break
 	_check(isolated_candidate != null, "the isolation fixture has a distant candidate in another run")
 	if isolated_candidate == null:
 		return false
-	definition.spawn_transform.origin = rejected_candidate.transform.origin
+	definition.checkpoints.append(Transform2D(0.0, rejected_candidate.transform.origin))
 	var with_rejection := placer.place(definition, catalog)
-	_check(_placement_by_id(with_rejection.placements, rejected_candidate.stable_id) == null, "moving spawn onto a run's first candidate rejects it")
+	_check(_placement_by_id(with_rejection.placements, rejected_candidate.stable_id) == null, "adding a gate on a run's first candidate rejects it")
 	var isolated_after := _placement_by_id(with_rejection.placements, isolated_candidate.stable_id)
 	_check(isolated_after != null, "rejecting one run's first candidate preserves another run's chosen candidate")
 	if isolated_after != null:

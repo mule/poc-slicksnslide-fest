@@ -21,9 +21,9 @@ func place(definition: TrackDefinition, catalog: HeightChannelCatalog) -> JumpRa
 		"eligible_runs": 0,
 		"requested": 0,
 		"placed": 0,
-		"rejected_spawn": 0,
-		"rejected_checkpoint": 0,
-		"rejected_spacing": 0,
+		"rejected_spawn_candidates": 0,
+		"rejected_checkpoint_candidates": 0,
+		"rejected_spacing_candidates": 0,
 		"underfilled": false,
 	}
 	var centerline := definition.centerline
@@ -70,7 +70,8 @@ func place(definition: TrackDefinition, catalog: HeightChannelCatalog) -> JumpRa
 			var crest := centerline[crest_index]
 			var reason := _rejection_reason(crest, definition, catalog, crests)
 			if not reason.is_empty():
-				diagnostics["rejected_" + reason] = int(diagnostics["rejected_" + reason]) + 1
+				var rejection_key := "rejected_%s_candidates" % reason
+				diagnostics[rejection_key] = int(diagnostics[rejection_key]) + 1
 				continue
 			var next := centerline[(crest_index + 1) % unique_count]
 			var previous := centerline[(crest_index - 1 + unique_count) % unique_count]

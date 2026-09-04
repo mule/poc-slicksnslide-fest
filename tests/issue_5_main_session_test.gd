@@ -176,9 +176,8 @@ func _verify_height_channel_is_wired(session: Node) -> bool:
 	var definition: TrackDefinition = runtime.definition
 	_check(ramps != null and ramps.visual_count() == definition.jump_ramps.size(), "one wedge per generated ramp")
 	# The placer's fingerprint hashes only the catalog version and the placements, so every
-	# rampless seed hashes alike. Seeds 3 and 4 are chosen because both place ramps -- one and two
-	# respectively -- which is what keeps the wedge counts and the fingerprint comparison below
-	# from passing vacuously on two empty tracks.
+	# rampless seed hashes alike. Seeds 3 and 4 are chosen because both place ramps, which keeps the
+	# wedge counts and the fingerprint comparison below from passing vacuously on two empty tracks.
 	_check(not definition.jump_ramps.is_empty(), "seed 3 places at least one ramp, so its wedge count is not vacuously zero")
 	var first_fingerprint := str(snapshot.get("height_fingerprint", ""))
 	var first_ramps := ramps

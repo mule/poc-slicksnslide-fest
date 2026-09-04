@@ -21,6 +21,7 @@ func _run() -> void:
 	_check(_verify_domain_seed_vectors(), "the domain seed verification ran to completion")
 	_check(_verify_placement_validity(), "the placement validity verification ran to completion")
 	_check(_verify_catalog_defaults(), "the catalog defaults verification ran to completion")
+	_check(_verify_landing_clearance_covers_top_speed_flight(), "the ballistic landing-clearance verification ran to completion")
 	_check(_verify_definition_fields(), "the definition fields verification ran to completion")
 	_check(_verify_tuning_fields(), "the tuning fields verification ran to completion")
 	_check(_verify_clearance_agrees_with_obstacle_height(), "the clearance agreement verification ran to completion")
@@ -75,18 +76,52 @@ func _verify_catalog_defaults() -> bool:
 	_check(catalog != null, "the default height catalog loads")
 	if catalog == null:
 		return false
-	_check(catalog.version == 2, "catalog version is 2")
+	_check(catalog.version == 3, "catalog version is 3")
 	_check(is_equal_approx(catalog.half_length, WorldScale.metres(12.0)), "half length is 12 m")
-	_check(is_equal_approx(catalog.slope, 0.12), "slope is 0.12")
-	_check(is_equal_approx(catalog.crest_height(), WorldScale.metres(1.44)), "crest height derives as slope times half length")
+	_check(is_equal_approx(catalog.slope, 0.06), "slope is 0.06")
+	_check(is_equal_approx(catalog.crest_height(), WorldScale.metres(0.72)), "crest height derives as slope times half length")
 	_check(catalog.ramps_per_lap_min == 2 and catalog.ramps_per_lap_max == 4, "two to four ramps are requested per lap")
 	_check(catalog.ramps_per_lap_min <= catalog.ramps_per_lap_max, "ramp count range is ordered")
-	_check(is_equal_approx(catalog.approach_clearance, WorldScale.metres(40.0)), "approach clearance is 40 m")
-	_check(is_equal_approx(catalog.landing_clearance, WorldScale.metres(20.0)), "landing clearance is 20 m")
+	_check(is_equal_approx(catalog.approach_clearance, WorldScale.metres(28.0)), "approach clearance is 28 m")
+	_check(is_equal_approx(catalog.landing_clearance, WorldScale.metres(32.0)), "landing clearance is 32 m")
 	_check(is_equal_approx(catalog.spawn_exclusion, WorldScale.metres(80.0)), "spawn exclusion is 80 m")
 	_check(is_equal_approx(catalog.checkpoint_exclusion, WorldScale.metres(40.0)), "checkpoint exclusion is 40 m")
 	_check(is_equal_approx(catalog.minimum_spacing, WorldScale.metres(120.0)), "minimum crest spacing is 120 m")
 	_check(catalog.minimum_run_length() > catalog.approach_clearance + catalog.landing_clearance, "minimum run length includes both faces")
+	_check(is_equal_approx(catalog.minimum_run_length(), WorldScale.metres(84.0)), "minimum run length remains 1050 px")
+	var script_defaults := HeightChannelCatalog.new()
+	_check(
+		script_defaults.version == catalog.version
+		and is_equal_approx(script_defaults.slope, catalog.slope)
+		and is_equal_approx(script_defaults.approach_clearance, catalog.approach_clearance)
+		and is_equal_approx(script_defaults.landing_clearance, catalog.landing_clearance),
+		"script defaults match the versioned resource tuning"
+	)
+	return true
+
+
+## The continuous quadratic-drag solution is conservative relative to the game's 60 Hz
+## semi-implicit integration: the game applies both drag and gravity before each movement step, so
+## its car travels slightly less far before landing than this oracle predicts.
+func _verify_landing_clearance_covers_top_speed_flight() -> bool:
+	var catalog := load(HEIGHT_CATALOG_PATH) as HeightChannelCatalog
+	var tuning := load(TUNING_PATH) as VehicleTuning
+	var launch_height := catalog.crest_height()
+	var launch_vertical_speed := tuning.max_safe_speed * catalog.slope
+	var flight_seconds := (
+		launch_vertical_speed
+		+ sqrt(launch_vertical_speed * launch_vertical_speed + 2.0 * tuning.gravity * launch_height)
+	) / tuning.gravity
+	var flight_distance := (
+		log(1.0 + tuning.aerodynamic_drag * tuning.max_safe_speed * flight_seconds)
+		/ tuning.aerodynamic_drag
+	)
+	var guaranteed_road_after_crest := catalog.half_length + catalog.landing_clearance
+	print("top_speed_flight_distance=%.3f guaranteed_road_after_crest=%.3f" % [flight_distance, guaranteed_road_after_crest])
+	_check(
+		guaranteed_road_after_crest >= flight_distance,
+		"ramp landing clearance covers the conservative top-speed flight (%.1f >= %.1f px)" % [guaranteed_road_after_crest, flight_distance]
+	)
 	return true
 
 
