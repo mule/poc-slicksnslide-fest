@@ -145,7 +145,7 @@ func _verify_landing_burst() -> bool:
 	_check(seen_airborne, "the burst scenario falls off the plateau edge")
 	_check(z_on_landing == 0, "a landed car returns to z_index 0")
 	_check(burst_on_landing, "landing starts the dedicated one-shot burst")
-	_check(not dust_on_landing, "landing leaves the ordinary off-track dust plume off")
+	_check(not dust_on_landing, "the fixture's forced off-track surface keeps the continuous plume off, so the burst asserted above is the dedicated emitter rather than the plume")
 	context.world.queue_free()
 	await process_frame
 	return true
