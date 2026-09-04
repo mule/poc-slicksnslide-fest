@@ -7,9 +7,14 @@ extends SceneTree
 
 const VEHICLE_SCENE := preload("res://vehicle/top_down_car.tscn")
 const TUNING_PATH := "res://data/default_vehicle_tuning.tres"
+const HEIGHT_CATALOG_PATH := "res://data/default_height_channel_catalog.tres"
 const START := Vector2(-2200.0, 0.0)
 const CREST_X := 0.0
 const HALF_LENGTH := 150.0
+## The suite's own hump is 18.0 over a 150.0 half length, i.e. slope 0.12 -- TWICE the production
+## catalog's 0.06. It is kept because a steeper ramp is a harsher test of the analytic model and of
+## the landing cost. It is NOT the shape the game ships: read the catalog for that, never this
+## constant. `_verify_flight_matches_the_analytic_arc` runs at both slopes for exactly this reason.
 const CREST_HEIGHT := 18.0
 const HEADING_PLUS_X := PI * 0.5
 const MAX_FLIGHT_TICKS := 300
@@ -28,7 +33,10 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	_check(await _verify_flight_matches_the_analytic_arc(), "the analytic arc verification ran to completion")
+	var catalog := load(HEIGHT_CATALOG_PATH) as HeightChannelCatalog
+	_check(is_equal_approx(catalog.half_length, HALF_LENGTH), "the suite's half length matches the catalog's, so only the crest height differs")
+	_check(await _verify_flight_matches_the_analytic_arc(CREST_HEIGHT), "the analytic arc verification ran to completion at the suite slope")
+	_check(await _verify_flight_matches_the_analytic_arc(catalog.crest_height()), "the analytic arc verification ran to completion at the production slope")
 	_check(await _verify_landing_recovery_reduces_grip(), "the landing recovery verification ran to completion")
 	_check(await _verify_slow_car_stays_on_the_downslope(), "the downslope verification ran to completion")
 	_check(await _verify_plateau_edge_launches(), "the plateau edge verification ran to completion")
@@ -40,8 +48,9 @@ func _run() -> void:
 
 ## One flight, many assertions: lift-off vertical speed, flight time, landing distance, speed loss,
 ## throttle and steering having no effect in the air.
-func _verify_flight_matches_the_analytic_arc() -> bool:
-	var context := _make_car()
+func _verify_flight_matches_the_analytic_arc(crest_height: float) -> bool:
+	var slope_label := "slope %.3f" % (crest_height / HALF_LENGTH)
+	var context := _make_car(crest_height)
 	var car: TopDownCar = context.car
 	var tuning: VehicleTuning = car.tuning
 	var controls := VehicleInputState.new()
@@ -50,15 +59,15 @@ func _verify_flight_matches_the_analytic_arc() -> bool:
 	# Full steer is applied by _fly on the lift-off tick, not before: steering on the approach
 	# would turn the car away from the ramp.
 	var flight := await _fly(car, controls)
-	_check(flight.launched, "the car leaves the ground at the crest")
+	_check(flight.launched, "%s: the car leaves the ground at the crest" % slope_label)
 	if not flight.launched:
 		context.world.queue_free()
 		return true
-	var slope := CREST_HEIGHT / HALF_LENGTH
+	var slope := crest_height / HALF_LENGTH
 	var expected_vz: float = float(flight.launch_speed) * slope
-	_check(absf(float(flight.launch_vz) - expected_vz) <= expected_vz * 0.05, "lift-off vertical speed (%.1f) is within 5%% of speed times slope (%.1f)" % [flight.launch_vz, expected_vz])
-	_check(float(flight.launch_x) >= CREST_X - HALF_LENGTH and float(flight.launch_x) <= CREST_X + 30.0, "lift-off happens on the rising face or at the crest (x=%.1f)" % flight.launch_x)
-	_check(flight.landed, "the car lands within %d ticks" % MAX_FLIGHT_TICKS)
+	_check(absf(float(flight.launch_vz) - expected_vz) <= expected_vz * 0.05, "%s: lift-off vertical speed (%.1f) is within 5%% of speed times slope (%.1f)" % [slope_label, flight.launch_vz, expected_vz])
+	_check(float(flight.launch_x) >= CREST_X - HALF_LENGTH and float(flight.launch_x) <= CREST_X + 30.0, "%s: lift-off happens on the rising face or at the crest (x=%.1f)" % [slope_label, flight.launch_x])
+	_check(flight.landed, "%s: the car lands within %d ticks" % [slope_label, MAX_FLIGHT_TICKS])
 	if not flight.landed:
 		context.world.queue_free()
 		return true
@@ -67,23 +76,23 @@ func _verify_flight_matches_the_analytic_arc() -> bool:
 	var vz: float = flight.launch_vz
 	var expected_time := (vz + sqrt(vz * vz + 2.0 * g * h0)) / g
 	var measured_time := float(flight.air_ticks) * TICK
-	_check(float(flight.landing_x) > CREST_X + HALF_LENGTH, "the landing is on flat ground past the ramp, so the flat-ground formula applies")
-	_check(absf(measured_time - expected_time) <= 2.0 * TICK, "flight time (%.3f s) matches the analytic %.3f s within two ticks" % [measured_time, expected_time])
+	_check(float(flight.landing_x) > CREST_X + HALF_LENGTH, "%s: the landing is on flat ground past the ramp, so the flat-ground formula applies" % slope_label)
+	_check(absf(measured_time - expected_time) <= 2.0 * TICK, "%s: flight time (%.3f s) matches the analytic %.3f s within two ticks" % [slope_label, measured_time, expected_time])
 	var k: float = tuning.aerodynamic_drag
 	var v0: float = flight.launch_speed
 	var expected_distance := log(1.0 + k * v0 * expected_time) / k
 	var measured_distance: float = float(flight.landing_x) - float(flight.launch_x)
-	_check(absf(measured_distance - expected_distance) <= expected_distance * 0.05, "landing distance (%.1f) matches the drag integral (%.1f) within 5%%" % [measured_distance, expected_distance])
+	_check(absf(measured_distance - expected_distance) <= expected_distance * 0.05, "%s: landing distance (%.1f) matches the drag integral (%.1f) within 5%%" % [slope_label, measured_distance, expected_distance])
 	var impact_mps := WorldScale.to_metres(maxf(-float(flight.last_vz) + g * TICK, 0.0))
 	var expected_ratio := clampf(1.0 - tuning.landing_speed_loss * impact_mps, 0.3, 1.0)
 	var measured_ratio: float = float(flight.speed_after) / float(flight.speed_before)
-	_check(absf(measured_ratio - expected_ratio) <= 0.03, "landing keeps %.3f of speed, expected %.3f" % [measured_ratio, expected_ratio])
-	_check(expected_ratio < 0.97, "the landing is hard enough that the loss assertion is live")
-	_check(flight.speed_never_rose, "throttle adds no speed in the air")
-	_check(absf(float(flight.rotation_change)) < 0.01, "full steer does not rotate the car in the air at zero authority")
-	_check(flight.recovery_after_landing > 0.0, "landing opens a recovery window")
-	_check(car.consume_air_time_notice() > tuning.air_time_notice_seconds, "a long flight leaves an air time notice")
-	_check(car.consume_air_time_notice() == 0.0, "the notice is consumed once")
+	_check(absf(measured_ratio - expected_ratio) <= 0.03, "%s: landing keeps %.3f of speed, expected %.3f" % [slope_label, measured_ratio, expected_ratio])
+	_check(expected_ratio < 0.97, "%s: the landing is hard enough that the loss assertion is live" % slope_label)
+	_check(flight.speed_never_rose, "%s: throttle adds no speed in the air" % slope_label)
+	_check(absf(float(flight.rotation_change)) < 0.01, "%s: full steer does not rotate the car in the air at zero authority" % slope_label)
+	_check(flight.recovery_after_landing > 0.0, "%s: landing opens a recovery window" % slope_label)
+	_check(car.consume_air_time_notice() > tuning.air_time_notice_seconds, "%s: a long flight leaves an air time notice" % slope_label)
+	_check(car.consume_air_time_notice() == 0.0, "%s: the notice is consumed once" % slope_label)
 	context.world.queue_free()
 	await process_frame
 	return true
@@ -192,8 +201,14 @@ func _verify_a_wall_does_not_lift_the_car() -> bool:
 	var launched := false
 	var peak_height := 0.0
 	var passed_the_wall := false
+	# The car's own _process drains the landing latch every idle frame, so a single read after the
+	# loop can never observe a spurious event. Suppress that drain and poll every physics tick, so
+	# the assertion below is answered by the physics latch rather than by whoever read it first.
+	car.set_process(false)
+	var fired_a_landing := false
 	for tick in range(MAX_FLIGHT_TICKS + 200):
 		await physics_frame
+		fired_a_landing = fired_a_landing or car.consume_landing_event()
 		launched = launched or car.is_airborne()
 		peak_height = maxf(peak_height, car.get_height())
 		if car.global_position.x > CREST_X + 40.0:
@@ -202,7 +217,7 @@ func _verify_a_wall_does_not_lift_the_car() -> bool:
 	_check(passed_the_wall, "the wall scenario reaches and crosses the wall")
 	_check(not launched, "driving into a vertical wall does not lift the car off the ground")
 	_check(peak_height < 1.0, "the car is not carried up onto the wall (peak height %.2f of a %.1f wall)" % [peak_height, CREST_HEIGHT])
-	_check(not car.consume_landing_event(), "a wall fires no landing event")
+	_check(not fired_a_landing, "a wall fires no landing event on any tick of the approach")
 	_check(car.get_landing_recovery_remaining() == 0.0, "a wall opens no grip recovery window")
 	context.world.queue_free()
 	await process_frame
@@ -318,7 +333,7 @@ func _fly(car: TopDownCar, controls: VehicleInputState) -> Dictionary:
 	return flight
 
 
-func _make_car() -> Dictionary:
+func _make_car(crest_height: float = CREST_HEIGHT) -> Dictionary:
 	var world := Node2D.new()
 	root.add_child(world)
 	var car := VEHICLE_SCENE.instantiate() as TopDownCar
@@ -336,7 +351,7 @@ func _make_car() -> Dictionary:
 	height.mode = HeightChannelTestHeightProvider.Mode.HUMP
 	height.crest_x = CREST_X
 	height.half_length = HALF_LENGTH
-	height.crest_height = CREST_HEIGHT
+	height.crest_height = crest_height
 	car.set_height_query(height)
 	world.add_child(car)
 	car.set_safe_reset_pose(Transform2D(HEADING_PLUS_X, START))

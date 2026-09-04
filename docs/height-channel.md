@@ -219,6 +219,25 @@ Ramp placement is a separate deterministic domain from the road and from off-tra
   the version is part of both the domain seed and the fingerprint, so a bump necessarily
   invalidates both.
 
+**The height fingerprint is downstream of road tuning, and no catalog version bump announces it.**
+The bullets above document one direction only — a catalog change moves the height hashes. The
+reverse coupling also exists and is unversioned:
+
+- `JumpRampPlacer._straight_runs` reads `TrackGenerator.STRAIGHT_CURVATURE`
+  (`world/height/jump_ramp_placer.gd:103`) to decide which samples are gentle, so retuning that
+  threshold changes which runs are eligible, and therefore which crests are chosen.
+- The placer derives `spacing` from `definition.lap_length` over the sample count
+  (`world/height/jump_ramp_placer.gd:34`), which `TrackGenerator.SAMPLE_SPACING` sets. Changing it
+  changes the sample count, the clearance-to-sample conversions, and the crest indices.
+
+So a change to either road constant moves **every** height fingerprint on **every** seed while
+`HeightChannelCatalog.version` stays at 3. The coupling runs one way and in the correct direction —
+the placer runs after road acceptance and never touches the road RNG, so no ramp change can move a
+road — but a reader who assumes "same catalog version, same height hash" will be wrong after a
+road-tuning commit. `tests/jump_ramp_placement_test.gd` pins the road fingerprints against a
+baseline, so a road-tuning change is caught there first; treat that failure as the signal that the
+recorded height fingerprints need regenerating too.
+
 ## Limitations
 
 - **Crossing a ramp's lateral edge passes the car under the ramp.** The height map gives every ramp
@@ -251,19 +270,25 @@ godot --headless --path . --script res://tests/issue_5_main_session_test.gd
 godot --headless --path . --script res://tests/track_collision_physics_test.gd
 ```
 
+`tests/vehicle_height_channel_test.gd` runs its analytic-arc case twice, once on the suite's own
+0.12 hump and once on the catalog's shipped 0.06 slope, and every assertion in that case is prefixed
+with the slope it came from. The suite's other cases use the steeper hump only; it is a harsher test
+of the same model, not the shape the game ships.
+
 The graphical evidence capture is not headless:
 
 ```sh
 godot --path . --script res://tests/capture_height_channel_evidence.gd
 ```
 
-Six mutation flags exist to prove those suites are load-bearing. Each must exit non-zero, and each
+Seven mutation flags exist to prove those suites are load-bearing. Each must exit non-zero, and each
 must do so on its own assertion rather than on a load error — check the first `FAIL:` line, not
 just the exit code:
 
 ```sh
 godot --headless --path . --script res://tests/jump_ramp_placement_test.gd -- --break-height-seed
 godot --headless --path . --script res://tests/jump_ramp_placement_test.gd -- --break-clearance
+godot --headless --path . --script res://tests/jump_ramp_placement_test.gd -- --break-density
 godot --headless --path . --script res://tests/vehicle_height_channel_test.gd -- --break-gravity
 godot --headless --path . --script res://tests/vehicle_height_channel_test.gd -- --break-landing
 godot --headless --path . --script res://tests/airborne_obstacle_level_test.gd -- --break-height-layers
@@ -274,8 +299,9 @@ godot --headless --path . --script res://tests/track_collision_physics_test.gd -
 | --- | --- | --- |
 | `--break-height-seed` | reuses the road seed for the height domain | `seed 0 height fingerprint repeats` |
 | `--break-clearance` | zeroes the checkpoint exclusion only; the spawn and spacing exclusions are untouched | `seed 1 height fingerprint repeats` |
-| `--break-gravity` | zeroes gravity, so nothing ever lands | `the car lands within 300 ticks` |
-| `--break-landing` | zeroes the landing speed loss and recovery | `the landing is hard enough that the loss assertion is live` |
+| `--break-density` | restores a pre-fix landing clearance (2000 px, so `minimum_run_length` goes 1050 → 2650) and starves placement: counts fall from 3 / 20 non-empty / mean 2.40 to 0 / 5 / mean 0.35 | `seed 0 places at least one ramp` |
+| `--break-gravity` | zeroes gravity, so nothing ever lands | `slope 0.120: the car lands within 300 ticks` |
+| `--break-landing` | zeroes the landing speed loss and recovery | `slope 0.120: the landing is hard enough that the loss assertion is live` |
 | `--break-height-layers` | puts every solid on the tall layer | `the rock is a low collider` |
 | `--break-collision` | removes the containment boundary | `seed 0 probe driven right stays inside the play area` |
 
