@@ -117,8 +117,11 @@ func _integrate_forces(state: PhysicsDirectBodyState2D) -> void:
 	var updated_local := state.transform.basis_xform_inv(world_velocity)
 	var updated_forward_speed := -updated_local.y
 	var drag_rate := tuning.rolling_drag * _surface_drag * ground_authority
-	var aero_drag := tuning.aerodynamic_drag * (1.0 if _airborne else _surface_drag)
-	var drag_amount := (drag_rate * absf(updated_forward_speed) + aero_drag * updated_forward_speed * updated_forward_speed) * delta
+	# The surface factor stays the last multiplication, exactly where it was, so a grounded car's
+	# drag is bit-identical to the model before the height channel rather than merely equal in
+	# practice: float multiplication does not re-associate.
+	var aero_surface := 1.0 if _airborne else _surface_drag
+	var drag_amount := (drag_rate * absf(updated_forward_speed) + tuning.aerodynamic_drag * updated_forward_speed * updated_forward_speed * aero_surface) * delta
 	updated_forward_speed = move_toward(updated_forward_speed, 0.0, drag_amount)
 	world_velocity = forward * updated_forward_speed + lateral * updated_local.x
 
@@ -162,8 +165,11 @@ func set_surface_query(surface_query: SurfaceQuery) -> void:
 	_surface_query = surface_query
 
 
+## Also seats the car on the ground under it. The ride can only rise with the ground, so a car
+## placed on raised ground has to start there rather than climb to it.
 func set_height_query(height_query: HeightQuery) -> void:
 	_height_query = height_query
+	_height = _sample_ground_at(global_position).ground_height
 
 
 func is_airborne() -> bool:
@@ -339,13 +345,23 @@ func _update_height_channel(state: PhysicsDirectBodyState2D, delta: float) -> vo
 	# faster than one tick of gravity can pull the car onto it.
 	var ground_rate_ahead := state.linear_velocity.dot(ahead.gradient)
 	var clears_the_ground_ahead := predicted > ahead.ground_height + LIFT_OFF_TOLERANCE
-	var ground_falls_away := ground_rate_ahead < _vertical_velocity - tuning.gravity * delta
+	# The second conjunct rejects a height map's vertical walls -- every generated ramp has one at
+	# its lateral boundary. Driving into one, the car is on flat ground (rate 0) while the face
+	# behind the wall reads as falling away, which would otherwise open a flight onto ground that
+	# is above the car. At a crest the margin bottoms out at -0.5 * g * delta^2, so the conjunct is
+	# always satisfied there.
+	var ground_falls_away := ground_rate_ahead < _vertical_velocity - tuning.gravity * delta and predicted > ahead.ground_height - LIFT_OFF_TOLERANCE
 	if clears_the_ground_ahead or ground_falls_away:
 		_airborne = true
 		_air_time = 0.0
 		_height = maxf(predicted, ahead.ground_height)
 		return
-	_height = ahead.ground_height
+	# Riding the ground follows it down as far as it goes, but rises only as fast as the ground
+	# itself rises. On any continuous surface those are the same number, so a face is ridden
+	# exactly; at a wall the rise is refused, which is the grounded half of the same defect the
+	# conjunct above fixes for flight. Without it the car steps up the wall for free.
+	var rise_limit := maxf(maxf(_vertical_velocity, ground_rate_ahead) * delta, 0.0)
+	_height = minf(ahead.ground_height, _height + rise_limit)
 
 
 func _land(state: PhysicsDirectBodyState2D, ground: HeightQuery.HeightSample) -> void:
@@ -381,7 +397,7 @@ func _apply_safe_reset(state: PhysicsDirectBodyState2D) -> void:
 	_slip_ratio = 0.0
 	_reverse_hold_time = 0.0
 	_safe_pose_elapsed = 0.0
-	_height = 0.0
+	_height = _sample_ground_at(_safe_reset_pose.origin).ground_height
 	_vertical_velocity = 0.0
 	_airborne = false
 	_air_time = 0.0

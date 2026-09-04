@@ -31,6 +31,8 @@ func _run() -> void:
 	_check(await _verify_flight_matches_the_analytic_arc(), "the analytic arc verification ran to completion")
 	_check(await _verify_landing_recovery_reduces_grip(), "the landing recovery verification ran to completion")
 	_check(await _verify_slow_car_stays_on_the_downslope(), "the downslope verification ran to completion")
+	_check(await _verify_plateau_edge_launches(), "the plateau edge verification ran to completion")
+	_check(await _verify_a_wall_does_not_lift_the_car(), "the wall verification ran to completion")
 	_check(await _verify_ground_only_rules(), "the ground-only rules verification ran to completion")
 	_check(await _verify_reset_zeroes_height(), "the reset verification ran to completion")
 	_finish()
@@ -127,6 +129,8 @@ func _verify_slow_car_stays_on_the_downslope() -> bool:
 	var car: TopDownCar = context.car
 	car.global_transform = Transform2D(HEADING_PLUS_X, Vector2(CREST_X + 10.0, 0.0))
 	car.linear_velocity = Vector2(30.0, 0.0)
+	# Re-seat the car after the teleport: it has been moved onto the face, not driven onto it.
+	car.set_height_query(context.height)
 	var left_ground := false
 	for tick in range(60):
 		await physics_frame
@@ -134,6 +138,72 @@ func _verify_slow_car_stays_on_the_downslope() -> bool:
 			left_ground = true
 	_check(not left_ground, "a slow car rolling down the far face stays on the ground")
 	_check(car.get_height() >= 0.0 and car.get_height() <= CREST_HEIGHT, "the grounded car's height follows the face")
+	context.world.queue_free()
+	await process_frame
+	return true
+
+
+## The other way to leave the ground. At a drop-off the height falls with no change of gradient, so
+## the rate test is blind to it and only the ballistic-clearance test can see it.
+func _verify_plateau_edge_launches() -> bool:
+	var context := _make_car()
+	var car: TopDownCar = context.car
+	var height: HeightChannelTestHeightProvider = context.height
+	height.mode = HeightChannelTestHeightProvider.Mode.PLATEAU
+	height.plateau_height = CREST_HEIGHT
+	height.plateau_end_x = CREST_X
+	car.set_height_query(height)
+	var controls := VehicleInputState.new()
+	controls.throttle = 1.0
+	car.set_input_state(controls)
+	await physics_frame
+	_check(absf(car.get_height() - CREST_HEIGHT) < 0.5, "the car rides at the plateau height (%.2f) before the edge" % car.get_height())
+	var launch_x := INF
+	var landing_x := INF
+	for tick in range(MAX_FLIGHT_TICKS + 200):
+		await physics_frame
+		if car.is_airborne():
+			if launch_x == INF:
+				launch_x = car.global_position.x
+		elif launch_x != INF:
+			landing_x = car.global_position.x
+			break
+	_check(launch_x != INF, "the car leaves the ground at the plateau edge")
+	_check(launch_x >= CREST_X - 20.0 and launch_x <= CREST_X + 20.0, "lift-off happens at the edge (x=%.1f)" % launch_x)
+	_check(landing_x != INF, "the car lands past the edge (x=%.1f)" % landing_x)
+	_check(car.consume_landing_event(), "the drop-off landing fires a landing event")
+	context.world.queue_free()
+	await process_frame
+	return true
+
+
+## A generated height map gives every ramp a vertical wall at its lateral boundary, and the surface
+## is open enough to drive into one. The ground behind the wall reads as falling away, but it is
+## above the car, so the car must neither lift off nor be carried up onto it.
+func _verify_a_wall_does_not_lift_the_car() -> bool:
+	var context := _make_car()
+	var car: TopDownCar = context.car
+	var height: HeightChannelTestHeightProvider = context.height
+	height.mode = HeightChannelTestHeightProvider.Mode.WALL
+	car.set_height_query(height)
+	var controls := VehicleInputState.new()
+	controls.throttle = 1.0
+	car.set_input_state(controls)
+	var launched := false
+	var peak_height := 0.0
+	var passed_the_wall := false
+	for tick in range(MAX_FLIGHT_TICKS + 200):
+		await physics_frame
+		launched = launched or car.is_airborne()
+		peak_height = maxf(peak_height, car.get_height())
+		if car.global_position.x > CREST_X + 40.0:
+			passed_the_wall = true
+			break
+	_check(passed_the_wall, "the wall scenario reaches and crosses the wall")
+	_check(not launched, "driving into a vertical wall does not lift the car off the ground")
+	_check(peak_height < 1.0, "the car is not carried up onto the wall (peak height %.2f of a %.1f wall)" % [peak_height, CREST_HEIGHT])
+	_check(not car.consume_landing_event(), "a wall fires no landing event")
+	_check(car.get_landing_recovery_remaining() == 0.0, "a wall opens no grip recovery window")
 	context.world.queue_free()
 	await process_frame
 	return true
@@ -191,7 +261,7 @@ func _verify_reset_zeroes_height() -> bool:
 	# Read the pose before resetting: the approach from START is long enough for the checkpoint to
 	# have moved several times, so the destination is the latest safe pose, not START.
 	var expected_pose := car.get_safe_reset_pose().origin
-	_check(expected_pose.distance_to(START) > 1.0, "the approach moved the safe pose, so the destination assertion is live")
+	_check(car.global_position.distance_to(expected_pose) > 1.0, "the car is away from the pose it will reset to, so the destination assertion is live")
 	car.request_safe_reset()
 	await physics_frame
 	await physics_frame
