@@ -1,4 +1,4 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://vehicle/top_down_car.gd" id="1_car"]
 [ext_resource type="Resource" path="res://data/default_vehicle_tuning.tres" id="2_tuning"]
@@ -22,6 +22,17 @@ scale_min = 12.5
 scale_max = 30.0
 color = Color(0.58, 0.38, 0.19, 0.55)
 
+[sub_resource type="ParticleProcessMaterial" id="ParticleProcess_landing_burst"]
+particle_flag_disable_z = true
+direction = Vector3(0, -1, 0)
+spread = 85.0
+initial_velocity_min = 100.0
+initial_velocity_max = 220.0
+gravity = Vector3(0, 100, 0)
+scale_min = 10.0
+scale_max = 24.0
+color = Color(0.62, 0.4, 0.2, 0.7)
+
 [node name="TopDownCar" type="RigidBody2D"]
 collision_layer = 1
 collision_mask = 3
@@ -44,15 +55,17 @@ position = Vector2(4, 6)
 polygon = PackedVector2Array(-13, -24, 13, -24, 17, 18, 0, 27, -17, 18)
 color = Color(0.02, 0.03, 0.02, 0.42)
 
-[node name="Body" type="Polygon2D" parent="."]
+[node name="Lift" type="Node2D" parent="."]
+
+[node name="Body" type="Polygon2D" parent="Lift"]
 polygon = PackedVector2Array(-13, -24, 13, -24, 17, 18, 0, 27, -17, 18)
 color = Color(0.88, 0.18, 0.07, 1)
 
-[node name="Windshield" type="Polygon2D" parent="."]
+[node name="Windshield" type="Polygon2D" parent="Lift"]
 polygon = PackedVector2Array(-9, -13, 9, -13, 11, 2, -11, 2)
 color = Color(0.08, 0.16, 0.19, 1)
 
-[node name="DirectionMark" type="Polygon2D" parent="."]
+[node name="DirectionMark" type="Polygon2D" parent="Lift"]
 polygon = PackedVector2Array(-4, -21, 4, -21, 0, -28)
 color = Color(1, 0.83, 0.35, 1)
 
@@ -70,6 +83,17 @@ amount = 20
 lifetime = 0.7
 local_coords = false
 process_material = SubResource("ParticleProcess_dust")
+
+[node name="LandingBurst" type="CPUParticles2D" parent="."]
+position = Vector2(0, 18)
+emitting = false
+amount = 24
+lifetime = 0.45
+one_shot = true
+explosiveness = 1.0
+randomness = 0.5
+local_coords = false
+process_material = SubResource("ParticleProcess_landing_burst")
 
 [node name="FollowCamera" type="Camera2D" parent="."]
 top_level = true

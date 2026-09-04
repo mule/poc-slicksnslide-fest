@@ -6,6 +6,7 @@ extends RigidBody2D
 
 const TALL_LAYER := 1
 const LOW_LAYER := 2
+const SHADOW_FADE_PER_METRE := 0.15
 
 ## Predicted ballistic height must exceed the ground ahead by this much before the car counts as
 ## airborne. Small enough that a car cresting at walking pace still lifts off; large enough that
@@ -47,7 +48,10 @@ var _landed_this_tick := false
 
 @onready var _follow_camera: Camera2D = $FollowCamera
 @onready var _dust: CPUParticles2D = $Dust
+@onready var _landing_burst: CPUParticles2D = $LandingBurst
 @onready var _skid_feedback: Line2D = $SkidFeedback
+@onready var _lift: Node2D = $Lift
+@onready var _shadow: Polygon2D = $Shadow
 
 
 func _ready() -> void:
@@ -88,7 +92,14 @@ func _process(delta: float) -> void:
 	var camera_blend := 1.0 - exp(-tuning.camera_follow_response * delta)
 	_follow_camera.global_position = _follow_camera.global_position.lerp(target_camera_position, camera_blend)
 	var on_dirt := _surface_type == SurfaceQuery.SurfaceType.DIRT
-	_dust.emitting = on_dirt and get_speed() > WorldScale.metres(4.0)
+	_dust.emitting = on_dirt and not _airborne and get_speed() > WorldScale.metres(4.0)
+	if consume_landing_event():
+		_landing_burst.restart()
+	var metres := WorldScale.to_metres(_height)
+	_lift.position = Vector2(0.0, -_height * tuning.lift_pixels_per_pixel)
+	_lift.scale = Vector2.ONE * (1.0 + metres * tuning.scale_per_metre)
+	_shadow.modulate.a = clampf(1.0 - metres * SHADOW_FADE_PER_METRE, 0.25, 1.0)
+	z_index = 1 if _airborne else 0
 	_skid_feedback.visible = _slip_ratio >= tuning.feedback_slip_threshold or _input_state.handbrake > 0.25
 	_skid_feedback.modulate.a = clampf((_slip_ratio - tuning.feedback_slip_threshold) * 2.5 + _input_state.handbrake * 0.7, 0.0, 0.85)
 
