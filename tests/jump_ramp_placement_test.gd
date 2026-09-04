@@ -27,13 +27,40 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	_check(_verify_density(), "the ramp density verification ran to completion")
 	_check(_verify_sweep(), "the seed sweep verification ran to completion")
 	_check(_verify_geometry_isolation(), "the geometry isolation verification ran to completion")
+	_check(_verify_retry_stream_isolation(), "the retry stream isolation verification ran to completion")
 	_check(_verify_height_map_profile(), "the height map profile verification ran to completion")
 	_check(_verify_height_map_skips_invalid_records(), "the invalid record verification ran to completion")
 	_check(_verify_flat_sample_resets(), "the flat sample reset verification ran to completion")
 	_check(_verify_fallback(), "the fallback verification ran to completion")
 	_finish()
+
+
+func _verify_density() -> bool:
+	var generator := TrackGenerator.new()
+	var placer := JumpRampPlacer.new()
+	var catalog := load(CATALOG_PATH) as HeightChannelCatalog
+	var counts: Array[int] = []
+	var nonempty_seeds := 0
+	var total_ramps := 0
+	for seed in range(SEED_COUNT):
+		var definition: TrackDefinition = generator.generate(seed)
+		var result: JumpRampPlacementResult = placer.place(definition, catalog)
+		var count: int = result.placements.size()
+		counts.append(count)
+		total_ramps += count
+		if count > 0:
+			nonempty_seeds += 1
+		_check(count <= catalog.ramps_per_lap_max, "density seed %d does not exceed the catalog maximum" % seed)
+		print("density_seed=%d ramps=%d" % [seed, count])
+	var mean := float(total_ramps) / float(SEED_COUNT)
+	print("density_counts=%s nonempty=%d mean=%.3f" % [str(counts), nonempty_seeds, mean])
+	_check(counts[0] >= 1, "seed 0 places at least one ramp")
+	_check(nonempty_seeds >= 17, "at least 17 of seeds 0-19 place a ramp (%d do)" % nonempty_seeds)
+	_check(mean >= 2.0, "mean ramp count across seeds 0-19 is at least 2.0 (%.3f)" % mean)
+	return true
 
 
 func _verify_sweep() -> bool:
@@ -83,9 +110,15 @@ func _verify_rules(definition: TrackDefinition, placements: Array[JumpRampPlacem
 	var generator_script := load("res://track/track_generator.gd") as GDScript
 	var straight_curvature: float = generator_script.STRAIGHT_CURVATURE
 	var crest_positions: Array[Vector2] = []
+	var stable_ids := {}
 	for ramp in placements:
 		_check(ramp.is_valid(), "seed %d ramp %s is valid" % [seed, ramp.stable_id])
+		_check(not stable_ids.has(ramp.stable_id), "seed %d ramp id %s is unique" % [seed, ramp.stable_id])
+		stable_ids[ramp.stable_id] = true
 		_check(ramp.stable_id.begins_with("h%d:%d:" % [catalog.version, seed]), "seed %d ramp id carries version and seed" % seed)
+		var stable_id_fields := ramp.stable_id.split(":")
+		var stable_id_has_shape := stable_id_fields.size() == 4 and stable_id_fields[3].is_valid_int()
+		_check(stable_id_has_shape, "seed %d ramp id has four fields and an integer attempt ordinal" % seed)
 		_check(is_equal_approx(ramp.half_length, catalog.half_length), "seed %d ramp uses the catalog half length" % seed)
 		_check(is_equal_approx(ramp.crest_height, catalog.crest_height()), "seed %d ramp uses the catalog crest height" % seed)
 		_check(is_equal_approx(ramp.width, definition.track_width), "seed %d ramp spans the road width" % seed)
@@ -118,8 +151,10 @@ func _verify_rules(definition: TrackDefinition, placements: Array[JumpRampPlacem
 
 func _verify_diagnostics(result: JumpRampPlacementResult, catalog: HeightChannelCatalog, seed: int) -> bool:
 	var diagnostics := result.diagnostics
-	for key in ["eligible_runs", "requested", "placed", "rejected_spawn", "rejected_checkpoint", "rejected_spacing", "underfilled"]:
+	for key in ["eligible_runs", "requested", "placed", "rejected_spawn_candidates", "rejected_checkpoint_candidates", "rejected_spacing_candidates", "underfilled"]:
 		_check(diagnostics.has(key), "seed %d diagnostics report %s" % [seed, key])
+	for key in ["rejected_spawn_candidates", "rejected_checkpoint_candidates", "rejected_spacing_candidates"]:
+		_check(int(diagnostics.get(key, -1)) >= 0, "seed %d diagnostics report a non-negative candidate count for %s" % [seed, key])
 	var requested := int(diagnostics.get("requested", -1))
 	var placed := int(diagnostics.get("placed", -1))
 	_check(requested >= catalog.ramps_per_lap_min and requested <= catalog.ramps_per_lap_max, "seed %d requested count is inside the catalog range" % seed)
@@ -151,6 +186,56 @@ func _verify_crest_geometry(seed: int, first: Array[JumpRampPlacement], second: 
 func _verify_geometry_isolation() -> bool:
 	if _break_seed:
 		_check(_geometry_changed_seeds > 0, "a version bump moves at least one seed's crest origins (%d of 20 changed)" % _geometry_changed_seeds)
+	return true
+
+
+## Seed 4 has several separated eligible runs. With a deliberately high request ceiling it visits
+## all of them; adding a gate on one run's attempt-zero crest forces that first candidate to reject
+## without changing the chosen crest or attempt ordinal in a later, distant run.
+func _verify_retry_stream_isolation() -> bool:
+	var definition: TrackDefinition = TrackGenerator.new().generate(4)
+	var catalog := (load(CATALOG_PATH) as HeightChannelCatalog).duplicate(true) as HeightChannelCatalog
+	catalog.ramps_per_lap_min = 16
+	catalog.ramps_per_lap_max = 16
+	var placer := JumpRampPlacer.new()
+	var first := placer.place(definition, catalog)
+	var repeated := placer.place(definition, catalog)
+	_check(_placements_equal(first.placements, repeated.placements), "retry placement repeats exactly with the same catalog")
+	var rejected_candidate: JumpRampPlacement = null
+	var isolated_candidate: JumpRampPlacement = null
+	for candidate in first.placements:
+		if candidate.stable_id.get_slice(":", 3) != "0":
+			continue
+		var candidate_run := int(candidate.stable_id.get_slice(":", 2))
+		for placement in first.placements:
+			var placement_run := int(placement.stable_id.get_slice(":", 2))
+			if placement_run == candidate_run:
+				continue
+			var separation := placement.transform.origin.distance_to(candidate.transform.origin)
+			var safely_distant := separation > catalog.minimum_spacing + catalog.checkpoint_exclusion + catalog.half_length
+			if placement_run > candidate_run and safely_distant:
+				rejected_candidate = candidate
+				isolated_candidate = placement
+				break
+		if rejected_candidate != null:
+			break
+	_check(rejected_candidate != null, "the isolation fixture accepts a later run's attempt-zero candidate to reject")
+	if rejected_candidate == null:
+		return false
+	_check(isolated_candidate != null, "the isolation fixture has a distant candidate in another run")
+	if isolated_candidate == null:
+		return false
+	var rejected_run := int(rejected_candidate.stable_id.get_slice(":", 2))
+	var isolated_run := int(isolated_candidate.stable_id.get_slice(":", 2))
+	print("retry_isolation rejected_run=%d isolated_run=%d" % [rejected_run, isolated_run])
+	_check(isolated_run > rejected_run, "the retry-isolation oracle observes a later run")
+	definition.checkpoints.append(Transform2D(0.0, rejected_candidate.transform.origin))
+	var with_rejection := placer.place(definition, catalog)
+	_check(_placement_by_id(with_rejection.placements, rejected_candidate.stable_id) == null, "adding a gate on a run's first candidate rejects it")
+	var isolated_after := _placement_by_id(with_rejection.placements, isolated_candidate.stable_id)
+	_check(isolated_after != null, "rejecting one run's first candidate preserves another run's chosen candidate")
+	if isolated_after != null:
+		_check(isolated_after.transform.is_equal_approx(isolated_candidate.transform), "rejecting one run's first candidate does not move another run's crest")
 	return true
 
 
@@ -276,6 +361,13 @@ func _placements_equal(first: Array[JumpRampPlacement], second: Array[JumpRampPl
 		if not is_equal_approx(a.half_length, b.half_length) or not is_equal_approx(a.crest_height, b.crest_height) or not is_equal_approx(a.width, b.width):
 			return false
 	return true
+
+
+func _placement_by_id(placements: Array[JumpRampPlacement], stable_id: String) -> JumpRampPlacement:
+	for placement in placements:
+		if placement.stable_id == stable_id:
+			return placement
+	return null
 
 
 func _sorted_origins(placements: Array[JumpRampPlacement]) -> Array[Vector2]:
