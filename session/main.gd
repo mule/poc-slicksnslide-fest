@@ -77,9 +77,12 @@ func _physics_process(delta: float) -> void:
 		reset_this_tick = true
 	# Polled ahead of the reset early-return below: the notice is an unbounded latch that only a
 	# consumer clears, so a tick that returns early without draining it would let a stale flight
-	# raise its status line at an arbitrary later moment.
+	# raise its status line at an arbitrary later moment. Draining and reporting are separated for
+	# that reason: a reset clears the car's air time but not this latch, so a flight that ends in
+	# an off-track reset would otherwise overwrite "Returned to the track" with its own air time in
+	# the same tick. The latch still drains on every simulated tick; only the message is suppressed.
 	var air_time := _vehicle.consume_air_time_notice()
-	if air_time > 0.0:
+	if air_time > 0.0 and not reset_this_tick:
 		_show_status("Air time  ·  %.2f s" % air_time)
 	if reset_this_tick:
 		# A reset only sets a flag the vehicle honours on the *next* physics tick, so
