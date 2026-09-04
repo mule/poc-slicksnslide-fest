@@ -1,6 +1,6 @@
 # Slicks 'n Slide Fest
 
-A Godot proof of concept for a single-viewport, top-down dirt-racing game. It now launches directly into a deterministic generated circuit with a force-based car, controller-first input, ordered lap timing, safe reset, pause, seed restart, and deterministic off-track scenery. Grass and debris make the shoulder readable while trees and rocks populate the deeper hazard field without blocking the 20 m solid recovery corridor; see [Off-track objects](docs/offtrack-objects.md).
+A Godot proof of concept for a single-viewport, top-down dirt-racing game. It now launches directly into a deterministic generated circuit with a force-based car, controller-first input, ordered lap timing, safe reset, pause, seed restart, and deterministic off-track scenery. Grass and debris make the shoulder readable while trees and rocks populate the deeper hazard field without blocking the 20 m solid recovery corridor; see [Off-track objects](docs/offtrack-objects.md). Deterministic jump ramps give the circuit its one vertical axis: the car crests, flies, and pays for the landing, and while it is high enough it clears a rock but never a tree; see [The height channel](docs/height-channel.md).
 
 ## Required Godot version
 
@@ -108,6 +108,32 @@ Run the opt-in automatic reset check:
 godot --headless --path . --script res://tests/open_surface_auto_reset_test.gd
 ```
 
+Run the height channel contract, placement, vehicle, obstacle-level, and ramp visual checks:
+
+```sh
+godot --headless --path . --script res://tests/height_channel_contract_test.gd
+godot --headless --path . --script res://tests/jump_ramp_placement_test.gd
+godot --headless --path . --script res://tests/vehicle_height_channel_test.gd
+godot --headless --path . --script res://tests/airborne_obstacle_level_test.gd
+godot --headless --path . --script res://tests/jump_ramp_visuals_test.gd
+```
+
+These pin the ramp catalog and its derivations, keep ramp placement deterministic and separated
+from the road and off-track seeds, hold the car's flight to its analytic arc and its ground-only
+rules, and check that a car above the clearance height clears a rock while still hitting a tree.
+
+For the seeds 0-19 ramp ledger, the driven approach/apex/landing stills, the flight-reach
+measurement, and the rock-clearance still, use the graphical renderer (not `--headless`):
+
+```sh
+godot --path . --script res://tests/capture_height_channel_evidence.gd
+```
+
+It writes the trace and the PNGs under
+[`docs/evidence/height-channel/`](docs/evidence/height-channel/); see
+[The height channel](docs/height-channel.md) for what each number means and for the six mutation
+commands that keep these suites honest.
+
 Run the harness contract check:
 
 ```sh
@@ -127,6 +153,7 @@ assertions silently skipped and still exit 0. Every verification function is the
 | --- | --- |
 | `world/` | The pixel-per-metre scale contract and shared spatial indexing |
 | `world/offtrack/` | Deterministic off-track placement, prototype visuals, and chunked solid collisions; see [Off-track objects](docs/offtrack-objects.md) |
+| `world/height/` | Deterministic jump ramp placement and ramp presentation; see [The height channel](docs/height-channel.md) |
 | `track/` | Deterministic generated track data, runtime geometry/collision, lap order, and surface queries |
 | `vehicle/` | Tunable force-based car dynamics, reset safety, feedback, and diagnostics |
 | `input/` | InputMap polling, deadzone processing, and hardware-independent normalized vehicle input |

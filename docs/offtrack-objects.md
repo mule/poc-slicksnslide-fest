@@ -61,8 +61,12 @@ reports a validation error and creates neither a visual nor a collider; valid si
 build.
 
 There is no object streaming, persistence across a restart, destructibility, damage, pickup
-system, shadow gameplay, or height/jump behavior. Restarting a seed frees the old generated track
-and its visual and collision children before mounting the replacement.
+system, or shadow gameplay. Height and jump behaviour is no longer out of scope: it was
+implemented as sub-project C, and an object's `obstacle_height` is what decides whether an
+airborne car can pass over it. See [The height channel](height-channel.md).
+
+Restarting a seed frees the old generated track and its visual and collision children before
+mounting the replacement.
 
 ## Diagnostics
 
@@ -78,7 +82,11 @@ An underfilled zone means its accepted/occupied-draw ratio is below the catalog'
 does not change the road or retry generation. A zero-draw zone is not marked underfilled.
 `OfftrackObjectRuntime.get_metrics()` reports `visuals`, `decorative_batches`, `solid_visuals`,
 `colliders`, and `collision_chunks`; tests require the visual count to match placements and the
-collider count to match solid placements.
+collider count to match solid placements. `collision_chunks` counts bodies, not spatial chunks:
+collision layers belong to bodies rather than to shapes, so one spatial chunk holding both a low
+solid and a tall one builds two `StaticBody2D` bodies, `Chunk_<x>_<y>_low` and
+`Chunk_<x>_<y>_tall`. A chunk therefore contributes one or two to this count. See
+[The height channel](height-channel.md) for what the two levels mean to the car.
 
 ## Verification
 
