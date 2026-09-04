@@ -116,7 +116,7 @@ func _verify_chunk_local_alignment(catalog: OfftrackObjectCatalog) -> bool:
 	var collisions := OfftrackObjectCollisions.new()
 	root.add_child(collisions)
 	collisions.build(placements, catalog)
-	_check(collisions.chunk_body_count() == 2, "nearby solid fixtures build one low and one tall chunk body")
+	_check(collisions.chunk_body_count() == 2, "non-zero fixtures build one low and one tall chunk body")
 	_check(_verify_shape_contract(collisions, placements, catalog), "non-zero fixture shapes preserve local/global alignment")
 	collisions.free()
 	return true
