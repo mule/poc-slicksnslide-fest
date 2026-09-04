@@ -28,6 +28,7 @@ func _run() -> void:
 	await process_frame
 	await physics_frame
 	_check(await _verify_automatic_reset_does_not_leak_checkpoint_progress(session), "the automatic reset does not leak checkpoint progress verification ran to completion")
+	_check(await _verify_height_channel_is_wired(session), "the height channel wiring verification ran to completion")
 	paused = false
 	session.queue_free()
 	await process_frame
@@ -159,6 +160,49 @@ func _verify_automatic_reset_does_not_leak_checkpoint_progress(session: Node) ->
 		int(after.get("next_checkpoint", -1)) == 1 and int(after.get("lap_count", -1)) == 0,
 		"the automatic reset's off-track-to-safe-pose teleport is not credited as a driven checkpoint crossing"
 	)
+	return true
+
+
+func _verify_height_channel_is_wired(session: Node) -> bool:
+	# The file keeps `session` typed as Node like its sibling verifications, so calls go through
+	# call() rather than static member access.
+	session.call("restart_with_seed", 3)
+	await process_frame
+	var snapshot: Dictionary = session.call("get_session_snapshot")
+	_check(str(snapshot.get("height_fingerprint", "")).length() == 64, "the snapshot reports a SHA-256 height fingerprint")
+	var runtime := session.get_node_or_null("World/TrackMount/GeneratedTrack") as TrackRuntime
+	var ramps := runtime.get_node_or_null("JumpRamps") as JumpRampVisuals if runtime != null else null
+	_check(ramps != null, "the generated track mounts a JumpRamps visual layer")
+	var definition: TrackDefinition = runtime.definition
+	_check(ramps != null and ramps.visual_count() == definition.jump_ramps.size(), "one wedge per generated ramp")
+	var first_fingerprint := str(snapshot.get("height_fingerprint", ""))
+
+	# Seed restart replaces the ramp set entirely.
+	session.call("restart_with_seed", 4)
+	await process_frame
+	var second: Dictionary = session.call("get_session_snapshot")
+	_check(str(second.get("height_fingerprint", "")) != first_fingerprint, "restarting with another seed changes the height fingerprint")
+	_check(session.get_node("World/TrackMount").get_child_count() == 1, "the previous track, including its ramps, is freed on restart")
+
+	# A scripted fall long enough for the notice proves the car is wired to the session's status.
+	var car := session.get_node("World/VehicleMount/PlayerCar") as TopDownCar
+	var provider := HeightChannelTestHeightProvider.new()
+	provider.mode = HeightChannelTestHeightProvider.Mode.PLATEAU
+	provider.plateau_height = 40.0
+	car.set_height_query(provider)
+	# Two ticks on the plateau so the car snaps up to 40 px, then pull the ground away everywhere.
+	await physics_frame
+	await physics_frame
+	provider.plateau_end_x = -INF
+	var label := session.get_node("%StatusLabel") as Label
+	var saw_air_time := false
+	for tick in range(180):
+		await physics_frame
+		await process_frame
+		if label.text.begins_with("Air time"):
+			saw_air_time = true
+			break
+	_check(saw_air_time, "a flight of at least half a second shows the air time status line")
 	return true
 
 

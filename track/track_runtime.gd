@@ -33,6 +33,7 @@ func _ready() -> void:
 		return
 	_build_line("GrassShoulder", definition.track_width * 1.4, GRASS_COLOR, -3)
 	_build_line("Dirt", definition.track_width, DIRT_COLOR, -2)
+	_build_jump_ramps()
 	_build_boundary_line("LeftEdge", definition.left_boundary)
 	_build_boundary_line("RightEdge", definition.right_boundary)
 	_build_checkpoint_markers()
@@ -42,6 +43,14 @@ func _ready() -> void:
 		preload("res://data/default_offtrack_object_catalog.tres"),
 	)
 	add_child(object_runtime)
+
+
+func _build_jump_ramps() -> void:
+	var visuals := JumpRampVisuals.new()
+	visuals.name = "JumpRamps"
+	visuals.z_index = -1
+	add_child(visuals)
+	visuals.build(definition.jump_ramps)
 
 
 func _build_line(line_name: String, width: float, color: Color, z_layer: int) -> void:
