@@ -52,25 +52,37 @@ func place(definition: TrackDefinition, catalog: HeightChannelCatalog) -> JumpRa
 		var window_size := run_count - before - after
 		if window_size <= 0:
 			continue
-		# Every run draws from its own child seed, so a rejection here cannot shift another run.
+		# Every run draws a without-replacement candidate stream from its own child seed, so a
+		# rejection here cannot shift another run and every legal crest can be tried at most once.
 		rng.seed = DomainSeed.child(domain_seed, run_start, run_count)
-		var crest_index := (run_start + before + rng.randi_range(0, window_size - 1)) % unique_count
-		var crest := centerline[crest_index]
-		var reason := _rejection_reason(crest, definition, catalog, crests)
-		if not reason.is_empty():
-			diagnostics["rejected_" + reason] = int(diagnostics["rejected_" + reason]) + 1
-			continue
-		var next := centerline[(crest_index + 1) % unique_count]
-		var previous := centerline[(crest_index - 1 + unique_count) % unique_count]
-		var axis := (next - previous).normalized()
-		var placement := JumpRampPlacement.new()
-		placement.stable_id = "h%d:%d:%d" % [catalog.version, definition.seed, run_start]
-		placement.transform = Transform2D(axis.angle(), crest)
-		placement.half_length = catalog.half_length
-		placement.crest_height = catalog.crest_height()
-		placement.width = definition.track_width
-		result.placements.append(placement)
-		crests.append(crest)
+		var candidate_offsets: Array[int] = []
+		for offset in range(window_size):
+			candidate_offsets.append(offset)
+		for offset in range(candidate_offsets.size() - 1, 0, -1):
+			var swap_index := rng.randi_range(0, offset)
+			var held := candidate_offsets[offset]
+			candidate_offsets[offset] = candidate_offsets[swap_index]
+			candidate_offsets[swap_index] = held
+		for attempt in range(candidate_offsets.size()):
+			if result.placements.size() >= requested:
+				break
+			var crest_index := (run_start + before + candidate_offsets[attempt]) % unique_count
+			var crest := centerline[crest_index]
+			var reason := _rejection_reason(crest, definition, catalog, crests)
+			if not reason.is_empty():
+				diagnostics["rejected_" + reason] = int(diagnostics["rejected_" + reason]) + 1
+				continue
+			var next := centerline[(crest_index + 1) % unique_count]
+			var previous := centerline[(crest_index - 1 + unique_count) % unique_count]
+			var axis := (next - previous).normalized()
+			var placement := JumpRampPlacement.new()
+			placement.stable_id = "h%d:%d:%d:%d" % [catalog.version, definition.seed, run_start, attempt]
+			placement.transform = Transform2D(axis.angle(), crest)
+			placement.half_length = catalog.half_length
+			placement.crest_height = catalog.crest_height()
+			placement.width = definition.track_width
+			result.placements.append(placement)
+			crests.append(crest)
 
 	result.placements.sort_custom(func(a: JumpRampPlacement, b: JumpRampPlacement) -> bool: return a.stable_id < b.stable_id)
 	diagnostics["placed"] = result.placements.size()

@@ -75,14 +75,14 @@ func _verify_catalog_defaults() -> bool:
 	_check(catalog != null, "the default height catalog loads")
 	if catalog == null:
 		return false
-	_check(catalog.version == 1, "catalog version is 1")
+	_check(catalog.version == 2, "catalog version is 2")
 	_check(is_equal_approx(catalog.half_length, WorldScale.metres(12.0)), "half length is 12 m")
 	_check(is_equal_approx(catalog.slope, 0.12), "slope is 0.12")
 	_check(is_equal_approx(catalog.crest_height(), WorldScale.metres(1.44)), "crest height derives as slope times half length")
 	_check(catalog.ramps_per_lap_min == 2 and catalog.ramps_per_lap_max == 4, "two to four ramps are requested per lap")
 	_check(catalog.ramps_per_lap_min <= catalog.ramps_per_lap_max, "ramp count range is ordered")
 	_check(is_equal_approx(catalog.approach_clearance, WorldScale.metres(40.0)), "approach clearance is 40 m")
-	_check(is_equal_approx(catalog.landing_clearance, WorldScale.metres(80.0)), "landing clearance is 80 m")
+	_check(is_equal_approx(catalog.landing_clearance, WorldScale.metres(20.0)), "landing clearance is 20 m")
 	_check(is_equal_approx(catalog.spawn_exclusion, WorldScale.metres(80.0)), "spawn exclusion is 80 m")
 	_check(is_equal_approx(catalog.checkpoint_exclusion, WorldScale.metres(40.0)), "checkpoint exclusion is 40 m")
 	_check(is_equal_approx(catalog.minimum_spacing, WorldScale.metres(120.0)), "minimum crest spacing is 120 m")
