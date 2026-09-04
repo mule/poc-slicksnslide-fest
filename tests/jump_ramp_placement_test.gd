@@ -190,8 +190,8 @@ func _verify_geometry_isolation() -> bool:
 
 
 ## Seed 4 has several separated eligible runs. With a deliberately high request ceiling it visits
-## all of them; adding a gate on a later run's attempt-zero crest forces that first candidate to
-## reject without changing the chosen crest or attempt ordinal in an earlier, distant run.
+## all of them; adding a gate on one run's attempt-zero crest forces that first candidate to reject
+## without changing the chosen crest or attempt ordinal in a later, distant run.
 func _verify_retry_stream_isolation() -> bool:
 	var definition: TrackDefinition = TrackGenerator.new().generate(4)
 	var catalog := (load(CATALOG_PATH) as HeightChannelCatalog).duplicate(true) as HeightChannelCatalog
@@ -209,9 +209,11 @@ func _verify_retry_stream_isolation() -> bool:
 		var candidate_run := int(candidate.stable_id.get_slice(":", 2))
 		for placement in first.placements:
 			var placement_run := int(placement.stable_id.get_slice(":", 2))
-			if placement_run >= candidate_run:
+			if placement_run == candidate_run:
 				continue
-			if placement.transform.origin.distance_to(candidate.transform.origin) > catalog.minimum_spacing + catalog.checkpoint_exclusion + catalog.half_length:
+			var separation := placement.transform.origin.distance_to(candidate.transform.origin)
+			var safely_distant := separation > catalog.minimum_spacing + catalog.checkpoint_exclusion + catalog.half_length
+			if placement_run > candidate_run and safely_distant:
 				rejected_candidate = candidate
 				isolated_candidate = placement
 				break
@@ -223,6 +225,10 @@ func _verify_retry_stream_isolation() -> bool:
 	_check(isolated_candidate != null, "the isolation fixture has a distant candidate in another run")
 	if isolated_candidate == null:
 		return false
+	var rejected_run := int(rejected_candidate.stable_id.get_slice(":", 2))
+	var isolated_run := int(isolated_candidate.stable_id.get_slice(":", 2))
+	print("retry_isolation rejected_run=%d isolated_run=%d" % [rejected_run, isolated_run])
+	_check(isolated_run > rejected_run, "the retry-isolation oracle observes a later run")
 	definition.checkpoints.append(Transform2D(0.0, rejected_candidate.transform.origin))
 	var with_rejection := placer.place(definition, catalog)
 	_check(_placement_by_id(with_rejection.placements, rejected_candidate.stable_id) == null, "adding a gate on a run's first candidate rejects it")
