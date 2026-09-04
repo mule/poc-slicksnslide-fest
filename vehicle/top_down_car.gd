@@ -48,6 +48,7 @@ var _landed_this_tick := false
 
 @onready var _follow_camera: Camera2D = $FollowCamera
 @onready var _dust: CPUParticles2D = $Dust
+@onready var _landing_burst: CPUParticles2D = $LandingBurst
 @onready var _skid_feedback: Line2D = $SkidFeedback
 @onready var _lift: Node2D = $Lift
 @onready var _shadow: Polygon2D = $Shadow
@@ -93,7 +94,7 @@ func _process(delta: float) -> void:
 	var on_dirt := _surface_type == SurfaceQuery.SurfaceType.DIRT
 	_dust.emitting = on_dirt and not _airborne and get_speed() > WorldScale.metres(4.0)
 	if consume_landing_event():
-		_dust.restart()
+		_landing_burst.restart()
 	var metres := WorldScale.to_metres(_height)
 	_lift.position = Vector2(0.0, -_height * tuning.lift_pixels_per_pixel)
 	_lift.scale = Vector2.ONE * (1.0 + metres * tuning.scale_per_metre)

@@ -75,41 +75,77 @@ func _verify_body_lift_and_shadow() -> bool:
 
 
 func _verify_airborne_draw_order_and_dust() -> bool:
+	_check(await _verify_airborne_suppresses_dust(), "the airborne dust suppression verification ran to completion")
+	_check(await _verify_landing_burst(), "the landing burst verification ran to completion")
+	return true
+
+
+func _verify_airborne_suppresses_dust() -> bool:
 	var context := _make_car(40.0, 50.0)
 	var car: TopDownCar = context.car
 	var dust := car.get_node("Dust") as CPUParticles2D
 	var controls := VehicleInputState.new()
 	controls.throttle = 1.0
 	car.set_input_state(controls)
-	# Off-track keeps the ordinary dust rule off, so the only way emitting can be true on the
-	# landing frame is the landing burst. Without this the assertion would pass on speed alone.
-	(context.surface as Issue4TestSurfaceProvider).force_off_track = true
 	var seen_airborne := false
 	var z_in_air := 0
 	var dust_in_air := false
-	var z_on_landing := -1
-	var dust_on_landing := false
-	for tick in range(240):
+	var speed_above_dust_threshold := false
+	for _tick in range(240):
 		await physics_frame
 		await process_frame
 		if car.is_airborne():
 			seen_airborne = true
-			z_in_air = car.z_index
-			dust_in_air = dust_in_air or dust.emitting
-		elif seen_airborne:
-			# SceneTree.process_frame fires before Node._process(), so let the car present the
-			# just-observed physics landing before sampling its one-frame visual state.
+			# SceneTree.process_frame fires before Node._process(), so sample after the car has
+			# presented the airborne physics state just observed above.
 			await process_frame
-			z_on_landing = car.z_index
-			dust_on_landing = dust.emitting
+			z_in_air = car.z_index
+			dust_in_air = dust.emitting
+			speed_above_dust_threshold = car.get_speed() > WorldScale.metres(4.0)
 			break
 	_check(seen_airborne, "the car falls off the plateau edge")
+	_check(speed_above_dust_threshold, "the airborne dirt car is fast enough that ordinary dust would emit")
 	_check(z_in_air == 1, "an airborne car draws at z_index 1")
-	_check(not dust_in_air, "dust does not emit in the air")
-	_check(z_on_landing == 0, "a landed car returns to z_index 0")
-	_check(dust_on_landing, "landing restarts the dust as a burst")
+	_check(not dust_in_air, "continuous dirt dust does not emit in the air")
+	context.world.queue_free()
 	await process_frame
-	_check(not dust.emitting, "the burst is one frame; the ordinary rule resumes")
+	return true
+
+
+func _verify_landing_burst() -> bool:
+	var context := _make_car(40.0, 50.0)
+	var car: TopDownCar = context.car
+	var dust := car.get_node("Dust") as CPUParticles2D
+	var landing_burst := car.get_node("LandingBurst") as CPUParticles2D
+	_check(landing_burst.one_shot, "the landing burst is a one-shot emitter")
+	_check(landing_burst.amount > 1, "the landing burst emits multiple particles at once")
+	_check(is_equal_approx(landing_burst.explosiveness, 1.0), "the landing burst releases its full amount instantly")
+	_check(not landing_burst.emitting, "the landing burst is idle before a landing")
+	var controls := VehicleInputState.new()
+	controls.throttle = 1.0
+	car.set_input_state(controls)
+	# Off-track keeps the ordinary plume off, isolating the dedicated landing emitter.
+	(context.surface as Issue4TestSurfaceProvider).force_off_track = true
+	var seen_airborne := false
+	var z_on_landing := -1
+	var burst_on_landing := false
+	var dust_on_landing := false
+	for _tick in range(240):
+		await physics_frame
+		await process_frame
+		if car.is_airborne():
+			seen_airborne = true
+		elif seen_airborne:
+			# Let the car present the just-observed physics landing before sampling its visuals.
+			await process_frame
+			z_on_landing = car.z_index
+			burst_on_landing = landing_burst.emitting
+			dust_on_landing = dust.emitting
+			break
+	_check(seen_airborne, "the burst scenario falls off the plateau edge")
+	_check(z_on_landing == 0, "a landed car returns to z_index 0")
+	_check(burst_on_landing, "landing starts the dedicated one-shot burst")
+	_check(not dust_on_landing, "landing leaves the ordinary off-track dust plume off")
 	context.world.queue_free()
 	await process_frame
 	return true
