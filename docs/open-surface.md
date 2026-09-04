@@ -60,7 +60,7 @@ Put together: because there is no wall forcing the car back onto the road, a dri
 
 `SessionSettings.auto_reset_enabled` defaults to `false`. `MainSession.restart_with_seed()` passes it straight to `TopDownCar.set_auto_reset_enabled()` on every restart, so it has to be explicitly turned on (there is no in-game toggle at time of writing; it is a resource-level setting).
 
-When enabled, `TopDownCar._update_auto_reset()` evaluates two independent conditions, checked only while the car is `OFF_TRACK`; either is sufficient to trigger a reset:
+When enabled, `TopDownCar._update_auto_reset()` evaluates two independent conditions, checked only while the car is `OFF_TRACK` **and on the ground**; either is sufficient to trigger a reset:
 
 | Condition | Threshold (`VehicleTuning` field) | Default value |
 | --- | --- | --- |
@@ -68,6 +68,8 @@ When enabled, `TopDownCar._update_auto_reset()` evaluates two independent condit
 | Lost off-track | `auto_reset_lost_distance` | more than 1000.0 px (80 m) from the centerline |
 
 The lost-distance threshold (80 m) is deliberately half of `PLAY_AREA_MARGIN` (160 m), so a "lost" reset resolves well before the car could ever reach the containment boundary. Returning to `DIRT` clears both timers immediately.
+
+Automatic reset and safe-pose capture are both ground-only: neither runs while the car is airborne, and no safe pose is recorded anywhere the ground is raised, so a jump over open ground is never mistaken for a car that is stuck or lost and a reset never puts the car back onto a ramp face. The height channel was deferred when this document was written; it is now implemented as sub-project C, and [The height channel](height-channel.md) is the contract for it.
 
 A reset that fires this way teleports the car to its last safe on-track pose (the same mechanism the manual reset uses) and shows the status message "Returned to the track". It also re-seeds the checkpoint detector at the landing pose so the teleport itself is never misread as a driven checkpoint crossing.
 
