@@ -1,7 +1,12 @@
 class_name OfftrackObjectCollisions
 extends Node2D
 
+const TALL_LAYER := 1
+const LOW_LAYER := 2
+
 var _chunk_body_count := 0
+var _low_collider_count := 0
+var _tall_collider_count := 0
 
 
 func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog) -> void:
@@ -21,15 +26,18 @@ func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCa
 			floori(placement.transform.origin.x / catalog.chunk_size),
 			floori(placement.transform.origin.y / catalog.chunk_size)
 		)
-		var body: StaticBody2D = bodies.get(chunk)
+		# Layers belong to bodies, not shapes, so each chunk holds one body per height level.
+		var is_low := archetype.obstacle_height <= catalog.low_obstacle_height
+		var key := "%d_%d_%s" % [chunk.x, chunk.y, "low" if is_low else "tall"]
+		var body: StaticBody2D = bodies.get(key)
 		if body == null:
 			body = StaticBody2D.new()
-			body.name = "Chunk_%d_%d" % [chunk.x, chunk.y]
+			body.name = "Chunk_" + key
 			body.position = Vector2(chunk) * catalog.chunk_size
-			body.collision_layer = 1
+			body.collision_layer = LOW_LAYER if is_low else TALL_LAYER
 			body.collision_mask = 0
 			add_child(body)
-			bodies[chunk] = body
+			bodies[key] = body
 			_chunk_body_count += 1
 		var shape := CollisionShape2D.new()
 		shape.name = placement.stable_id.replace(":", "_")
@@ -39,6 +47,18 @@ func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCa
 		circle.radius = archetype.collision_radius * placement.scale_factor
 		shape.shape = circle
 		body.add_child(shape)
+		if is_low:
+			_low_collider_count += 1
+		else:
+			_tall_collider_count += 1
+
+
+func low_collider_count() -> int:
+	return _low_collider_count
+
+
+func tall_collider_count() -> int:
+	return _tall_collider_count
 
 
 func collider_count() -> int:
@@ -60,3 +80,6 @@ func _clear_children() -> void:
 	for child in get_children():
 		child.free()
 	_chunk_body_count = 0
+	_low_collider_count = 0
+	_tall_collider_count = 0
+

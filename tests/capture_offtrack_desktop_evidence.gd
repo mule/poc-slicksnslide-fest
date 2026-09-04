@@ -207,7 +207,7 @@ func _find_generated_impact_target(definition: TrackDefinition, collisions: Offt
 		for direction in directions:
 			var start: Vector2 = placement.transform.origin - direction * WorldScale.metres(20.0)
 			var query := PhysicsRayQueryParameters2D.create(start, placement.transform.origin)
-			query.collision_mask = 1
+			query.collision_mask = OfftrackObjectCollisions.TALL_LAYER | OfftrackObjectCollisions.LOW_LAYER
 			query.exclude = [car.get_rid()]
 			var hit := car.get_world_2d().direct_space_state.intersect_ray(query)
 			if hit.get("collider") == body and int(hit.get("shape", -1)) == shape.get_index():

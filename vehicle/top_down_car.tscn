@@ -23,6 +23,8 @@ scale_max = 30.0
 color = Color(0.58, 0.38, 0.19, 0.55)
 
 [node name="TopDownCar" type="RigidBody2D"]
+collision_layer = 1
+collision_mask = 3
 mass = 1100.0
 physics_material_override = SubResource("PhysicsMaterial_car")
 gravity_scale = 0.0

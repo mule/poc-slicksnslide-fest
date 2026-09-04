@@ -115,6 +115,10 @@ func set_next_checkpoint(index: int) -> void:
 func _build_collision() -> void:
 	var body := StaticBody2D.new()
 	body.name = "PlayAreaBounds"
+	# Must stay on the tall layer (layer 1) so an airborne car that drops the low layer
+	# from its mask cannot escape past the world boundary.
+	body.collision_layer = 1
+	body.collision_mask = 0
 	add_child(body)
 	var area: Rect2 = definition.play_area
 	var corners := [
