@@ -6,8 +6,10 @@ extends HeightQuery
 ## whose local frame contains the position is the only one. With at most a handful of ramps per
 ## track a linear scan beats an index; the placement test bounds its cost. Per-ramp bounds live in
 ## scalar packed arrays and a conservative reach test rejects most misses before any transform
-## work. The flat miss case returns a shared sample rather than allocating per query, so callers
-## must read the returned sample immediately instead of holding it across further queries.
+## work. The flat miss path hands back one shared sample instead of allocating per query, re-zeroed
+## on every return so a consumer's stray write self-heals on the next query: hold and read the
+## sample freely, but never write through it — a mutation only corrupts what is read before the
+## next flat query resets it.
 
 var _flat := HeightSample.new()
 var _origin_xs := PackedFloat64Array()
@@ -65,4 +67,6 @@ func sample_at(world_position: Vector2) -> HeightSample:
 		# Rising toward the crest from either side: the gradient points at the crest.
 		var along := -signf(local.x) * _slopes[index]
 		return HeightSample.new(_crest_heights[index] * (1.0 - absf(local.x) / half_length), _axes[index] * along)
+	_flat.ground_height = 0.0
+	_flat.gradient = Vector2.ZERO
 	return _flat

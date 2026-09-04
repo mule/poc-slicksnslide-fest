@@ -17,6 +17,7 @@ var _failures: Array[String] = []
 var _checks := 0
 var _break_seed := false
 var _break_clearance := false
+var _geometry_changed_seeds := 0
 
 
 func _initialize() -> void:
@@ -27,8 +28,10 @@ func _initialize() -> void:
 
 func _run() -> void:
 	_check(_verify_sweep(), "the seed sweep verification ran to completion")
+	_check(_verify_geometry_isolation(), "the geometry isolation verification ran to completion")
 	_check(_verify_height_map_profile(), "the height map profile verification ran to completion")
 	_check(_verify_height_map_skips_invalid_records(), "the invalid record verification ran to completion")
+	_check(_verify_flat_sample_resets(), "the flat sample reset verification ran to completion")
 	_check(_verify_fallback(), "the fallback verification ran to completion")
 	_finish()
 
@@ -66,6 +69,7 @@ func _verify_seed(seed: int, generator: TrackGenerator, placer: JumpRampPlacer, 
 	_check(first.fingerprint.length() == 64, "seed %d produces a SHA-256 height fingerprint" % seed)
 	_check(first.fingerprint == second.fingerprint, "seed %d height fingerprint repeats" % seed)
 	_check(_placements_equal(first.placements, second.placements), "seed %d placements repeat exactly" % seed)
+	_check(_verify_crest_geometry(seed, first.placements, second.placements), "seed %d crest geometry verification completed" % seed)
 	_check(definition.geometry_fingerprint == road_fingerprint, "seed %d road fingerprint is unchanged by placement" % seed)
 	_check(definition.geometry_fingerprint == baseline[seed], "seed %d road fingerprint matches the pre-B baseline" % seed)
 	_check(definition.offtrack_object_fingerprint == object_fingerprint, "seed %d object fingerprint is unchanged by placement" % seed)
@@ -121,6 +125,32 @@ func _verify_diagnostics(result: JumpRampPlacementResult, catalog: HeightChannel
 	_check(requested >= catalog.ramps_per_lap_min and requested <= catalog.ramps_per_lap_max, "seed %d requested count is inside the catalog range" % seed)
 	_check(placed == result.placements.size(), "seed %d placed count matches the placement array" % seed)
 	_check(bool(diagnostics.get("underfilled")) == (placed < requested), "seed %d underfill flag is honest" % seed)
+	return true
+
+
+## A version bump must move crests through the domain seed, not merely rewrite stable ids and the
+## fingerprint, so this repeat check compares geometry only. Under --break-height-seed a changed
+## domain seed usually but not always moves a given seed's crests: seeds whose origins legitimately
+## coincide across versions still pass the repeat check, which is why _verify_geometry_isolation
+## additionally asserts at sweep scope that at least one seed's crest geometry changed.
+func _verify_crest_geometry(seed: int, first: Array[JumpRampPlacement], second: Array[JumpRampPlacement]) -> bool:
+	var first_origins := _sorted_origins(first)
+	var second_origins := _sorted_origins(second)
+	var matches := _origins_match(first_origins, second_origins)
+	if _break_seed:
+		if not matches:
+			_geometry_changed_seeds += 1
+		_check(matches, "seed %d crest origins repeat across the version bump" % seed)
+		return true
+	if _break_clearance:
+		return true
+	_check(matches, "seed %d crest origins repeat without the stable ids" % seed)
+	return true
+
+
+func _verify_geometry_isolation() -> bool:
+	if _break_seed:
+		_check(_geometry_changed_seeds > 0, "a version bump moves at least one seed's crest origins (%d of 20 changed)" % _geometry_changed_seeds)
 	return true
 
 
@@ -182,6 +212,27 @@ func _verify_height_map_skips_invalid_records() -> bool:
 	return true
 
 
+## The flat miss path hands back a shared sample; a consumer writing through it must not corrupt
+## later off-ramp queries, because every flat return re-zeros the sample first.
+func _verify_flat_sample_resets() -> bool:
+	var definition := TrackDefinition.new()
+	var ramp := JumpRampPlacement.new()
+	ramp.stable_id = "h1:0:0"
+	ramp.transform = Transform2D(0.0, Vector2(1000.0, 500.0))
+	ramp.half_length = 150.0
+	ramp.crest_height = 18.0
+	ramp.width = 240.0
+	definition.jump_ramps.append(ramp)
+	var map := TrackHeightMap.new(definition)
+	var poisoned := map.sample_at(Vector2(-500.0, -500.0))
+	poisoned.ground_height = 123.0
+	poisoned.gradient = Vector2(7.0, 9.0)
+	var flat := map.sample_at(Vector2(2500.0, 900.0))
+	_check(flat.ground_height == 0.0, "an off-ramp query after a consumer writes to the flat sample still reads flat height")
+	_check(flat.gradient.is_equal_approx(Vector2.ZERO), "an off-ramp query after a consumer writes to the flat sample still reads a zero gradient")
+	return true
+
+
 func _verify_fallback() -> bool:
 	var generator := TrackGenerator.new()
 	var definition: TrackDefinition = generator.generate(17, {"max_attempts": 1})
@@ -223,6 +274,29 @@ func _placements_equal(first: Array[JumpRampPlacement], second: Array[JumpRampPl
 		if a.stable_id != b.stable_id or not a.transform.is_equal_approx(b.transform):
 			return false
 		if not is_equal_approx(a.half_length, b.half_length) or not is_equal_approx(a.crest_height, b.crest_height) or not is_equal_approx(a.width, b.width):
+			return false
+	return true
+
+
+func _sorted_origins(placements: Array[JumpRampPlacement]) -> Array[Vector2]:
+	var origins: Array[Vector2] = []
+	for ramp in placements:
+		origins.append(ramp.transform.origin)
+	origins.sort_custom(_origin_before)
+	return origins
+
+
+func _origin_before(a: Vector2, b: Vector2) -> bool:
+	if a.x == b.x:
+		return a.y < b.y
+	return a.x < b.x
+
+
+func _origins_match(first: Array[Vector2], second: Array[Vector2]) -> bool:
+	if first.size() != second.size():
+		return false
+	for index in range(first.size()):
+		if not first[index].is_equal_approx(second[index]):
 			return false
 	return true
 
