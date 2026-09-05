@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="HeightChannelCatalog" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://world/height/height_channel_catalog.gd" id="1_catalog"]
+
+[resource]
+script = ExtResource("1_catalog")
+version = 3
+ramps_per_lap_min = 2
+ramps_per_lap_max = 4
+half_length = 150.0
+slope = 0.06
+approach_clearance = 350.0
+landing_clearance = 400.0
+spawn_exclusion = 1000.0
+checkpoint_exclusion = 500.0
+minimum_spacing = 1500.0
