@@ -224,10 +224,10 @@ The bullets above document one direction only — a catalog change moves the hei
 reverse coupling also exists and is unversioned:
 
 - `JumpRampPlacer._straight_runs` reads `TrackGenerator.STRAIGHT_CURVATURE`
-  (`world/height/jump_ramp_placer.gd:103`) to decide which samples are gentle, so retuning that
+  (`world/height/jump_ramp_placer.gd:116`) to decide which samples are gentle, so retuning that
   threshold changes which runs are eligible, and therefore which crests are chosen.
 - The placer derives `spacing` from `definition.lap_length` over the sample count
-  (`world/height/jump_ramp_placer.gd:34`), which `TrackGenerator.SAMPLE_SPACING` sets. Changing it
+  (`world/height/jump_ramp_placer.gd:44`), which `TrackGenerator.SAMPLE_SPACING` sets. Changing it
   changes the sample count, the clearance-to-sample conversions, and the crest indices.
 
 So a change to either road constant moves **every** height fingerprint on **every** seed while
