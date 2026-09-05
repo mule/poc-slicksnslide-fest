@@ -7,6 +7,10 @@ extends Resource
 @export var stable_id: String = ""
 @export var transform: Transform2D = Transform2D.IDENTITY
 @export_range(1.0, 2000.0, 0.5) var half_length: float = 150.0
+## These two defaults are inspector placeholders, not the shipped shape, and no production
+## placement ever reads them: `JumpRampPlacer.place` overwrites `crest_height` from
+## `HeightChannelCatalog.crest_height()` (9.0 at catalog v3, not the 18.0 below) and `width` from
+## `TrackDefinition.track_width`, which is road geometry rather than a catalog value at all.
 @export_range(0.0, 500.0, 0.1) var crest_height: float = 18.0
 @export_range(1.0, 500.0, 0.5) var width: float = 240.0
 

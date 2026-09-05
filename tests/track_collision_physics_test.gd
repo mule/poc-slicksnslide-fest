@@ -158,8 +158,10 @@ func _create_test_body() -> CharacterBody2D:
 	var body := CharacterBody2D.new()
 	body.name = "ContainmentProbe"
 	body.motion_mode = CharacterBody2D.MOTION_MODE_FLOATING
-	body.collision_layer = 2
-	body.collision_mask = 1
+	# Layer 2 is LOW_LAYER now; the probe is a car stand-in, not an obstacle, so it takes the same
+	# spare layer its sibling in tests/offtrack_object_collision_test.gd uses.
+	body.collision_layer = 4
+	body.collision_mask = OfftrackObjectCollisions.TALL_LAYER
 	body.safe_margin = 0.05
 	var collision_shape := CollisionShape2D.new()
 	var circle := CircleShape2D.new()

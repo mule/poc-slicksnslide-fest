@@ -14,7 +14,18 @@ func place(definition: TrackDefinition, catalog: HeightChannelCatalog) -> JumpRa
 	if definition == null or catalog == null or definition.centerline.size() < 3:
 		result.fingerprint = _fingerprint(catalog.version if catalog != null else 0, result.placements)
 		result.generation_usec = Time.get_ticks_usec() - started_usec
-		result.diagnostics = {"invalid_input": 1}
+		# Same seven keys as the success path, so `height_diagnostics` has one shape for every
+		# consumer; `invalid_input` is the eighth key that says which path produced them.
+		result.diagnostics = {
+			"eligible_runs": 0,
+			"requested": 0,
+			"placed": 0,
+			"rejected_spawn_candidates": 0,
+			"rejected_checkpoint_candidates": 0,
+			"rejected_spacing_candidates": 0,
+			"underfilled": false,
+			"invalid_input": 1,
+		}
 		return result
 
 	var diagnostics := {

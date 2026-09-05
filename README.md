@@ -135,7 +135,7 @@ godot --path . --script res://tests/capture_height_channel_evidence.gd
 
 It writes the trace and the PNGs under
 [`docs/evidence/height-channel/`](docs/evidence/height-channel/); see
-[The height channel](docs/height-channel.md) for what each number means and for the six mutation
+[The height channel](docs/height-channel.md) for what each number means and for the seven mutation
 commands that keep these suites honest.
 
 Run the harness contract check:

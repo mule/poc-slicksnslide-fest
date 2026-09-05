@@ -124,9 +124,10 @@ func set_next_checkpoint(index: int) -> void:
 func _build_collision() -> void:
 	var body := StaticBody2D.new()
 	body.name = "PlayAreaBounds"
-	# Must stay on the tall layer (layer 1) so an airborne car that drops the low layer
-	# from its mask cannot escape past the world boundary.
-	body.collision_layer = 1
+	# Must stay on the tall layer so an airborne car that drops the low layer from its mask cannot
+	# escape past the world boundary. Named, not a literal 1, so the invariant moves with the
+	# constant instead of holding by coincidence.
+	body.collision_layer = OfftrackObjectCollisions.TALL_LAYER
 	body.collision_mask = 0
 	add_child(body)
 	var area: Rect2 = definition.play_area

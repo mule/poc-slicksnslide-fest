@@ -5,6 +5,7 @@ extends SceneTree
 ## gate, and spacing exclusions, and never touch the road or object fingerprints. Mutations:
 ##   -- --break-height-seed   bumps the catalog version on the second run, so repeat checks fail
 ##   -- --break-clearance     zeroes the checkpoint exclusion, so the gate oracle fails
+##   -- --break-density       restores a pre-fix landing clearance, so placement starves again
 
 const CATALOG_PATH := "res://data/default_height_channel_catalog.tres"
 const BASELINE_PATH := "res://tests/offtrack_object_placement_test.gd"
@@ -12,17 +13,24 @@ const SEED_COUNT := 20
 const PLACEMENT_P95_BUDGET_USEC := 5000
 const QUERY_COUNT := 10000
 const QUERY_BUDGET_USEC := 20000
+## The density thresholds below are empirical, so something has to prove they are load-bearing.
+## This is the shape of the bug the density task was raised to fix: a landing zone long enough that
+## `minimum_run_length` (approach + both faces + landing = 1050 px at catalog v3) grows past what
+## most generated straights offer, so eligible runs collapse and seeds come back empty.
+const BROKEN_LANDING_CLEARANCE := 2000.0
 
 var _failures: Array[String] = []
 var _checks := 0
 var _break_seed := false
 var _break_clearance := false
+var _break_density := false
 var _geometry_changed_seeds := 0
 
 
 func _initialize() -> void:
 	_break_seed = OS.get_cmdline_user_args().has("--break-height-seed")
 	_break_clearance = OS.get_cmdline_user_args().has("--break-clearance")
+	_break_density = OS.get_cmdline_user_args().has("--break-density")
 	call_deferred("_run")
 
 
@@ -42,6 +50,11 @@ func _verify_density() -> bool:
 	var generator := TrackGenerator.new()
 	var placer := JumpRampPlacer.new()
 	var catalog := load(CATALOG_PATH) as HeightChannelCatalog
+	if _break_density:
+		var starved := catalog.duplicate(true) as HeightChannelCatalog
+		starved.landing_clearance = BROKEN_LANDING_CLEARANCE
+		catalog = starved
+		print("break_density landing_clearance=%.1f minimum_run_length=%.1f" % [catalog.landing_clearance, catalog.minimum_run_length()])
 	var counts: Array[int] = []
 	var nonempty_seeds := 0
 	var total_ramps := 0
@@ -102,6 +115,12 @@ func _verify_seed(seed: int, generator: TrackGenerator, placer: JumpRampPlacer, 
 	_check(definition.offtrack_object_fingerprint == object_fingerprint, "seed %d object fingerprint is unchanged by placement" % seed)
 	_check(_verify_rules(definition, checked, catalog, seed), "seed %d rule verification completed" % seed)
 	_check(_verify_diagnostics(first, catalog, seed), "seed %d diagnostics verification completed" % seed)
+	# Everything above re-runs the placer and discards `definition.jump_ramps`, so the ramps the
+	# generator actually attached -- through its own TrackGenerator.DEFAULT_HEIGHT_CATALOG preload
+	# -- were never checked. If that preload drifts from the catalog resource this suite loads,
+	# the game ships one set of ramps while every assertion here passes on another.
+	_check(_placements_equal(definition.jump_ramps, first.placements), "seed %d generator-attached ramps match an independent placement from the catalog resource" % seed)
+	_check(definition.height_fingerprint == first.fingerprint, "seed %d generator-attached height fingerprint matches the independent placement" % seed)
 	return true
 
 

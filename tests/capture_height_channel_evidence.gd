@@ -321,7 +321,15 @@ func _record_flight_reach(main_scene: PackedScene, lines: Array[String]) -> bool
 		beyond_edge_above_clearance,
 	])
 	_check(settled, "every reach pass started from a grounded car")
-	_check(launched_passes > 0, "at least one launch heading left the ground (%d of %d)" % [launched_passes, total_passes])
+	# A fraction of the sweep, not a single pass. The gap assertions in _record_solid_corridor
+	# consume the maximum reach measured over these same passes, so a change that collapsed the
+	# launch count would shrink that maximum and make the gap assertions pass *more* easily while
+	# the reach figures published in docs/height-channel.md quietly went stale.
+	var launch_floor := total_passes / 2
+	_check(
+		launched_passes >= launch_floor,
+		"at least half the sweep left the ground (%d of %d, floor %d), so the reach maximum below is taken over the whole envelope rather than a shrinking sample" % [launched_passes, total_passes, launch_floor]
+	)
 	_check(
 		beyond_edge_above_clearance > 0.0,
 		"the sweep observed flight past the road edge while above the clearance height, so the reach figure is measured rather than vacuous"

@@ -12,7 +12,12 @@ const HEADING_PLUS_X := PI * 0.5
 const ROCK_X := 400.0
 const TREE_X := 900.0
 const PROBE_SPEED := 200.0
-const PROBE_TICKS := 240
+## The probe must be able to reach its default target unobstructed, or "did not reach it" says
+## nothing: TREE_X + 60 = 960 px at 200 px/s over a 60 Hz tick needs 288 ticks.
+const PROBE_TICKS := 300
+## A grounded car stopped by the rock sits at x = 359.3; one with nothing in its way runs on to the
+## tree at x = 859.3. This is the same bound the raised car is required to pass.
+const STOPPED_AT_ROCK_X := ROCK_X + 60.0
 
 var _failures: Array[String] = []
 var _checks := 0
@@ -51,8 +56,16 @@ func _verify_grounded_car_hits_both() -> bool:
 	var context := _make_field(0.0)
 	var car: TopDownCar = context.car
 	var reached_tree := await _probe(car)
+	print("grounded_probe stop_x=%.1f collisions=%d reached_tree=%s" % [car.global_position.x, car.get_collision_count(), reached_tree])
 	_check(car.get_collision_count() >= 1, "a grounded car collides with the rock")
-	_check(not reached_tree, "a grounded car is stopped before the tree by the rock")
+	_check(not reached_tree, "a grounded car never reaches past the tree")
+	# Where it stopped, not merely that it stopped: `_probe` returns false for a tree collision too,
+	# so with no rock in the way this run still ends short of the target and only the position
+	# distinguishes the two. Removing the rock moves this from 359.3 to 859.3 and fails here.
+	_check(
+		car.global_position.x < STOPPED_AT_ROCK_X,
+		"a grounded car is stopped at the rock (x=%.1f, bound %.1f), not carried on to the tree at %.1f" % [car.global_position.x, STOPPED_AT_ROCK_X, TREE_X]
+	)
 	context.world.queue_free()
 	await process_frame
 	return true
