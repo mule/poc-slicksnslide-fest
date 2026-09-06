@@ -2,7 +2,8 @@ class_name JumpRampPlacement
 extends Resource
 
 ## One generated jump ramp: a symmetric hump whose crest is the transform origin and whose faces
-## run along the transform's x axis. Data only; never holds nodes or callbacks.
+## run along the transform's x axis. Beyond each lateral edge the hump fades to nothing over
+## `flank_width`; zero is the hard lateral cut of #37. Data only; never holds nodes or callbacks.
 
 @export var stable_id: String = ""
 @export var transform: Transform2D = Transform2D.IDENTITY
@@ -13,6 +14,7 @@ extends Resource
 ## `TrackDefinition.track_width`, which is road geometry rather than a catalog value at all.
 @export_range(0.0, 500.0, 0.1) var crest_height: float = 18.0
 @export_range(1.0, 500.0, 0.5) var width: float = 240.0
+@export_range(0.0, 2000.0, 1.0) var flank_width: float = 250.0
 
 
 func is_valid() -> bool:
@@ -21,4 +23,4 @@ func is_valid() -> bool:
 		return false
 	if not is_finite(transform.get_rotation()):
 		return false
-	return half_length > 0.0 and crest_height > 0.0 and width > 0.0
+	return half_length > 0.0 and crest_height > 0.0 and width > 0.0 and flank_width >= 0.0 and is_finite(flank_width)

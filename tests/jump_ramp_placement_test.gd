@@ -141,6 +141,7 @@ func _verify_rules(definition: TrackDefinition, placements: Array[JumpRampPlacem
 		_check(is_equal_approx(ramp.half_length, catalog.half_length), "seed %d ramp uses the catalog half length" % seed)
 		_check(is_equal_approx(ramp.crest_height, catalog.crest_height()), "seed %d ramp uses the catalog crest height" % seed)
 		_check(is_equal_approx(ramp.width, definition.track_width), "seed %d ramp spans the road width" % seed)
+		_check(is_equal_approx(ramp.flank_width, catalog.flank_width), "seed %d ramp uses the catalog flank width" % seed)
 		# The crest sits on a centerline sample, and every sample under the approach, both faces,
 		# and the landing zone is gentle.
 		var crest_index := _nearest_sample(definition.centerline, ramp.transform.origin)
@@ -277,7 +278,15 @@ func _verify_height_map_profile() -> bool:
 	_check(is_equal_approx(map.sample_at(Vector2(1075.0, 500.0)).ground_height, 9.0), "halfway down the falling face is half the crest")
 	_check(map.sample_at(Vector2(1075.0, 500.0)).gradient.is_equal_approx(Vector2(-slope, 0.0)), "the falling face slopes down along the axis")
 	_check(map.sample_at(Vector2(1200.0, 500.0)).ground_height == 0.0, "flat after the ramp")
-	_check(map.sample_at(Vector2(1000.0, 500.0 + 121.0)).ground_height == 0.0, "flat beside the road")
+	# The lateral edge is a quintic flank, not a wall: full height a pixel outside the road edge,
+	# exactly half at the flank's midpoint (the fade is 1/2 at t = 1/2), terrain-only beyond it.
+	_check(is_equal_approx(ramp.flank_width, 250.0), "the fixture ramp carries the placement's default flank width")
+	_check(map.sample_at(Vector2(1000.0, 500.0 + 121.0)).ground_height > 17.99, "a pixel beside the road the flank is still at full height")
+	_check(is_equal_approx(map.sample_at(Vector2(1000.0, 500.0 + 120.0 + 125.0)).ground_height, 9.0), "halfway across the flank is half the crest")
+	_check(map.sample_at(Vector2(1000.0, 500.0 + 120.0 + 125.0)).gradient.is_equal_approx(Vector2(0.0, -18.0 * 1.875 / 250.0)), "the flank rises toward the road at the fade's peak slope")
+	_check(map.sample_at(Vector2(1000.0, 500.0 - 120.0 - 125.0)).gradient.is_equal_approx(Vector2(0.0, 18.0 * 1.875 / 250.0)), "the far flank rises toward the road too")
+	_check(map.sample_at(Vector2(1000.0, 500.0 + 120.0 + 250.0 + 1.0)).ground_height == 0.0, "flat beyond the flank")
+	_check(map.sample_at(Vector2(1075.0, 500.0 + 120.0 + 125.0)).ground_height == 4.5, "on the falling face the flank scales the face height")
 	_check(is_equal_approx(map.sample_at(Vector2(1000.0, 500.0 - 119.0)).ground_height, 18.0), "the ramp spans the road width")
 	var rotated := ramp.duplicate() as JumpRampPlacement
 	rotated.transform = Transform2D(PI * 0.5, Vector2(0.0, 0.0))

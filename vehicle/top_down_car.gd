@@ -374,11 +374,12 @@ func _update_height_channel(state: PhysicsDirectBodyState2D, delta: float) -> vo
 	# faster than one tick of gravity can pull the car onto it.
 	var ground_rate_ahead := state.linear_velocity.dot(ahead.gradient)
 	var clears_the_ground_ahead := predicted > ahead.ground_height + LIFT_OFF_TOLERANCE
-	# The second conjunct rejects a height map's vertical walls -- every generated ramp has one at
-	# its lateral boundary. Driving into one, the car is on flat ground (rate 0) while the face
-	# behind the wall reads as falling away, which would otherwise open a flight onto ground that
-	# is above the car. At a crest the margin bottoms out at -0.5 * g * delta^2, so the conjunct is
-	# always satisfied there.
+	# The second conjunct rejects a height map's vertical walls. Every generated ramp had one at
+	# its lateral boundary until #47 gave the wedge a smooth flank; the rule stays because the
+	# height query is a contract any provider may implement. Driving into a wall, the car is on
+	# flat ground (rate 0) while the face behind the wall reads as falling away, which would
+	# otherwise open a flight onto ground that is above the car. At a crest the margin bottoms out
+	# at -0.5 * g * delta^2, so the conjunct is always satisfied there.
 	var ground_falls_away := ground_rate_ahead < _vertical_velocity - tuning.gravity * delta and predicted > ahead.ground_height - LIFT_OFF_TOLERANCE
 	if clears_the_ground_ahead or ground_falls_away:
 		_airborne = true

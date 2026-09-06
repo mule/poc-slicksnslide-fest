@@ -68,6 +68,12 @@ func _verify_placement_validity() -> bool:
 	var bad_width := ramp.duplicate() as JumpRampPlacement
 	bad_width.width = 0.0
 	_check(not bad_width.is_valid(), "a zero width is invalid")
+	var bad_flank := ramp.duplicate() as JumpRampPlacement
+	bad_flank.flank_width = -1.0
+	_check(not bad_flank.is_valid(), "a negative flank width is invalid")
+	var hard_cut := ramp.duplicate() as JumpRampPlacement
+	hard_cut.flank_width = 0.0
+	_check(hard_cut.is_valid(), "a zero flank width is valid: it is the hard lateral cut, kept so the side-wall mutation can restore it")
 	return true
 
 
@@ -87,6 +93,7 @@ func _verify_catalog_defaults() -> bool:
 	_check(is_equal_approx(catalog.spawn_exclusion, WorldScale.metres(80.0)), "spawn exclusion is 80 m")
 	_check(is_equal_approx(catalog.checkpoint_exclusion, WorldScale.metres(40.0)), "checkpoint exclusion is 40 m")
 	_check(is_equal_approx(catalog.minimum_spacing, WorldScale.metres(120.0)), "minimum crest spacing is 120 m")
+	_check(is_equal_approx(catalog.flank_width, WorldScale.metres(20.0)), "flank width is 20 m")
 	_check(catalog.minimum_run_length() > catalog.approach_clearance + catalog.landing_clearance, "minimum run length includes both faces")
 	_check(is_equal_approx(catalog.minimum_run_length(), WorldScale.metres(84.0)), "minimum run length remains 1050 px")
 	var script_defaults := HeightChannelCatalog.new()
@@ -94,7 +101,8 @@ func _verify_catalog_defaults() -> bool:
 		script_defaults.version == catalog.version
 		and is_equal_approx(script_defaults.slope, catalog.slope)
 		and is_equal_approx(script_defaults.approach_clearance, catalog.approach_clearance)
-		and is_equal_approx(script_defaults.landing_clearance, catalog.landing_clearance),
+		and is_equal_approx(script_defaults.landing_clearance, catalog.landing_clearance)
+		and is_equal_approx(script_defaults.flank_width, catalog.flank_width),
 		"script defaults match the versioned resource tuning"
 	)
 	return true

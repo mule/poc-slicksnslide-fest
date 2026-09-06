@@ -4,8 +4,9 @@ extends HeightQuery
 ## Scripted ground for vehicle tests. HUMP is one symmetric ramp along +X centred at crest_x that
 ## spans every Y. PLATEAU is flat ground at plateau_height for x < plateau_end_x and zero beyond,
 ## so a car can be held at a height or driven off an edge without a generated track. WALL is the
-## shape a generated height map puts at a ramp's lateral boundary: flat ground up to crest_x, then
-## a vertical step of crest_height onto a face that descends over half_length.
+## shape a generated height map put at a ramp's lateral boundary before #47 replaced the hard cut
+## with a flank: flat ground up to crest_x, then a vertical step of crest_height onto a face that
+## descends over half_length. It stays because the car's rules must hold for any provider.
 
 enum Mode { HUMP, PLATEAU, WALL }
 

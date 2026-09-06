@@ -57,7 +57,7 @@ func _run() -> void:
 	_check(_verify_curvature_is_bounded(), "the curvature bound verification ran to completion")
 	_check(_verify_fingerprints(), "the fingerprint verification ran to completion")
 	_check(_verify_definition_fields(), "the definition fields verification ran to completion")
-	_check(_verify_no_consumer_yet(), "the no-consumer verification ran to completion")
+	_check(_verify_generator_attaches_the_field(), "the generator attachment verification ran to completion")
 	_finish()
 
 
@@ -95,7 +95,6 @@ func _verify_catalog_defaults() -> bool:
 	_check(catalog.octaves == 3, "three octaves")
 	_check(is_equal_approx(catalog.persistence, 0.25), "persistence is 0.25")
 	_check(is_equal_approx(catalog.lacunarity, 2.0), "lacunarity is 2")
-	_check(is_equal_approx(catalog.road_flatten_width, WorldScale.metres(40.0)), "road flatten width is 40 m")
 	# Persistence 0.25 against lacunarity 2 is deliberate: curvature scales with amplitude over
 	# wavelength squared, so each octave contributes exactly as much curvature as the one below it
 	# instead of the finest octave dominating the bound.
@@ -124,7 +123,6 @@ func _verify_catalog_defaults() -> bool:
 	_check(script_defaults.octaves == catalog.octaves, "script default octave count matches the resource")
 	_check(is_equal_approx(script_defaults.persistence, catalog.persistence), "script default persistence matches the resource")
 	_check(is_equal_approx(script_defaults.lacunarity, catalog.lacunarity), "script default lacunarity matches the resource")
-	_check(is_equal_approx(script_defaults.road_flatten_width, catalog.road_flatten_width), "script default road flatten width matches the resource")
 	return true
 
 
@@ -390,15 +388,19 @@ func _verify_definition_fields() -> bool:
 	return true
 
 
-## Task 1 ships types, data and tests only. The generator must not attach terrain yet; task 2
-## flips this check when it wires the field in.
-func _verify_no_consumer_yet() -> bool:
+## Task 2 (#47) wired the field in: the generator attaches the terrain seed and fingerprint, and
+## the height map answers the field away from every ramp. tests/terrain_height_map_test.gd owns
+## the sum itself; this is the contract-level wiring check.
+func _verify_generator_attaches_the_field() -> bool:
+	var catalog := load(CATALOG_PATH) as TerrainCatalog
 	var definition: TrackDefinition = TrackGenerator.new().generate(0)
-	_check(definition.terrain_fingerprint == "", "the generator does not attach a terrain fingerprint yet")
-	_check(definition.terrain_seed == 0, "the generator does not attach a terrain seed yet")
+	_check(definition.terrain_seed == DomainSeed.derive(catalog.version, 0, "terrain"), "the generator attaches the terrain domain seed")
+	var field := TerrainField.new(definition.terrain_seed, catalog)
+	_check(definition.terrain_fingerprint == field.fingerprint(definition.play_area), "the generator attaches the field's fingerprint over the play area")
 	var height_map := TrackHeightMap.new(definition)
 	var off_ramp := Vector2(1e6, 1e6)
-	_check(height_map.sample_at(off_ramp).ground_height == 0.0, "the height map is still flat away from ramps")
+	_check(height_map.sample_at(off_ramp).ground_height == field.height_at(off_ramp), "the height map answers the field away from ramps")
+	_check(height_map.sample_at(off_ramp).ground_height != 0.0, "the height map is no longer flat away from ramps")
 	return true
 
 

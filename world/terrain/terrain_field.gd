@@ -18,17 +18,40 @@ extends HeightQuery
 ## vanish at the cell edges, so the gradient and the Hessian are continuous across every lattice
 ## boundary. A cubic fade would leave the Hessian stepping at each edge, which the car's lift-off
 ## rule would read as a crest.
+##
+## This is on the car's per-tick path through TrackHeightMap, so evaluation allocates nothing: the
+## result lands in member scalars, and `sample_into` writes a caller's sample in place. Each octave
+## also keeps the bilinear coefficients of the cell its previous query fell in; a moving car's
+## consecutive queries land in the same cell almost always, so the four corner lookups per octave,
+## each a call into a dictionary, are skipped on the steady path. The arithmetic is otherwise the
+## expression of the first version, term for term, so the pinned fingerprints hold.
 
 const DOMAIN := "terrain"
 ## Grid pitch the fingerprint samples on, in px: the off-track placement cell.
 const FINGERPRINT_SPACING := 250.0
+## A cell coordinate no query can produce, so the first query of every octave loads its cell.
+const NO_CELL := -9223372036854775808
 
 var terrain_seed: int
 var _version: int
+var _octave_count := 0
 var _octave_seeds := PackedInt64Array()
 var _frequencies := PackedFloat64Array()
 var _amplitudes := PackedFloat64Array()
 var _lattices: Array[Dictionary] = []
+var _cell_columns := PackedInt64Array()
+var _cell_rows := PackedInt64Array()
+var _cell_v00 := PackedFloat64Array()
+var _cell_b := PackedFloat64Array()
+var _cell_c := PackedFloat64Array()
+var _cell_d := PackedFloat64Array()
+# Outputs of the last _evaluate: height, gradient, and the Hessian when it was asked for.
+var _height := 0.0
+var _slope_x := 0.0
+var _slope_y := 0.0
+var _hxx := 0.0
+var _hxy := 0.0
+var _hyy := 0.0
 
 
 static func for_track(track_seed: int, catalog: TerrainCatalog) -> TerrainField:
@@ -38,36 +61,48 @@ static func for_track(track_seed: int, catalog: TerrainCatalog) -> TerrainField:
 func _init(initial_terrain_seed: int, catalog: TerrainCatalog) -> void:
 	terrain_seed = initial_terrain_seed
 	_version = catalog.version
+	_octave_count = catalog.octaves
 	for octave in range(catalog.octaves):
 		_octave_seeds.append(DomainSeed.child(terrain_seed, octave, 0))
 		_frequencies.append(1.0 / catalog.octave_wavelength(octave))
 		_amplitudes.append(catalog.octave_amplitude(octave))
 		_lattices.append({})
+		_cell_columns.append(NO_CELL)
+		_cell_rows.append(NO_CELL)
+		_cell_v00.append(0.0)
+		_cell_b.append(0.0)
+		_cell_c.append(0.0)
+		_cell_d.append(0.0)
 
 
 func octave_count() -> int:
-	return _octave_seeds.size()
+	return _octave_count
 
 
 func sample_at(world_position: Vector2) -> HeightSample:
-	var terms := _evaluate(world_position, false)
-	return HeightSample.new(terms[0], Vector2(terms[1], terms[2]))
+	_evaluate(world_position.x, world_position.y, false)
+	return HeightSample.new(_height, Vector2(_slope_x, _slope_y))
+
+
+## Writes the height and gradient at the position into an existing sample, allocating nothing.
+func sample_into(world_position: Vector2, sample: HeightSample) -> void:
+	_evaluate(world_position.x, world_position.y, false)
+	sample.ground_height = _height
+	sample.gradient = Vector2(_slope_x, _slope_y)
 
 
 func height_at(world_position: Vector2) -> float:
-	return _evaluate(world_position, false)[0]
+	_evaluate(world_position.x, world_position.y, false)
+	return _height
 
 
 ## Largest absolute directional second derivative at the position: the spectral radius of the
 ## Hessian. This is the quantity the lift-off rule compares against gravity over speed squared.
 func curvature_at(world_position: Vector2) -> float:
-	var terms := _evaluate(world_position, true)
-	var hxx := terms[3]
-	var hxy := terms[4]
-	var hyy := terms[5]
-	var mean := 0.5 * (hxx + hyy)
-	var half_difference := 0.5 * (hxx - hyy)
-	return absf(mean) + sqrt(half_difference * half_difference + hxy * hxy)
+	_evaluate(world_position.x, world_position.y, true)
+	var mean := 0.5 * (_hxx + _hyy)
+	var half_difference := 0.5 * (_hxx - _hyy)
+	return absf(mean) + sqrt(half_difference * half_difference + _hxy * _hxy)
 
 
 ## SHA-256 over heights sampled on a FINGERPRINT_SPACING grid across the area, with the version,
@@ -91,52 +126,76 @@ func fingerprint(area: Rect2) -> String:
 	return "|".join(components).sha256_text()
 
 
-## Returns [height, dh/dx, dh/dy, d2h/dx2, d2h/dxdy, d2h/dy2]; the last three only when asked.
-func _evaluate(world_position: Vector2, with_hessian: bool) -> PackedFloat64Array:
-	var terms := PackedFloat64Array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-	for octave in range(_octave_seeds.size()):
+## Leaves height, dh/dx, dh/dy in the members, and d2h/dx2, d2h/dxdy, d2h/dy2 only when asked.
+func _evaluate(x: float, y: float, with_hessian: bool) -> void:
+	var height := 0.0
+	var slope_x := 0.0
+	var slope_y := 0.0
+	var hxx := 0.0
+	var hxy := 0.0
+	var hyy := 0.0
+	for octave in _octave_count:
 		var frequency := _frequencies[octave]
 		var amplitude := _amplitudes[octave]
-		var u := world_position.x * frequency
-		var v := world_position.y * frequency
+		var u := x * frequency
+		var v := y * frequency
 		var column := floori(u)
 		var row := floori(v)
 		var tu := u - float(column)
 		var tv := v - float(row)
-		var v00 := _lattice_value(octave, column, row)
-		var v10 := _lattice_value(octave, column + 1, row)
-		var v01 := _lattice_value(octave, column, row + 1)
-		var v11 := _lattice_value(octave, column + 1, row + 1)
+		if column != _cell_columns[octave] or row != _cell_rows[octave]:
+			_load_cell(octave, column, row)
 		# Bilinear form in the faded coordinates: v00 + b su + c sv + d su sv.
-		var b := v10 - v00
-		var c := v01 - v00
-		var d := v11 - v01 - v10 + v00
+		var v00 := _cell_v00[octave]
+		var b := _cell_b[octave]
+		var c := _cell_c[octave]
+		var d := _cell_d[octave]
 		var su := tu * tu * tu * (tu * (tu * 6.0 - 15.0) + 10.0)
 		var sv := tv * tv * tv * (tv * (tv * 6.0 - 15.0) + 10.0)
 		var dsu := 30.0 * tu * tu * (tu - 1.0) * (tu - 1.0)
 		var dsv := 30.0 * tv * tv * (tv - 1.0) * (tv - 1.0)
 		var along_u := b + d * sv
 		var along_v := c + d * su
-		terms[0] += amplitude * (v00 + b * su + c * sv + d * su * sv)
+		height += amplitude * (v00 + b * su + c * sv + d * su * sv)
 		var scale := amplitude * frequency
-		terms[1] += scale * along_u * dsu
-		terms[2] += scale * along_v * dsv
+		slope_x += scale * along_u * dsu
+		slope_y += scale * along_v * dsv
 		if with_hessian:
 			var ddsu := 60.0 * tu * (2.0 * tu - 1.0) * (tu - 1.0)
 			var ddsv := 60.0 * tv * (2.0 * tv - 1.0) * (tv - 1.0)
 			var scale_2 := scale * frequency
-			terms[3] += scale_2 * along_u * ddsu
-			terms[4] += scale_2 * d * dsu * dsv
-			terms[5] += scale_2 * along_v * ddsv
-	return terms
+			hxx += scale_2 * along_u * ddsu
+			hxy += scale_2 * d * dsu * dsv
+			hyy += scale_2 * along_v * ddsv
+	_height = height
+	_slope_x = slope_x
+	_slope_y = slope_y
+	_hxx = hxx
+	_hxy = hxy
+	_hyy = hyy
+
+
+## Loads the bilinear coefficients of one octave's cell from its four memoised corners.
+func _load_cell(octave: int, column: int, row: int) -> void:
+	var v00 := _lattice_value(octave, column, row)
+	var v10 := _lattice_value(octave, column + 1, row)
+	var v01 := _lattice_value(octave, column, row + 1)
+	var v11 := _lattice_value(octave, column + 1, row + 1)
+	_cell_columns[octave] = column
+	_cell_rows[octave] = row
+	_cell_v00[octave] = v00
+	_cell_b[octave] = v10 - v00
+	_cell_c[octave] = v01 - v00
+	_cell_d[octave] = v11 - v01 - v10 + v00
 
 
 ## Lattice corner value in [-1, 1], memoised per octave.
 func _lattice_value(octave: int, column: int, row: int) -> float:
 	var lattice := _lattices[octave]
 	var key := (column << 32) ^ (row & 0xFFFFFFFF)
-	if lattice.has(key):
-		return lattice[key]
+	var memoised = lattice.get(key)
+	if memoised != null:
+		return memoised
 	var material := DomainSeed.child(_octave_seeds[octave], column, row)
 	var value := float(material & 0xFFFFFFFF) / 4294967295.0 * 2.0 - 1.0
 	lattice[key] = value

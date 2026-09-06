@@ -10,10 +10,11 @@ extends Resource
 ## then carries the same curvature as the one below it rather than the finest octave owning the
 ## bound.
 ##
-## `road_flatten_width` is data for the consumer that sums this field under the road: the distance
-## from the road centreline at which its damping envelope reaches full amplitude. Any envelope adds
-## curvature of its own, of order total_amplitude() / width^2 across the road, which the field's
-## bound does not include; the consumer owns that term.
+## The field is summed under the road as it is. No road damping is applied: #49 showed that any
+## envelope taking the field to flat on the centreline adds curvature of its own, of order
+## total_amplitude() / width^2 across the road, which breaks the lift-off bound at every practical
+## width; and the car takes only the forward component of the gradient, so a laterally tilted road
+## exerts no sideways force. The road's drivability rests on curvature_bound() alone.
 
 ## Supremum of a quintic-fade value-noise cell's directional second derivative, in lattice units
 ## per unit amplitude, with corner values in [-1, 1]. The fade s(t) = 6t^5 - 15t^4 + 10t^3 peaks
@@ -24,6 +25,8 @@ extends Resource
 const CELL_CURVATURE := 225.0 / 16.0
 ## Peak slope of the quintic fade, s'(1/2).
 const FADE_PEAK_SLOPE := 15.0 / 8.0
+## Peak absolute second derivative of the quintic fade, |s''| at t = 1/2 -+ 1 / (2 sqrt 3).
+const FADE_PEAK_CURVATURE := 10.0 / sqrt(3.0)
 
 @export var version: int = 1
 ## Height range of the base octave: octave 0 spans -amplitude..+amplitude.
@@ -34,7 +37,6 @@ const FADE_PEAK_SLOPE := 15.0 / 8.0
 @export_range(1, 8, 1) var octaves: int = 3
 @export_range(0.0, 1.0, 0.001) var persistence: float = 0.25
 @export_range(1.0, 8.0, 0.01) var lacunarity: float = 2.0
-@export_range(0.0, 20000.0, 1.0) var road_flatten_width: float = 500.0
 
 
 func octave_amplitude(octave: int) -> float:
