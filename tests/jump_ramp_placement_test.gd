@@ -308,7 +308,11 @@ func _verify_height_map_profile() -> bool:
 		accumulated += four_map.sample_at(Vector2(float(query % 8000), 0.0)).ground_height
 	var elapsed := Time.get_ticks_usec() - started
 	print("height_query_usec_per_10k=%d accumulated=%.1f" % [elapsed, accumulated])
-	_check(elapsed <= QUERY_BUDGET_USEC, "ten thousand height queries (%d us) stay under 20 ms" % elapsed)
+	# `four` is TrackDefinition.new() with no terrain seed, so this map carries no TerrainField and
+	# the budget below covers a RAMP-ONLY map, not the shipped path. Since #47 every generated map
+	# samples terrain on every query, and that path costs about twice this budget; the assertion
+	# that covers it is _verify_query_cost in tests/terrain_height_map_test.gd (60 ms per 10k).
+	_check(elapsed <= QUERY_BUDGET_USEC, "ten thousand ramp-only height queries (%d us) stay under 20 ms" % elapsed)
 	return true
 
 

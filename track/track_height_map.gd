@@ -21,7 +21,8 @@ extends HeightQuery
 ## and read the sample freely, but never write through it -- a mutation only corrupts what is read
 ## before the next miss query rewrites it. A hit allocates its own sample, as before.
 ##
-## Terrain is built from the definition's `terrain_seed` and the catalog the generator used; a
+## Terrain is built from the definition's `terrain_seed` and the same default catalog resource the
+## generator preloads, so the map reproduces the field the fingerprint was taken from; a
 ## definition without a terrain seed (a hand-built fixture) gets a flat base, so a ramp-only
 ## fixture reads exactly as it did before terrain existed.
 
@@ -44,11 +45,11 @@ var _crest_heights := PackedFloat64Array()
 var _slopes := PackedFloat64Array()
 
 
-func _init(definition, terrain_catalog: TerrainCatalog = null) -> void:
+func _init(definition) -> void:
 	if definition == null:
 		return
 	if definition.terrain_seed != 0:
-		_terrain = TerrainField.new(definition.terrain_seed, terrain_catalog if terrain_catalog != null else DEFAULT_TERRAIN_CATALOG)
+		_terrain = TerrainField.new(definition.terrain_seed, DEFAULT_TERRAIN_CATALOG)
 	for ramp: JumpRampPlacement in definition.jump_ramps:
 		if ramp == null or not ramp.is_valid():
 			continue

@@ -80,7 +80,7 @@ func _attach_terrain(definition: TrackDefinition) -> TrackDefinition:
 	definition.terrain_fingerprint = field.fingerprint(area)
 	definition.terrain_diagnostics = {
 		"octaves": catalog.octaves,
-		"fingerprint_samples": (int(floor(area.size.x / TerrainField.FINGERPRINT_SPACING)) + 1) * (int(floor(area.size.y / TerrainField.FINGERPRINT_SPACING)) + 1),
+		"fingerprint_samples": TerrainField.fingerprint_sample_count(area),
 		"total_amplitude": catalog.total_amplitude(),
 		"curvature_bound": catalog.curvature_bound(),
 	}

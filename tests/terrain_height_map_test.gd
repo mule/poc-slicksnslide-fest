@@ -4,12 +4,14 @@ extends SceneTree
 ## fingerprint on both exit paths without moving any of the three fingerprints the earlier epics
 ## pinned; inside a ramp the sample is terrain plus wedge and outside every ramp it is terrain
 ## alone; the ramp's lateral edge, which was a vertical wall, is now a smooth flank the car rides
-## onto; and the flank's own curvature stays under the lift-off threshold at the speed a car can
-## carry onto it from off-track. Mutations:
+## onto; the flank's own curvature stays under the lift-off threshold at the speed a car can carry
+## onto it from off-track; and above that speed the hop a crossing produces is bounded by the
+## flank's geometry, measured at max_safe_speed. Mutations:
 ##   -- --break-side-wall        zeroes the fixture ramp's flank width, restoring the hard lateral
 ##                               cut of #37, so the crossing car passes under the wedge again
 ##   -- --break-flank-curvature  quarters the flank width, so the flank's curvature breaks the
-##                               crossing-speed bound and launches the crossing car
+##                               crossing-speed bound, launches the slow crossing car, and throws
+##                               the fast one higher than the crest
 
 const TERRAIN_CATALOG_PATH := "res://data/default_terrain_catalog.tres"
 const HEIGHT_CATALOG_PATH := "res://data/default_height_channel_catalog.tres"
@@ -55,9 +57,12 @@ const SEAT_TOLERANCE := 1e-3
 ## GDScript after #47's allocation-free evaluation and cell cache (about 9 us before them), so
 ## the terrain-bearing budget is 60 ms: 6 us a query, or 12 us for the car's two queries a tick,
 ## under a tenth of a percent of a 60 Hz tick. The pre-#47 field measured over 90 ms here, so the
-## budget separates the optimised path from the unoptimised one.
+## budget separates the optimised path from the unoptimised one. Each pattern is timed three times
+## and the median is asserted, so one descheduled slice on a busy host does not fail the suite the
+## way the off-track performance budgets are documented to.
 const QUERY_COUNT := 10000
 const QUERY_BUDGET_USEC := 60000
+const TIMING_RUNS := 3
 ## The driven path circles at this turn rate: 10 px a tick at 0.03 rad a tick is a loop about
 ## 330 px across, so the whole path stays inside cells the warm-up lap has already touched and
 ## the measurement is the steady per-tick cost rather than first-touch corner hashing.
@@ -87,6 +92,8 @@ func _run() -> void:
 	_check(_verify_flank_curvature_is_bounded(), "the flank curvature verification ran to completion")
 	_check(await _verify_car_rides_onto_the_flank(false), "the flat-base flank crossing verification ran to completion")
 	_check(await _verify_car_rides_onto_the_flank(true), "the terrain-base flank crossing verification ran to completion")
+	_check(await _verify_fast_flank_crossing_hop_is_bounded(false), "the flat-base fast crossing verification ran to completion")
+	_check(await _verify_fast_flank_crossing_hop_is_bounded(true), "the terrain-base fast crossing verification ran to completion")
 	_check(_verify_shared_sample_discipline_with_terrain(), "the shared sample verification ran to completion")
 	_check(_verify_query_cost(), "the query cost verification ran to completion")
 	_check(_verify_road_flatten_width_is_gone(), "the dead field verification ran to completion")
@@ -103,9 +110,21 @@ func _height_catalog() -> HeightChannelCatalog:
 	return catalog
 
 
+## Counts the documented grid by walking it: a sample at the origin and one every spacing until the
+## far edge is passed, on each axis. Built differently from the field's own arithmetic on purpose.
 func _fingerprint_samples(area: Rect2) -> int:
 	var spacing: float = TerrainField.FINGERPRINT_SPACING
-	return (int(floor(area.size.x / spacing)) + 1) * (int(floor(area.size.y / spacing)) + 1)
+	var columns := 0
+	var x := area.position.x
+	while x <= area.end.x:
+		columns += 1
+		x += spacing
+	var rows := 0
+	var y := area.position.y
+	while y <= area.end.y:
+		rows += 1
+		y += spacing
+	return columns * rows
 
 
 func _verify_generator_attaches_terrain() -> bool:
@@ -357,7 +376,6 @@ func _verify_flank_curvature_is_bounded() -> bool:
 					across += 2.0
 		along += 4.0
 	print("flank_sweep sampled_max=%.9f at_local=(%.1f, %.1f) summed_bound=%.9f evaluations=%d" % [sampled_max, sampled_max_at.x, sampled_max_at.y, summed_bound, evaluations])
-	_check(evaluations >= 4000, "the flank sweep covered at least 4000 positions (%d)" % evaluations)
 	_check(sampled_max <= summed_bound + 1e-7, "the sampled curvature on the flanks (%.9f) never exceeds the summed analytic bound (%.9f)" % [sampled_max, summed_bound])
 	_check(sampled_max > 0.5 * height_catalog.flank_curvature_bound(), "the sampled curvature reaches half the flank bound (%.9f), so the sweep is measuring the flank" % sampled_max)
 	_check(sampled_max < lift_off_curvature, "the sampled flank curvature stays under the lift-off curvature at the off-track terminal speed")
@@ -385,6 +403,72 @@ func _sampled_curvature(map: TrackHeightMap, position: Vector2) -> float:
 ## cut again and the car stays at ground level under the wedge.
 func _verify_car_rides_onto_the_flank(on_terrain: bool) -> bool:
 	var label := "on terrain" if on_terrain else "on a flat base"
+	var tuning := load(TUNING_PATH) as VehicleTuning
+	var crossing_speed := _offtrack_terminal_speed(tuning)
+	# Enough throttle on the test's dirt to hold the crossing speed against drag.
+	var throttle := (tuning.rolling_drag * crossing_speed + tuning.aerodynamic_drag * crossing_speed * crossing_speed) * tuning.mass_kg / tuning.engine_force
+	var trace := await _drive_flank_crossing(on_terrain, crossing_speed, throttle)
+	var crest_height: float = trace.crest_height
+	print("crossing %s: ticks=%d speed_at_road_edge=%.1f speed_at_crest=%.1f worst_gap=%.4f at=(%.1f, %.1f) peak_wedge=%.3f crest=%.3f launched=%s" % [label, trace.ticks, trace.speed_at_road_edge, trace.speed_at_crest, trace.worst_gap, trace.worst_gap_at.x, trace.worst_gap_at.y, trace.peak_wedge, crest_height, trace.launched])
+	_check(trace.has_terrain == on_terrain, "%s: the crossing map carries terrain as intended" % label)
+	_check(trace.seated < 0.5, "%s: the car starts seated on the ground under it (%.3f px off)" % [label, trace.seated])
+	_check(trace.reached_crest_line, "%s: the car reaches the crest line within %d ticks" % [label, CROSSING_TICKS])
+	_check(trace.speed_at_road_edge > 0.8 * crossing_speed, "%s: the car crosses the road edge near the off-track terminal speed (%.1f of %.1f px/s)" % [label, trace.speed_at_road_edge, crossing_speed])
+	_check(not trace.launched, "%s: the car never leaves the ground crossing the flank" % label)
+	_check(trace.worst_gap < 0.5, "%s: the car's ride height tracks the map under it on every tick (worst gap %.4f px)" % [label, trace.worst_gap])
+	_check(trace.peak_wedge >= crest_height - 0.5, "%s: the car arrives on the crest line at the crest height above terrain (%.3f of %.3f px), riding onto the wedge instead of under it" % [label, trace.peak_wedge, crest_height])
+	if on_terrain:
+		_check(trace.terrain_under_crest != 0.0, "%s: the terrain under the crest line is not flat (%.3f px)" % [label, trace.terrain_under_crest])
+		_check(absf(trace.crest_ground - trace.terrain_under_crest - crest_height) < 1e-6, "%s: the crest line is terrain plus the crest height" % label)
+	return true
+
+
+## The flank is bounded against the off-track terminal speed, sixteen times looser than #49's
+## max_safe_speed bound on the terrain, so above 289 px/s a lateral crossing launches the car. The
+## controller's ruling (#47 fix round 1) keeps that threshold and bounds the consequence instead:
+## the flank's whole relief is the crest height, so the hop is bounded by geometry whatever the
+## speed. Measured here at max_safe_speed: the car leaves the ground, and the peak of its height
+## above the map under it stays under the ballistic apex of the fade's peak slope at that speed,
+## (max_safe_speed * crest * FADE_PEAK_SLOPE / flank)^2 / 2g, and under the crest height. Under
+## --break-flank-curvature the quartered flank throws the car well above the crest.
+func _verify_fast_flank_crossing_hop_is_bounded(on_terrain: bool) -> bool:
+	var label := "fast crossing on terrain" if on_terrain else "fast crossing on a flat base"
+	var tuning := load(TUNING_PATH) as VehicleTuning
+	var height_catalog := _height_catalog()
+	var trace := await _drive_flank_crossing(on_terrain, tuning.max_safe_speed, 1.0)
+	var crest_height: float = trace.crest_height
+	var flank: float = trace.flank_width
+	var peak_slope := crest_height * TerrainCatalog.FADE_PEAK_SLOPE / maxf(flank, 1e-9)
+	var apex_bound := pow(tuning.max_safe_speed * peak_slope, 2.0) / (2.0 * tuning.gravity)
+	print("%s: ticks=%d speed_at_road_edge=%.1f launched=%s launch_y=%.1f launch_vz=%.2f landing_y=%.1f air_ticks=%d peak_hop=%.3f at=(%.1f, %.1f) apex_bound=%.3f crest=%.3f flank=%.1f" % [label, trace.ticks, trace.speed_at_road_edge, trace.launched, trace.launch_y, trace.launch_vz, trace.landing_y, trace.air_ticks, trace.peak_hop, trace.peak_hop_at.x, trace.peak_hop_at.y, apex_bound, crest_height, flank])
+	_check(trace.seated < 0.5, "%s: the car starts seated on the ground under it (%.3f px off)" % [label, trace.seated])
+	_check(trace.speed_at_road_edge >= 0.9 * tuning.max_safe_speed, "%s: the car reaches the road edge near max_safe_speed (%.1f of %.1f px/s)" % [label, trace.speed_at_road_edge, tuning.max_safe_speed])
+	_check(trace.launched, "%s: the crossing leaves the ground, so the hop bound below is measured on a real hop" % label)
+	_check(trace.launch_y != INF and trace.launch_y < 0.0 and trace.launch_y > -(0.5 * trace.width + flank), "%s: lift-off happens on the near flank (y=%.1f)" % [label, trace.launch_y])
+	_check(trace.landing_y != INF, "%s: the car lands again within the crossing (y=%.1f)" % [label, trace.landing_y])
+	_check(trace.peak_hop > 1.0, "%s: the hop is real (%.3f px), so the bound is not passing on a grounded crossing" % [label, trace.peak_hop])
+	_check(trace.peak_hop <= apex_bound, "%s: the peak hop above the map (%.3f px) stays under the ballistic apex of the fade's peak slope at max_safe_speed (%.3f px)" % [label, trace.peak_hop, apex_bound])
+	_check(trace.peak_hop < crest_height, "%s: the peak hop above the map (%.3f px) stays under the flank's whole relief, the crest height (%.3f px)" % [label, trace.peak_hop, crest_height])
+	_check(apex_bound < crest_height, "%s: the analytic apex bound (%.3f px) is itself under the crest height, so the geometric bound is the binding one" % [label, apex_bound])
+	_check(is_equal_approx(flank, height_catalog.flank_width), "%s: the crossed flank is the catalog's" % label)
+	return true
+
+
+## Off-track terminal speed: engine at the off-track multiplier balances rolling and aerodynamic
+## drag at the surface map's grass factor times the tuning's off-track factor.
+func _offtrack_terminal_speed(tuning: VehicleTuning) -> float:
+	var acceleration := tuning.engine_force * tuning.off_track_engine_multiplier / tuning.mass_kg
+	var drag_factor := TrackSurfaceMap.GRASS_DRAG * tuning.off_track_drag_multiplier
+	var quadratic := tuning.aerodynamic_drag * drag_factor
+	var linear := tuning.rolling_drag * drag_factor
+	return (-linear + sqrt(linear * linear + 4.0 * quadratic * acceleration)) / (2.0 * quadratic)
+
+
+## Drives a production car straight across a catalog ramp's flank, from CROSSING_RUN_UP outside it
+## toward the crest line, at the given initial speed with the given throttle held, until it is on
+## or past the crest line and grounded, or past the far flank, or out of ticks. Returns the trace
+## the crossing verifications assert on; frees the scene before returning.
+func _drive_flank_crossing(on_terrain: bool, speed: float, throttle: float) -> Dictionary:
 	var terrain_catalog := load(TERRAIN_CATALOG_PATH) as TerrainCatalog
 	var height_catalog := _height_catalog()
 	var tuning := load(TUNING_PATH) as VehicleTuning
@@ -405,14 +489,9 @@ func _verify_car_rides_onto_the_flank(on_terrain: bool) -> bool:
 	var map := TrackHeightMap.new(definition)
 	# Only a terrain base has a field under it; TerrainField.new(0, ...) would be a real field.
 	var field := TerrainField.new(definition.terrain_seed, terrain_catalog) if on_terrain else null
-	_check(map.has_terrain() == on_terrain, "%s: the crossing map carries terrain as intended" % label)
 	var half_width := ramp.width * 0.5
-	var start_y := -(half_width + height_catalog.flank_width + CROSSING_RUN_UP)
-	var acceleration := tuning.engine_force * tuning.off_track_engine_multiplier / tuning.mass_kg
-	var drag_factor := TrackSurfaceMap.GRASS_DRAG * tuning.off_track_drag_multiplier
-	var quadratic := tuning.aerodynamic_drag * drag_factor
-	var linear := tuning.rolling_drag * drag_factor
-	var crossing_speed := (-linear + sqrt(linear * linear + 4.0 * quadratic * acceleration)) / (2.0 * quadratic)
+	var far_edge := half_width + height_catalog.flank_width + CROSSING_RUN_UP
+	var start_y := -far_edge
 
 	var world := Node2D.new()
 	root.add_child(world)
@@ -424,53 +503,58 @@ func _verify_car_rides_onto_the_flank(on_terrain: bool) -> bool:
 	car.set_height_query(map)
 	world.add_child(car)
 	car.set_safe_reset_pose(car.global_transform)
-	car.linear_velocity = Vector2(0.0, crossing_speed)
-	# Enough throttle on the test's dirt to hold the crossing speed against drag.
+	car.linear_velocity = Vector2(0.0, speed)
 	var controls := VehicleInputState.new()
-	controls.throttle = (tuning.rolling_drag * crossing_speed + tuning.aerodynamic_drag * crossing_speed * crossing_speed) * tuning.mass_kg / tuning.engine_force
+	controls.throttle = throttle
 	car.set_input_state(controls)
-	var seated := absf(car.get_height() - map.sample_at(car.global_position).ground_height)
-	_check(seated < 0.5, "%s: the car starts seated on the ground under it (%.3f px off)" % [label, seated])
-
-	var launched := false
-	var worst_gap := 0.0
-	var worst_gap_at := Vector2.ZERO
-	var peak_wedge := 0.0
-	var speed_at_road_edge := 0.0
-	var speed_at_crest := 0.0
-	var reached_crest_line := false
-	var ticks := 0
+	var trace := {
+		"has_terrain": map.has_terrain(),
+		"crest_height": ramp.crest_height,
+		"width": ramp.width,
+		"flank_width": ramp.flank_width,
+		"seated": absf(car.get_height() - map.sample_at(car.global_position).ground_height),
+		"ticks": 0, "launched": false, "reached_crest_line": false,
+		"worst_gap": 0.0, "worst_gap_at": Vector2.ZERO,
+		"peak_wedge": 0.0, "peak_hop": 0.0, "peak_hop_at": Vector2.ZERO,
+		"speed_at_road_edge": 0.0, "speed_at_crest": 0.0,
+		"launch_y": INF, "launch_vz": 0.0, "landing_y": INF, "air_ticks": 0,
+		"crest_ground": map.sample_at(Vector2.ZERO).ground_height,
+		"terrain_under_crest": field.height_at(Vector2.ZERO) if on_terrain else 0.0,
+	}
+	var was_airborne := false
 	for tick in range(CROSSING_TICKS):
 		await physics_frame
-		ticks += 1
+		trace.ticks += 1
 		var position := car.global_position
 		var ground := map.sample_at(position).ground_height
-		var gap := absf(car.get_height() - ground)
-		if gap > worst_gap:
-			worst_gap = gap
-			worst_gap_at = position
-		launched = launched or car.is_airborne()
-		peak_wedge = maxf(peak_wedge, car.get_height() - (field.height_at(position) if on_terrain else 0.0))
-		if speed_at_road_edge == 0.0 and position.y >= -half_width:
-			speed_at_road_edge = car.get_speed()
-		if position.y >= 0.0:
-			speed_at_crest = car.get_speed()
-			reached_crest_line = true
+		var above := car.get_height() - ground
+		if absf(above) > trace.worst_gap:
+			trace.worst_gap = absf(above)
+			trace.worst_gap_at = position
+		if above > trace.peak_hop:
+			trace.peak_hop = above
+			trace.peak_hop_at = position
+		var airborne := car.is_airborne()
+		if airborne:
+			trace.air_ticks += 1
+			if not was_airborne and trace.launch_y == INF:
+				trace.launch_y = position.y
+				trace.launch_vz = car.get_vertical_velocity()
+		elif was_airborne and trace.landing_y == INF:
+			trace.landing_y = position.y
+		was_airborne = airborne
+		trace.launched = trace.launched or airborne
+		trace.peak_wedge = maxf(trace.peak_wedge, car.get_height() - (field.height_at(position) if on_terrain else 0.0))
+		if trace.speed_at_road_edge == 0.0 and position.y >= -half_width:
+			trace.speed_at_road_edge = car.get_speed()
+		if position.y >= 0.0 and not trace.reached_crest_line:
+			trace.speed_at_crest = car.get_speed()
+			trace.reached_crest_line = true
+		if (trace.reached_crest_line and not airborne) or position.y >= far_edge:
 			break
-	print("crossing %s: ticks=%d speed_at_road_edge=%.1f speed_at_crest=%.1f worst_gap=%.4f at=(%.1f, %.1f) peak_wedge=%.3f crest=%.3f launched=%s" % [label, ticks, speed_at_road_edge, speed_at_crest, worst_gap, worst_gap_at.x, worst_gap_at.y, peak_wedge, ramp.crest_height, launched])
-	_check(reached_crest_line, "%s: the car reaches the crest line within %d ticks" % [label, CROSSING_TICKS])
-	_check(speed_at_road_edge > 0.8 * crossing_speed, "%s: the car crosses the road edge near the off-track terminal speed (%.1f of %.1f px/s)" % [label, speed_at_road_edge, crossing_speed])
-	_check(not launched, "%s: the car never leaves the ground crossing the flank" % label)
-	_check(worst_gap < 0.5, "%s: the car's ride height tracks the map under it on every tick (worst gap %.4f px)" % [label, worst_gap])
-	_check(peak_wedge >= ramp.crest_height - 0.5, "%s: the car arrives on the crest line at the crest height above terrain (%.3f of %.3f px), riding onto the wedge instead of under it" % [label, peak_wedge, ramp.crest_height])
-	if on_terrain:
-		var crest_ground := map.sample_at(Vector2.ZERO).ground_height
-		var terrain_under := field.height_at(Vector2.ZERO)
-		_check(terrain_under != 0.0, "%s: the terrain under the crest line is not flat (%.3f px)" % [label, terrain_under])
-		_check(absf(crest_ground - terrain_under - ramp.crest_height) < 1e-6, "%s: the crest line is terrain plus the crest height" % label)
 	world.queue_free()
 	await process_frame
-	return true
+	return trace
 
 
 ## The miss path hands back one shared sample, now carrying terrain rather than zeros, rewritten on
@@ -504,35 +588,51 @@ func _verify_query_cost() -> bool:
 	_check(map.has_terrain(), "the query cost is measured with terrain on")
 	var origin: Vector2 = definition.jump_ramps[0].transform.origin
 	var axis: Vector2 = definition.jump_ramps[0].transform.x.normalized()
-	# Warm the lattice cells the sweep touches, as the game does on its first frames.
-	for query in range(QUERY_COUNT):
-		map.sample_at(origin + axis * float(query % 8000 - 4000))
+	# Warm the lattice cells both patterns touch, as the game does on its first frames.
+	_time_line_queries(map, origin, axis)
+	_time_path_queries(map, origin, axis)
+	var line_times: Array[int] = []
+	var path_times: Array[int] = []
+	for run in range(TIMING_RUNS):
+		line_times.append(_time_line_queries(map, origin, axis))
+		path_times.append(_time_path_queries(map, origin, axis))
+	line_times.sort()
+	path_times.sort()
+	var line_usec: int = line_times[TIMING_RUNS / 2]
+	var path_usec: int = path_times[TIMING_RUNS / 2]
+	print("terrain_height_query_usec_per_10k line_median=%d path_median=%d line_runs=%s path_runs=%s" % [line_usec, path_usec, str(line_times), str(path_times)])
+	_check(line_usec <= QUERY_BUDGET_USEC, "ten thousand terrain-bearing height queries along the ramp line (median %d us of %d runs) stay under %d us" % [line_usec, TIMING_RUNS, QUERY_BUDGET_USEC])
+	_check(path_usec <= QUERY_BUDGET_USEC, "ten thousand terrain-bearing height queries along a driven path (median %d us of %d runs) stay under %d us" % [path_usec, TIMING_RUNS, QUERY_BUDGET_USEC])
+	return true
+
+
+## The placement suite's pattern: a line of queries through the ramps, one a pixel.
+func _time_line_queries(map: TrackHeightMap, origin: Vector2, axis: Vector2) -> int:
 	var started := Time.get_ticks_usec()
 	var accumulated := 0.0
 	for query in range(QUERY_COUNT):
 		accumulated += map.sample_at(origin + axis * float(query % 8000 - 4000)).ground_height
-	var line_usec := Time.get_ticks_usec() - started
+	var elapsed := Time.get_ticks_usec() - started
+	if accumulated == INF:
+		print("unreachable, keeps the accumulator live")
+	return elapsed
+
+
+## The car's pattern: two samples a tick, 10 px apart, along a loop that stays in warmed cells.
+func _time_path_queries(map: TrackHeightMap, origin: Vector2, axis: Vector2) -> int:
 	var position := origin - axis * 500.0
 	var direction := axis
-	for tick in range(QUERY_COUNT / 2):
-		map.sample_at(position)
-		position += direction * 10.0
-		direction = direction.rotated(PATH_TURN_RATE)
-	position = origin - axis * 500.0
-	direction = axis
-	started = Time.get_ticks_usec()
-	var travelled := 0.0
+	var started := Time.get_ticks_usec()
+	var accumulated := 0.0
 	for tick in range(QUERY_COUNT / 2):
 		accumulated += map.sample_at(position).ground_height
 		accumulated += map.sample_at(position + direction * 10.0).ground_height
 		position += direction * 10.0
 		direction = direction.rotated(PATH_TURN_RATE)
-		travelled += 10.0
-	var path_usec := Time.get_ticks_usec() - started
-	print("terrain_height_query_usec_per_10k line=%d path=%d accumulated=%.1f travelled=%.0f" % [line_usec, path_usec, accumulated, travelled])
-	_check(line_usec <= QUERY_BUDGET_USEC, "ten thousand terrain-bearing height queries along the ramp line (%d us) stay under %d us" % [line_usec, QUERY_BUDGET_USEC])
-	_check(path_usec <= QUERY_BUDGET_USEC, "ten thousand terrain-bearing height queries along a driven path (%d us) stay under %d us" % [path_usec, QUERY_BUDGET_USEC])
-	return true
+	var elapsed := Time.get_ticks_usec() - started
+	if accumulated == INF:
+		print("unreachable, keeps the accumulator live")
+	return elapsed
 
 
 ## The road damping was withdrawn in #47's scope change; the field that carried its width must

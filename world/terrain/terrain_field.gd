@@ -105,6 +105,20 @@ func curvature_at(world_position: Vector2) -> float:
 	return absf(mean) + sqrt(half_difference * half_difference + _hxy * _hxy)
 
 
+## Columns and rows of the fingerprint grid over an area: one sample at the area's origin and one
+## every FINGERPRINT_SPACING to the far edge, inclusive.
+static func fingerprint_columns(area: Rect2) -> int:
+	return int(floor(area.size.x / FINGERPRINT_SPACING)) + 1
+
+
+static func fingerprint_rows(area: Rect2) -> int:
+	return int(floor(area.size.y / FINGERPRINT_SPACING)) + 1
+
+
+static func fingerprint_sample_count(area: Rect2) -> int:
+	return fingerprint_columns(area) * fingerprint_rows(area)
+
+
 ## SHA-256 over heights sampled on a FINGERPRINT_SPACING grid across the area, with the version,
 ## seed and area in the header. The field is never serialised; this is what stands in for it.
 func fingerprint(area: Rect2) -> String:
@@ -117,8 +131,8 @@ func fingerprint(area: Rect2) -> String:
 		area.size.y,
 		FINGERPRINT_SPACING,
 	]])
-	var columns := int(floor(area.size.x / FINGERPRINT_SPACING)) + 1
-	var rows := int(floor(area.size.y / FINGERPRINT_SPACING)) + 1
+	var columns := fingerprint_columns(area)
+	var rows := fingerprint_rows(area)
 	for row in range(rows):
 		for column in range(columns):
 			var position := area.position + Vector2(float(column), float(row)) * FINGERPRINT_SPACING

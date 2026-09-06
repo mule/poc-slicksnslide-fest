@@ -33,9 +33,16 @@ conservative reach test before doing any transform work. Its off-ramp answer is 
 never write through it — a mutation corrupts only what is read before the next off-ramp query
 rewrites it. The terrain sample itself allocates nothing: `TerrainField.sample_into` writes the
 shared sample in place, and each octave keeps the coefficients of the cell its previous query fell
-in, so a moving car's queries skip the corner lookups almost always. Ten thousand terrain-bearing
-queries cost about 40 ms against a 60 ms budget in `tests/terrain_height_map_test.gd`; the
-ramp-only 20 ms budget in `tests/jump_ramp_placement_test.gd` still holds for a flat base.
+in, so a moving car's queries skip the corner lookups almost always.
+
+**Query cost, and a deviation from #47's scope.** Issue #47 asked for the query cost to stay within
+the existing budget of ten thousand queries in 20 ms. **That is not met.** A three-octave field costs
+about 4 µs a query in GDScript even with no allocation and no lookups (the fade arithmetic alone is
+about 3 µs), so ten thousand terrain-bearing queries cost about 40 ms; `tests/terrain_height_map_test.gd`
+asserts the median of three runs under 60 ms, which is the assertion that covers the shipped map. The
+20 ms assertion in `tests/jump_ramp_placement_test.gd` still passes, but its fixture has no terrain
+seed, so it covers a ramp-only map and not the shipped path; the comment on that assertion says so.
+Per tick the car's two queries cost about 8 µs, under a tenth of a percent of a 60 Hz tick.
 
 ## Ramp geometry and placement
 
@@ -51,8 +58,22 @@ lift-off rule to read as a crest. The flank adds curvature of its own, bounded b
 `crest * (|w''|max / flank^2 + |w'|max / (flank * half_length))` = 1.28e-3 per px, which together
 with the terrain bound (1.875e-4) stays under the lift-off curvature at the off-track terminal
 speed of 158.5 px/s (4.88e-3); the summed field launches a car crossing a flank only above
-289 px/s (83 km/h), a speed it can reach only by leaving the road. The flank is not part of the
+289 px/s (83 km/h). In a slide racer that is ordinary play, not an edge case: a car that crosses a
+ramp edge sideways at 600 px/s hops, and the hop is bounded below. The flank is not part of the
 height fingerprint, so the pinned fingerprints below hold.
+
+**Ruling on the threshold (#47 fix round 1).** #49 bounded the terrain's curvature against
+`max_safe_speed` (2.994e-4 per px); the flank is bounded against the off-track terminal speed
+(4.883e-3), sixteen times looser, because no flank narrower than about 1350 px could meet the tighter
+one and any flank that wide puts solids on flanks. The relaxation is kept, and its consequence is
+bounded by assertion instead of by argument: the flank's whole relief is the crest height, so the
+hop a fast crossing produces is bounded by geometry whatever the speed. `tests/terrain_height_map_test.gd`
+drives a lateral crossing at `max_safe_speed` and asserts the peak height of the car above the map
+under it stays under the ballistic apex of the fade's peak slope at that speed,
+`(max_safe_speed * crest * 15/8 / flank)^2 / 2g` = 7.61 px, and under the crest height, 9 px.
+Measured: lift-off at 601 px/s on the near flank with 41 px/s of vertical speed, 35 ticks in the air,
+a 3.8 px peak hop, landing on the road. The #48 acceptance line covers terrain with no ramp present;
+this is the check for the ramp-and-flank case at `max_safe_speed`.
 
 `data/default_height_channel_catalog.tres`, catalog version 3:
 
@@ -264,6 +285,13 @@ recorded height fingerprints need regenerating too.
   speed: its ride height tracks the map within 0.18 px on every tick and it arrives on the crest
   line at the crest height. Under `--break-side-wall`, or with the falloff reverted to the hard
   cut in code, the same drive reads a 9.0 px gap and a zero wedge height.
+- **A fast lateral flank crossing hops.** The flank replaced the wall with a real slope, and above
+  289 px/s sideways its curvature exceeds the lift-off rule's threshold, so a car crossing a ramp
+  edge at speed leaves the ground: at 601 px/s, 41 px/s of vertical speed, 0.58 s in the air, a
+  3.8 px (0.3 m) peak above the ground, landing on the road. Bounded by assertion at 7.61 px (the
+  ballistic apex of the fade's peak slope at `max_safe_speed`) and by the 9 px crest height; see the
+  ruling above. It is a hop, not a launch, but it is new behaviour and the #52 drive should say how
+  it reads.
 - **No rock can be cleared from a generated ramp.** The behaviour works — a car above the clearance
   height passes over a rock and still hits a tree — but ramp placement and object placement never
   bring the two within reach of each other, so it is a capability rather than something that
