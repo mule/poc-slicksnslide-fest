@@ -85,7 +85,7 @@ func sample_at(world_position: Vector2) -> HeightSample:
 	else:
 		_sample.ground_height = 0.0
 		_sample.gradient = Vector2.ZERO
-	_sample.feature_height = 0.0
+	_sample.on_feature = false
 	var px := world_position.x
 	var py := world_position.y
 	var count := _inverses.size()
@@ -118,6 +118,5 @@ func sample_at(world_position: Vector2) -> HeightSample:
 		var along_slope := -signf(local.x) * _slopes[index] * falloff
 		var across_slope := crest * profile * falloff_slope * signf(local.y)
 		var gradient := _axes[index] * along_slope + _laterals[index] * across_slope
-		var wedge := crest * profile * falloff
-		return HeightSample.new(_sample.ground_height + wedge, _sample.gradient + gradient, wedge)
+		return HeightSample.new(_sample.ground_height + crest * profile * falloff, _sample.gradient + gradient, true)
 	return _sample

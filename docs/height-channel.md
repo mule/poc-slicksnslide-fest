@@ -11,14 +11,16 @@ what the drive and the captures actually measured.
 
 ```gdscript
 class_name HeightQuery
-func sample_at(world_position: Vector2) -> HeightSample   # { ground_height, gradient, feature_height }
+func sample_at(world_position: Vector2) -> HeightSample   # { ground_height, gradient, on_feature }
 ```
 
 The base class answers zero height and a zero gradient everywhere, so a car with no height source
-behaves exactly as it did before the channel existed. `feature_height` (#48) is the part of the
-height a placed feature contributes on top of the terrain: the wedge's own height anywhere on a
-ramp or its flank, zero on bare ground however high or steep. It exists for one consumer, the
-car's safe-pose rule, which needs "on a ramp" and can no longer read that off the total height. `TrackHeightMap` is the production
+behaves exactly as it did before the channel existed. `on_feature` (#48) says whether the position
+lies inside a placed feature — anywhere on a ramp or its flank — as opposed to bare ground however
+high or steep. It exists for one consumer, the car's safe-pose rule, which needs "on a ramp" and can
+no longer read that off the total height. It is a boolean rather than the feature's height on
+purpose: the consumer needs membership, and a height would invite "raised means feature", which a
+dip carved into the road would falsify. `TrackHeightMap` is the production
 implementation: it is constructed from a `TrackDefinition` and answers the terrain field built
 from that definition's `terrain_seed` plus that definition's `jump_ramps`, summed (#47). A
 definition without a terrain seed, such as a hand-built fixture, gets a flat base.
@@ -186,7 +188,7 @@ least `air_time_notice_seconds` (0.5 s) also leaves an air-time notice the sessi
 **Ground-only rules.** The safety behaviours are deliberately blind to the air:
 
 - `_update_safe_pose_checkpoint()` refuses to record a safe pose while `_airborne`, while the
-  ground under the car is raised by a feature (`feature_height > 0`: anywhere on a ramp or its
+  ground under the car is part of a placed feature (`on_feature`: anywhere on a ramp or its
   flank), during the landing recovery window, off dirt, above the slip limit, or while touching
   anything. A reset therefore never puts the car back onto a ramp face or into mid-air. Until #48
   the gate read the total height (`_ground_height > 0`), which meant the same thing while ramps
@@ -304,9 +306,9 @@ ground below zero reads as "not raised". Two replacements were weighed:
   (the stall margin below is 12.7×), and `low_speed_stabilization` (50 px/s²) exceeds gravity on the
   steepest possible slope (15.2 px/s²), so a car reset onto a slope sits still.
 - *"Not on a ramp"* — the original intent, read from the feature's own contribution rather than the
-  total. **Chosen.** The height sample now carries `feature_height`, the map fills it with the wedge
+  total. **Chosen.** The height sample now carries `on_feature`, the map sets it on every ramp hit
   (flank included), the scripted test provider reports its hump, plateau and wall as features, and
-  the gate reads `_ground_feature_height > 0.0`. On flat fixtures the two conditions are identical,
+  the gate reads `_on_feature`. On flat fixtures the two conditions are identical,
   and the three flat regression suites report the same 53, 12 and 44 assertion lines to the byte.
 
 The rate is asserted, not the existence of a pose. During each lap the suite rebuilds the gate's

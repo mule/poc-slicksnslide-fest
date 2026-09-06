@@ -37,7 +37,7 @@ var _visited_surfaces: Dictionary = {}
 var _safe_pose_elapsed := 0.0
 var _height_query: HeightQuery
 var _ground_gradient := Vector2.ZERO
-var _ground_feature_height := 0.0
+var _on_feature := false
 var _height := 0.0
 var _vertical_velocity := 0.0
 var _airborne := false
@@ -343,7 +343,7 @@ func _sample_surface(world_position: Vector2) -> void:
 func _sample_ground(world_position: Vector2) -> void:
 	var sample := _sample_ground_at(world_position)
 	_ground_gradient = sample.gradient
-	_ground_feature_height = sample.feature_height
+	_on_feature = sample.on_feature
 
 
 func _sample_ground_at(world_position: Vector2) -> HeightQuery.HeightSample:
@@ -434,15 +434,15 @@ func _apply_safe_reset(state: PhysicsDirectBodyState2D) -> void:
 	_landing_recovery_remaining = 0.0
 
 
-## A pose is recorded only on ground no feature has raised. The gate reads the feature's own
-## contribution rather than the total height: the pre-terrain gate refused any ground above zero,
+## A pose is recorded only on ground that is not part of a placed feature. The gate reads the
+## sample's membership flag rather than the total height: the pre-terrain gate refused any ground above zero,
 ## which meant "not on a ramp" while ramps were the only raised ground, but on a terrain field it
 ## refuses between a quarter and the whole of a lap depending on the seed, and admits a ramp whose
 ## wedge sits on ground below zero. Terrain itself never disqualifies a pose: the car can drive
 ## away from any slope the catalog allows (tests/vehicle_terrain_test.gd derives the margin), and
 ## low-speed stabilization holds a still car on any of them.
 func _update_safe_pose_checkpoint(state: PhysicsDirectBodyState2D, delta: float) -> void:
-	if _airborne or _ground_feature_height > 0.0 or _landing_recovery_remaining > 0.0 or _surface_type != SurfaceQuery.SurfaceType.DIRT or _slip_ratio > tuning.safe_pose_max_slip or state.get_contact_count() > 0:
+	if _airborne or _on_feature or _landing_recovery_remaining > 0.0 or _surface_type != SurfaceQuery.SurfaceType.DIRT or _slip_ratio > tuning.safe_pose_max_slip or state.get_contact_count() > 0:
 		_safe_pose_elapsed = 0.0
 		return
 	_safe_pose_elapsed += delta
