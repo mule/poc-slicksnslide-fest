@@ -7,6 +7,9 @@ extends HeightQuery
 ## shape a generated height map put at a ramp's lateral boundary before #47 replaced the hard cut
 ## with a flank: flat ground up to crest_x, then a vertical step of crest_height onto a face that
 ## descends over half_length. It stays because the car's rules must hold for any provider.
+## Every raised sample reports its whole height as feature height: these shapes stand in for ramps,
+## and the car's safe-pose gate must keep treating them as ramps now that it reads the feature
+## rather than the total height.
 
 enum Mode { HUMP, PLATEAU, WALL }
 
@@ -23,16 +26,18 @@ func sample_at(world_position: Vector2) -> HeightSample:
 	sample_count += 1
 	if mode == Mode.PLATEAU:
 		if world_position.x < plateau_end_x:
-			return HeightSample.new(plateau_height, Vector2.ZERO)
+			return HeightSample.new(plateau_height, Vector2.ZERO, plateau_height)
 		return HeightSample.new()
 	if mode == Mode.WALL:
 		var beyond := world_position.x - crest_x
 		if beyond < 0.0 or beyond > half_length:
 			return HeightSample.new()
 		var wall_slope := crest_height / half_length
-		return HeightSample.new(crest_height - wall_slope * beyond, Vector2(-wall_slope, 0.0))
+		var wall_height := crest_height - wall_slope * beyond
+		return HeightSample.new(wall_height, Vector2(-wall_slope, 0.0), wall_height)
 	var along := world_position.x - crest_x
 	if absf(along) > half_length:
 		return HeightSample.new()
 	var slope := crest_height / half_length
-	return HeightSample.new(crest_height * (1.0 - absf(along) / half_length), Vector2(-signf(along) * slope, 0.0))
+	var hump_height := crest_height * (1.0 - absf(along) / half_length)
+	return HeightSample.new(hump_height, Vector2(-signf(along) * slope, 0.0), hump_height)
