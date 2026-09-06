@@ -6,8 +6,10 @@ extends SceneTree
 ## reaches the level at which the car's lift-off rule fires at max_safe_speed.
 ##
 ## Mutations:
-##   -- --break-terrain-seed       bumps the catalog version on every second build, so repeat
+##   -- --break-terrain-version    bumps the catalog version on every second build, so repeat
 ##                                 samples and fingerprints stop agreeing
+##   -- --break-terrain-seed       derives every second build's seed from the wrong domain, as a
+##                                 field whose seed derivation drifted would, so repeats stop agreeing
 ##   -- --break-terrain-curvature  quadruples the amplitude, so the field breaks the lift-off bound
 
 const CATALOG_PATH := "res://data/default_terrain_catalog.tres"
@@ -34,11 +36,13 @@ const SEED_0_FINGERPRINT := "3ec9ea63e98ee3d1306e8efe6405df7d1d368963ea1f3f0fecf
 
 var _failures: Array[String] = []
 var _checks := 0
+var _break_version := false
 var _break_seed := false
 var _break_curvature := false
 
 
 func _initialize() -> void:
+	_break_version = OS.get_cmdline_user_args().has("--break-terrain-version")
 	_break_seed = OS.get_cmdline_user_args().has("--break-terrain-seed")
 	_break_curvature = OS.get_cmdline_user_args().has("--break-terrain-curvature")
 	call_deferred("_run")
@@ -67,13 +71,17 @@ func _catalog() -> TerrainCatalog:
 	return catalog
 
 
-## The second build of any pair. Under --break-terrain-seed it runs on a bumped version.
-func _repeat_catalog(catalog: TerrainCatalog) -> TerrainCatalog:
-	if not _break_seed:
-		return catalog
-	var bumped := catalog.duplicate(true) as TerrainCatalog
-	bumped.version += 1
-	return bumped
+## The second build of any pair. Under --break-terrain-version it runs on a bumped version; under
+## --break-terrain-seed its seed is derived from the height channel's domain instead of the terrain
+## domain, the regression a drifted derivation would produce.
+func _repeat_field(track_seed: int, catalog: TerrainCatalog) -> TerrainField:
+	if _break_version:
+		var bumped := catalog.duplicate(true) as TerrainCatalog
+		bumped.version += 1
+		return TerrainField.for_track(track_seed, bumped)
+	if _break_seed:
+		return TerrainField.new(DomainSeed.derive(catalog.version, track_seed, "height_channel"), catalog)
+	return TerrainField.for_track(track_seed, catalog)
 
 
 func _verify_catalog_defaults() -> bool:
@@ -102,22 +110,21 @@ func _verify_catalog_defaults() -> bool:
 	# Expected values below are worked from the pinned numbers, never from the catalog's own
 	# derivations, so a wrong derivation cannot agree with itself.
 	var expected_curvature := 225.0 / 16.0 * (40.0 / (3000.0 * 3000.0) + 10.0 / (1500.0 * 1500.0) + 2.5 / (750.0 * 750.0))
-	_check(is_equal_approx(catalog.curvature_bound(), expected_curvature), "curvature bound is the cell constant times amplitude over wavelength squared, summed")
-	_check(is_equal_approx(catalog.curvature_bound(), 1.875e-4), "curvature bound is 1.875e-4 per px")
+	# is_equal_approx floors its tolerance at 1e-5 absolute, a 5% window at this magnitude, so the
+	# bound is pinned with an explicit absolute tolerance instead.
+	_check(absf(catalog.curvature_bound() - expected_curvature) < 1e-12, "curvature bound is the cell constant times amplitude over wavelength squared, summed")
+	_check(absf(catalog.curvature_bound() - 1.875e-4) < 1e-12, "curvature bound is 1.875e-4 per px")
 	var expected_slope := 2.0 * 15.0 / 8.0 * (40.0 / 3000.0 + 10.0 / 1500.0 + 2.5 / 750.0)
-	_check(is_equal_approx(catalog.slope_bound(), expected_slope), "slope bound is twice the peak fade slope times amplitude over wavelength, summed")
-	_check(is_equal_approx(catalog.slope_bound(), 0.0875), "slope bound is 8.75% per axis")
+	_check(absf(catalog.slope_bound() - expected_slope) < 1e-12, "slope bound is twice the peak fade slope times amplitude over wavelength, summed")
+	_check(absf(catalog.slope_bound() - 0.0875) < 1e-12, "slope bound is 8.75% per axis")
 	var script_defaults := TerrainCatalog.new()
-	_check(
-		script_defaults.version == catalog.version
-		and is_equal_approx(script_defaults.amplitude, catalog.amplitude)
-		and is_equal_approx(script_defaults.base_wavelength, catalog.base_wavelength)
-		and script_defaults.octaves == catalog.octaves
-		and is_equal_approx(script_defaults.persistence, catalog.persistence)
-		and is_equal_approx(script_defaults.lacunarity, catalog.lacunarity)
-		and is_equal_approx(script_defaults.road_flatten_width, catalog.road_flatten_width),
-		"script defaults match the versioned resource tuning"
-	)
+	_check(script_defaults.version == catalog.version, "script default version matches the resource")
+	_check(is_equal_approx(script_defaults.amplitude, catalog.amplitude), "script default amplitude matches the resource")
+	_check(is_equal_approx(script_defaults.base_wavelength, catalog.base_wavelength), "script default base wavelength matches the resource")
+	_check(script_defaults.octaves == catalog.octaves, "script default octave count matches the resource")
+	_check(is_equal_approx(script_defaults.persistence, catalog.persistence), "script default persistence matches the resource")
+	_check(is_equal_approx(script_defaults.lacunarity, catalog.lacunarity), "script default lacunarity matches the resource")
+	_check(is_equal_approx(script_defaults.road_flatten_width, catalog.road_flatten_width), "script default road flatten width matches the resource")
 	return true
 
 
@@ -183,7 +190,7 @@ func _verify_determinism() -> bool:
 	var catalog := _catalog()
 	var positions := _spread_positions(64)
 	var first := TerrainField.for_track(7, catalog)
-	var second := TerrainField.for_track(7, _repeat_catalog(catalog))
+	var second := _repeat_field(7, catalog)
 	var other_version := catalog.duplicate(true) as TerrainCatalog
 	other_version.version += 1
 	var third := TerrainField.for_track(7, other_version)
@@ -239,7 +246,11 @@ func _verify_gradient_is_the_derivative() -> bool:
 		if error > worst:
 			worst = error
 			worst_at = position
-		_check(is_equal_approx(sample.ground_height, field.height_at(position)), "height_at agrees with sample_at at (%.1f, %.1f)" % [position.x, position.y])
+	# Both entry points share _evaluate today; this guards against them diverging later, and is
+	# kept to a handful of positions so it does not inflate the check count.
+	for index in [0, 1, positions.size() / 2, positions.size() - 1]:
+		var position: Vector2 = positions[index]
+		_check(field.sample_at(position).ground_height == field.height_at(position), "height_at agrees with sample_at at (%.1f, %.1f)" % [position.x, position.y])
 	print("gradient_max_error=%.10f at=(%.1f, %.1f) largest_gradient=%.5f tolerance=%.10f" % [worst, worst_at.x, worst_at.y, largest_gradient, GRADIENT_TOLERANCE])
 	_check(worst < GRADIENT_TOLERANCE, "the analytic gradient matches a central finite difference within %.10f at %d positions (worst %.10f)" % [GRADIENT_TOLERANCE, positions.size(), worst])
 	_check(largest_gradient > 100.0 * GRADIENT_TOLERANCE, "gradients are large against the tolerance, so a wrong gradient could not hide inside it")
@@ -335,8 +346,7 @@ func _verify_fingerprints() -> bool:
 	var started := Time.get_ticks_usec()
 	for seed in range(FINGERPRINT_SEED_COUNT):
 		var first := TerrainField.for_track(seed, catalog).fingerprint(SWEEP_AREA)
-		var second := TerrainField.for_track(seed, _repeat_catalog(catalog)).fingerprint(SWEEP_AREA)
-		_check(first.length() == 64, "seed %d produces a SHA-256 terrain fingerprint" % seed)
+		var second := _repeat_field(seed, catalog).fingerprint(SWEEP_AREA)
 		_check(first == second, "seed %d terrain fingerprint repeats" % seed)
 		_check(not seen.has(first), "seed %d terrain fingerprint is distinct from every earlier seed" % seed)
 		seen[first] = seed
@@ -348,9 +358,27 @@ func _verify_fingerprints() -> bool:
 	var bumped := catalog.duplicate(true) as TerrainCatalog
 	bumped.version += 1
 	_check(TerrainField.for_track(0, bumped).fingerprint(SWEEP_AREA) != seed_0, "a catalog version bump moves the seed 0 fingerprint")
-	var smaller := Rect2(SWEEP_AREA.position, SWEEP_AREA.size * 0.5)
-	_check(TerrainField.for_track(0, catalog).fingerprint(smaller) != seed_0, "the fingerprint covers the area it was asked for")
+	# The area sits in the hash header, so two areas differing is no proof the grid honours it.
+	# Rebuild the fingerprint independently from height_at over the grid the field documents.
+	var field := TerrainField.for_track(0, catalog)
+	var smaller := Rect2(SWEEP_AREA.position + Vector2(1000.0, -500.0), SWEEP_AREA.size * 0.5)
+	_check(seed_0 == _independent_fingerprint(field, catalog, SWEEP_AREA), "the fingerprint is the hash of the documented grid over the sweep area")
+	_check(field.fingerprint(smaller) == _independent_fingerprint(field, catalog, smaller), "the fingerprint samples the grid of the area it was asked for")
 	return true
+
+
+## The fingerprint's documented contract, built from the public height query rather than the
+## field's own loop: header, then heights on a FINGERPRINT_SPACING grid, row-major, from the
+## area's origin, "%.3f" each, joined by "|", SHA-256.
+func _independent_fingerprint(field: TerrainField, catalog: TerrainCatalog, area: Rect2) -> String:
+	var spacing: float = TerrainField.FINGERPRINT_SPACING
+	var components := PackedStringArray(["version=%d|seed=%d|area=%.1f,%.1f,%.1f,%.1f|spacing=%.1f" % [
+		catalog.version, field.terrain_seed, area.position.x, area.position.y, area.size.x, area.size.y, spacing,
+	]])
+	for row in range(int(floor(area.size.y / spacing)) + 1):
+		for column in range(int(floor(area.size.x / spacing)) + 1):
+			components.append("%.3f" % field.height_at(area.position + Vector2(float(column), float(row)) * spacing))
+	return "|".join(components).sha256_text()
 
 
 func _verify_definition_fields() -> bool:
