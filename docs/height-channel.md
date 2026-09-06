@@ -16,8 +16,9 @@ func sample_at(world_position: Vector2) -> HeightSample   # { ground_height, gra
 
 The base class answers zero height and a zero gradient everywhere, so a car with no height source
 behaves exactly as it did before the channel existed. `TrackHeightMap` is the production
-implementation: it is constructed from a `TrackDefinition` and answers from that definition's
-`jump_ramps`.
+implementation: it is constructed from a `TrackDefinition` and answers the terrain field built
+from that definition's `terrain_seed` plus that definition's `jump_ramps`, summed (#47). A
+definition without a terrain seed, such as a hand-built fixture, gets a flat base.
 
 Nothing about a ramp reaches the car. There is no ramp node in the physics world, no `Area2D`, no
 `body_entered`, no signal, and no per-ramp state on the vehicle. `TopDownCar` asks two questions
@@ -27,15 +28,52 @@ noise field, a set of block levels, or a hand-authored track could implement `He
 drive crests, drops, and flight without a line changing in `vehicle/`.
 
 `TrackHeightMap` keeps per-ramp bounds in scalar packed arrays and rejects most queries with a
-conservative reach test before doing any transform work. Its flat-ground answer is one shared
-`HeightSample` instance, re-zeroed on every return: read it freely, but never write through it —
-a mutation corrupts only what is read before the next flat query resets it.
+conservative reach test before doing any transform work. Its off-ramp answer is one shared
+`HeightSample` instance, rewritten with the terrain sample on every return: read it freely, but
+never write through it — a mutation corrupts only what is read before the next off-ramp query
+rewrites it. The terrain sample itself allocates nothing: `TerrainField.sample_into` writes the
+shared sample in place, and each octave keeps the coefficients of the cell its previous query fell
+in, so a moving car's queries skip the corner lookups almost always.
+
+**Query cost, and a deviation from #47's scope.** Issue #47 asked for the query cost to stay within
+the existing budget of ten thousand queries in 20 ms. **That is not met.** A three-octave field costs
+about 4 µs a query in GDScript even with no allocation and no lookups (the fade arithmetic alone is
+about 3 µs), so ten thousand terrain-bearing queries cost about 40 ms; `tests/terrain_height_map_test.gd`
+asserts the median of three runs under 60 ms, which is the assertion that covers the shipped map. The
+20 ms assertion in `tests/jump_ramp_placement_test.gd` still passes, but its fixture has no terrain
+seed, so it covers a ramp-only map and not the shipped path; the comment on that assertion says so.
+Per tick the car's two queries cost about 8 µs, under a tenth of a percent of a 60 Hz tick.
 
 ## Ramp geometry and placement
 
 A ramp is a symmetric hump. Its crest is the placement transform's origin, its faces run along the
 transform's x axis, and it spans the full road width. Height falls linearly from the crest to zero
 at each foot, so the gradient is a constant `slope` pointing at the crest from either side.
+
+Beyond each road edge the hump fades to nothing over `flank_width` (250 px, 20 m, the off-track
+catalog's `solid_clearance`, so no solid ever sits on a flank), along the quintic fade
+`6t^5 - 15t^4 + 10t^3`. Both of its derivatives vanish at the road edge and at the flank's outer
+edge, so the total height is continuous everywhere and its second derivative has no step for the
+lift-off rule to read as a crest. The flank adds curvature of its own, bounded by
+`crest * (|w''|max / flank^2 + |w'|max / (flank * half_length))` = 1.28e-3 per px, which together
+with the terrain bound (1.875e-4) stays under the lift-off curvature at the off-track terminal
+speed of 158.5 px/s (4.88e-3); the summed field launches a car crossing a flank only above
+289 px/s (83 km/h). In a slide racer that is ordinary play, not an edge case: a car that crosses a
+ramp edge sideways at 600 px/s hops, and the hop is bounded below. The flank is not part of the
+height fingerprint, so the pinned fingerprints below hold.
+
+**Ruling on the threshold (#47 fix round 1).** #49 bounded the terrain's curvature against
+`max_safe_speed` (2.994e-4 per px); the flank is bounded against the off-track terminal speed
+(4.883e-3), sixteen times looser, because no flank narrower than about 1350 px could meet the tighter
+one and any flank that wide puts solids on flanks. The relaxation is kept, and its consequence is
+bounded by assertion instead of by argument: the flank's whole relief is the crest height, so the
+hop a fast crossing produces is bounded by geometry whatever the speed. `tests/terrain_height_map_test.gd`
+drives a lateral crossing at `max_safe_speed` and asserts the peak height of the car above the map
+under it stays under the ballistic apex of the fade's peak slope at that speed,
+`(max_safe_speed * crest * 15/8 / flank)^2 / 2g` = 7.61 px, and under the crest height, 9 px.
+Measured: lift-off at 601 px/s on the near flank with 41 px/s of vertical speed, 35 ticks in the air,
+a 3.8 px peak hop, landing on the road. The #48 acceptance line covers terrain with no ramp present;
+this is the check for the ramp-and-flank case at `max_safe_speed`.
 
 `data/default_height_channel_catalog.tres`, catalog version 3:
 
@@ -240,17 +278,27 @@ recorded height fingerprints need regenerating too.
 
 ## Limitations
 
-- **Crossing a ramp's lateral edge passes the car under the ramp.** The height map gives every ramp
-  a vertical wall at its lateral boundary. A car entering from the side is on flat ground with the
-  ramp's face above it; the lift-off test correctly refuses to raise it, so it drives under the
-  wedge instead of onto it. Deferred by decision, not an accident: the alternative shapes cost
-  either a query per side or a fake barrier.
+- **Crossing a ramp's lateral edge passes the car under the ramp — closed in #47.** The height map
+  gave every ramp a vertical wall at its lateral boundary, so a car entering from the side drove
+  under the wedge. The wedge now fades over a flank beyond each road edge, and
+  `tests/terrain_height_map_test.gd` drives a production car across it at the off-track terminal
+  speed: its ride height tracks the map within 0.18 px on every tick and it arrives on the crest
+  line at the crest height. Under `--break-side-wall`, or with the falloff reverted to the hard
+  cut in code, the same drive reads a 9.0 px gap and a zero wedge height.
+- **A fast lateral flank crossing hops.** The flank replaced the wall with a real slope, and above
+  289 px/s sideways its curvature exceeds the lift-off rule's threshold, so a car crossing a ramp
+  edge at speed leaves the ground: at 601 px/s, 41 px/s of vertical speed, 0.58 s in the air, a
+  3.8 px (0.3 m) peak above the ground, landing on the road. Bounded by assertion at 7.61 px (the
+  ballistic apex of the fade's peak slope at `max_safe_speed`) and by the 9 px crest height; see the
+  ruling above. It is a hop, not a launch, but it is new behaviour and the #52 drive should say how
+  it reads.
 - **No rock can be cleared from a generated ramp.** The behaviour works — a car above the clearance
   height passes over a rock and still hits a tree — but ramp placement and object placement never
   bring the two within reach of each other, so it is a capability rather than something that
   happens in play. See the tuning notes below for the measurement.
-- **No elevation anywhere else.** The ground is flat except on a ramp. There is no terrain field
-  and no elevation on the road itself.
+- **No elevation anywhere else — closed in #47.** The ground is now the terrain field of #49
+  under the whole play area, with the ramps summed onto it, so the road climbs and drops with it.
+  Nothing renders that yet; #50 makes it legible.
 - **No mid-air control.** `airborne_steering_authority` is data and defaults to 0.0. Any non-zero
   value is a tuning decision no drive has justified yet.
 - **A landing on a solid is a collision.** Nothing keeps objects out of a landing zone; ramps are
@@ -281,7 +329,7 @@ The graphical evidence capture is not headless:
 godot --path . --script res://tests/capture_height_channel_evidence.gd
 ```
 
-Seven mutation flags exist to prove those suites are load-bearing. Each must exit non-zero, and each
+Nine mutation flags exist to prove those suites are load-bearing. Each must exit non-zero, and each
 must do so on its own assertion rather than on a load error — check the first `FAIL:` line, not
 just the exit code:
 
@@ -293,6 +341,8 @@ godot --headless --path . --script res://tests/vehicle_height_channel_test.gd --
 godot --headless --path . --script res://tests/vehicle_height_channel_test.gd -- --break-landing
 godot --headless --path . --script res://tests/airborne_obstacle_level_test.gd -- --break-height-layers
 godot --headless --path . --script res://tests/track_collision_physics_test.gd -- --break-collision
+godot --headless --path . --script res://tests/terrain_height_map_test.gd -- --break-side-wall
+godot --headless --path . --script res://tests/terrain_height_map_test.gd -- --break-flank-curvature
 ```
 
 | Flag | Breaks | First failing assertion |
@@ -304,6 +354,8 @@ godot --headless --path . --script res://tests/track_collision_physics_test.gd -
 | `--break-landing` | zeroes the landing speed loss and recovery | `slope 0.120: the landing is hard enough that the loss assertion is live` |
 | `--break-height-layers` | puts every solid on the tall layer | `the rock is a low collider` |
 | `--break-collision` | removes the containment boundary | `seed 0 probe driven right stays inside the play area` |
+| `--break-side-wall` | zeroes the fixture ramp's flank width, restoring the hard lateral cut | `on a flat base: the car's ride height tracks the map under it on every tick (worst gap 9.0000 px)` |
+| `--break-flank-curvature` | quarters the flank width, so its curvature breaks the crossing-speed bound | `terrain plus flank curvature (0.015289650) stays under the lift-off curvature at the off-track terminal speed (0.004883371)` |
 
 ## Tuning notes
 

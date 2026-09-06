@@ -4,6 +4,7 @@ extends RefCounted
 const TrackDefinitionScript := preload("res://track/track_definition.gd")
 const DEFAULT_OFFTRACK_CATALOG := preload("res://data/default_offtrack_object_catalog.tres")
 const DEFAULT_HEIGHT_CATALOG := preload("res://data/default_height_channel_catalog.tres")
+const DEFAULT_TERRAIN_CATALOG := preload("res://data/default_terrain_catalog.tres")
 
 const DEFAULT_MAX_ATTEMPTS := 30
 const SAMPLE_SPACING := 25.0
@@ -46,14 +47,14 @@ func generate(requested_seed: int, limit_overrides: Dictionary = {}):
 		if last_reason.is_empty():
 			candidate.diagnostic_reason = "accepted"
 			candidate.generation_usec = Time.get_ticks_usec() - started_usec
-			return _attach_offtrack_objects(_attach_jump_ramps(candidate))
+			return _attach_offtrack_objects(_attach_terrain(_attach_jump_ramps(candidate)))
 
 	var fallback = _build_definition(requested_seed, _sample_stadium(FALLBACK_HALF_STRAIGHT, FALLBACK_RADIUS), FALLBACK_WIDTH)
 	fallback.generation_attempts = maximum_attempts
 	fallback.used_fallback = true
 	fallback.diagnostic_reason = "retry_exhausted:%s; fallback=known_valid_stadium" % last_reason
 	fallback.generation_usec = Time.get_ticks_usec() - started_usec
-	return _attach_offtrack_objects(_attach_jump_ramps(fallback))
+	return _attach_offtrack_objects(_attach_terrain(_attach_jump_ramps(fallback)))
 
 
 ## Ramps come before objects. Both are domain-seeded and share nothing, but if a later catalog
@@ -64,6 +65,26 @@ func _attach_jump_ramps(definition: TrackDefinition) -> TrackDefinition:
 	definition.height_fingerprint = result.fingerprint
 	definition.height_generation_usec = result.generation_usec
 	definition.height_diagnostics = result.diagnostics
+	return definition
+
+
+## Terrain sits between ramps and objects. It reads nothing but the seed and the play area, draws
+## from its own domain, and attaches only its seed and fingerprint, so neither neighbour can see
+## it; the order is fixed here so a later catalog that seats objects on terrain finds it present.
+func _attach_terrain(definition: TrackDefinition) -> TrackDefinition:
+	var started_usec := Time.get_ticks_usec()
+	var catalog: TerrainCatalog = DEFAULT_TERRAIN_CATALOG
+	var field := TerrainField.for_track(definition.seed, catalog)
+	var area: Rect2 = definition.play_area
+	definition.terrain_seed = field.terrain_seed
+	definition.terrain_fingerprint = field.fingerprint(area)
+	definition.terrain_diagnostics = {
+		"octaves": catalog.octaves,
+		"fingerprint_samples": TerrainField.fingerprint_sample_count(area),
+		"total_amplitude": catalog.total_amplitude(),
+		"curvature_bound": catalog.curvature_bound(),
+	}
+	definition.terrain_generation_usec = Time.get_ticks_usec() - started_usec
 	return definition
 
 

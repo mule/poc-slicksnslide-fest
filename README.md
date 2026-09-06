@@ -120,11 +120,17 @@ godot --headless --path . --script res://tests/jump_ramp_placement_test.gd
 godot --headless --path . --script res://tests/vehicle_height_channel_test.gd
 godot --headless --path . --script res://tests/airborne_obstacle_level_test.gd
 godot --headless --path . --script res://tests/jump_ramp_visuals_test.gd
+godot --headless --path . --script res://tests/terrain_field_contract_test.gd
+godot --headless --path . --script res://tests/terrain_height_map_test.gd
 ```
 
 These pin the ramp catalog and its derivations, keep ramp placement deterministic and separated
 from the road and off-track seeds, hold the car's flight to its analytic arc and its ground-only
 rules, and check that a car above the clearance height clears a rock while still hitting a tree.
+The last two pin the terrain field's curvature bound and the height map that sums terrain under
+the ramps: all three earlier fingerprints held byte for byte for seeds 0-19, a car crossing a
+ramp's flank rides onto the wedge (`-- --break-side-wall` restores the old wall and fails it),
+and the flank's curvature stays under the lift-off threshold (`-- --break-flank-curvature`).
 
 For the seeds 0-19 ramp ledger, the driven approach/apex/landing stills, the flight-reach
 measurement, and the rock-clearance still, use the graphical renderer (not `--headless`):
@@ -135,7 +141,7 @@ godot --path . --script res://tests/capture_height_channel_evidence.gd
 
 It writes the trace and the PNGs under
 [`docs/evidence/height-channel/`](docs/evidence/height-channel/); see
-[The height channel](docs/height-channel.md) for what each number means and for the seven mutation
+[The height channel](docs/height-channel.md) for what each number means and for the nine mutation
 commands that keep these suites honest.
 
 Run the harness contract check:

@@ -30,3 +30,7 @@ extends Resource
 @export var height_fingerprint: String = ""
 @export var height_generation_usec: int = 0
 @export var height_diagnostics: Dictionary = {}
+@export var terrain_seed: int = 0
+@export var terrain_fingerprint: String = ""
+@export var terrain_generation_usec: int = 0
+@export var terrain_diagnostics: Dictionary = {}
