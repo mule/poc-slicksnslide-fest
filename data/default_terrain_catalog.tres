@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="TerrainCatalog" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://world/terrain/terrain_catalog.gd" id="1_catalog"]
+
+[resource]
+script = ExtResource("1_catalog")
+version = 1
+amplitude = 40.0
+base_wavelength = 3000.0
+octaves = 3
+persistence = 0.25
+lacunarity = 2.0
+road_flatten_width = 500.0
