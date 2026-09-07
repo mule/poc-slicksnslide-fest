@@ -11,11 +11,16 @@ what the drive and the captures actually measured.
 
 ```gdscript
 class_name HeightQuery
-func sample_at(world_position: Vector2) -> HeightSample   # { ground_height, gradient }
+func sample_at(world_position: Vector2) -> HeightSample   # { ground_height, gradient, on_feature }
 ```
 
 The base class answers zero height and a zero gradient everywhere, so a car with no height source
-behaves exactly as it did before the channel existed. `TrackHeightMap` is the production
+behaves exactly as it did before the channel existed. `on_feature` (#48) says whether the position
+lies inside a placed feature — anywhere on a ramp or its flank — as opposed to bare ground however
+high or steep. It exists for one consumer, the car's safe-pose rule, which needs "on a ramp" and can
+no longer read that off the total height. It is a boolean rather than the feature's height on
+purpose: the consumer needs membership, and a height would invite "raised means feature", which a
+dip carved into the road would falsify. `TrackHeightMap` is the production
 implementation: it is constructed from a `TrackDefinition` and answers the terrain field built
 from that definition's `terrain_seed` plus that definition's `jump_ramps`, summed (#47). A
 definition without a terrain seed, such as a hand-built fixture, gets a flat base.
@@ -183,9 +188,11 @@ least `air_time_notice_seconds` (0.5 s) also leaves an air-time notice the sessi
 **Ground-only rules.** The safety behaviours are deliberately blind to the air:
 
 - `_update_safe_pose_checkpoint()` refuses to record a safe pose while `_airborne`, while the
-  ground under the car is above zero (that is, anywhere on a ramp), during the landing recovery
-  window, off dirt, above the slip limit, or while touching anything. A reset therefore never puts
-  the car back onto a ramp face or into mid-air.
+  ground under the car is part of a placed feature (`on_feature`: anywhere on a ramp or its
+  flank), during the landing recovery window, off dirt, above the slip limit, or while touching
+  anything. A reset therefore never puts the car back onto a ramp face or into mid-air. Until #48
+  the gate read the total height (`_ground_height > 0`), which meant the same thing while ramps
+  were the only raised ground; see "Slopes" below for why that had to change.
 - `_update_auto_reset()` does not run at all while `_airborne`, so a long jump over off-track
   ground can never be mistaken for a car that is stuck or lost. The same lost condition fires
   normally once the car has landed.
@@ -276,6 +283,96 @@ road-tuning commit. `tests/jump_ramp_placement_test.gd` pins the road fingerprin
 baseline, so a road-tuning change is caught there first; treat that failure as the signal that the
 recorded height fingerprints need regenerating too.
 
+## Slopes
+
+#37 handled gradients through one line, `longitudinal_acceleration -= gravity * gradient.dot(forward)`,
+and only ever exercised it on a 12 m ramp face. #48 measured what that line does on the whole
+terrain field, and made the one design decision the field forced. `tests/vehicle_terrain_test.gd`
+holds every number below as an assertion.
+
+**The safe-pose gate.** The pre-terrain gate refused a pose wherever `_ground_height > 0`. That
+was "not on a ramp" while ramps were the only raised ground; on a terrain field it is a different
+rule entirely. Over seeds 0–19 the road sits above zero for between 24.9 % and 100 % of its length
+(seed 13: all of it), and the gate zeroes its half-second timer on every refused tick, so on the
+three seeds the suite drives it captured 58 %, 45 % and 34 % of the poses the rest of its own
+conditions allow — and it captured a pose *on a ramp* on two of them, because a wedge summed onto
+ground below zero reads as "not raised". Two replacements were weighed:
+
+- *A flatness test* — capture only where the gradient is below some limit. Rejected. No limit
+  separates ramp from terrain: a ramp face is a constant 0.06 plus whatever the terrain under it
+  contributes (−0.049 to +0.049 across the roads surveyed), so any threshold either admits ramp faces
+  where the terrain cancels the wedge's slope or refuses terrain that is provably driveable. And
+  flatness is not what a safe pose is for: the car can drive away from any slope the catalog allows
+  (the stall margin below is 12.7×), and `low_speed_stabilization` (50 px/s²) exceeds gravity on the
+  steepest possible slope (15.2 px/s²), so a car reset onto a slope sits still.
+- *"Not on a ramp"* — the original intent, read from the feature's own contribution rather than the
+  total. **Chosen.** The height sample now carries `on_feature`, the map sets it on every ramp hit
+  (flank included), the scripted test provider reports its hump, plateau and wall as features, and
+  the gate reads `_on_feature`. On flat fixtures the two conditions are identical,
+  and the three flat regression suites report the same 53, 12 and 44 assertion lines to the byte.
+
+The rate is asserted, not the existence of a pose. During each lap the suite rebuilds the gate's
+own eligibility from the car's public state (grounded, no recovery window, on dirt, under the slip
+limit, not inside a ramp's footprint) and counts one expected capture per 30 consecutive eligible
+ticks; the observed captures must reach 90 % of that and must include poses on ground above zero.
+With the new gate the count matches exactly on every lap driven (128 of 128, 157 of 157, 160 of
+160, with 54, 84 and 102 of them above zero); with the old gate reverted in code the same drives
+report 74, 71 and 54 and the suite exits 1.
+
+**Uphill.** The relationship is `gravity * gradient` against `engine_force / mass_kg`. From rest,
+where drag is zero, the car stalls only when `g · s > engine / mass`, i.e. `s > 193.18 / 122.625 =
+1.575` (a 57.6° slope). The catalog bounds each gradient component at 0.0875, so the directional
+slope along any heading is under `√2 · 0.0875 = 0.1237`, a 12.7× margin. The twenty seeds' roads
+reach 0.0488 (the steepest climb along a road is 0.0486, seed 3). Balancing engine, slope and drag,
+the terminal speed on level ground is 600.0 px/s and on the steepest slope the catalog allows
+573.3 px/s: the worst climb costs 4.4 % of top speed. Driven: full throttle from rest on seed 3's
+steepest climb reaches 421.5 px/s in three seconds, above the 403.9 px/s the slope bound allows and
+below the 432.4 px/s of the same run on level ground, with speed and progress monotone on every
+tick.
+
+**Downhill.** Coasting, drag balances gravity at 127.6 px/s on the steepest slope the catalog
+allows; on seed 18's steepest road descent (−0.0465) a car released at 30 px/s reaches 36 px/s after
+two seconds and peaks at 40.7. Under full throttle the drag balance on the steepest possible slope
+is 625.6 px/s, **under the 640 px/s clamp**: on shipped terrain drag is what holds every descent
+and the clamp is a backstop with 2.3 % of margin. Driven, a full-throttle descent from 550 px/s
+reaches 579.7 px/s against 576.8 on level ground. So a terrain drive cannot show the clamp working;
+the suite proves it on a synthetic 0.5 plane, six times the catalog's bound, where engine plus
+gravity would balance drag at 698.5 px/s and the car instead sits at 640.000 for the whole last
+second. Under `--break-speed-clamp` (clamp raised to 2000) the same drive peaks at 683.2.
+
+**No spurious lift-off, in the integrator.** #49 asserts `|h″| < g / max_safe_speed²` in the field's
+arithmetic. The suite pins a production car at 640 px/s and drives 24 straight lines through three
+seeds' play areas on bare terrain (ramps stripped: a ramp launches by design, and #47 sanctioned the
+flank hop), 36 709 ticks in all, never airborne, riding the terrain within 0.003 px, across
+curvature up to 1.10e-4 per px (58 % of the bound, 37 % of the lift-off threshold). Under
+`--break-terrain-lift-off` (amplitude ×4, curvature 4.38e-4) the same drive is airborne on 44 ticks.
+
+**A lap.** A pure-pursuit driver with a curvature governor drives seeds 0, 4 and 9 on terrain and
+on the flat base with the same ramps:
+
+| Seed | Terrain lap | Flat lap | Top speed (terrain) | Top uphill | Top downhill | Slowest |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | 69.0 s | 69.1 s | 560.8 px/s | 560.8 | 515.0 | 182.5 |
+| 4 | 84.5 s | 84.5 s | 582.5 px/s | 576.0 | 561.0 | 182.3 |
+| 9 | 86.2 s | 86.2 s | 570.3 px/s | 557.9 | 550.9 | 181.6 |
+
+No lap fired an automatic reset, none held the car under the stuck speed for a second, and terrain
+moved no lap time by more than three ticks. After the terrain lap a manual reset lands the car on
+its last pose at the terrain's own height (−0.4 to −15.7 px on the poses hit), on dirt, off any
+ramp, and it drives away under throttle; a car stranded off-track beside seed 3's steepest climb is
+reset by the automatic rule onto the climb, sits still on it for two seconds, then climbs away.
+
+**Two things a fixture must know.** `_integrate_forces` runs at the start of an iteration on the
+transform the previous step produced, so (1) a car *seeded* with a velocity is moved one step by
+the server before its first tick sees it; seated where it was placed, its ride height is stale by
+one tick of vertical travel, and on a descent steeper than the lift-off tolerance per tick (0.43 px
+at 550 px/s on seed 18) it lifts off and pays a landing. The suite seats a seeded car on the ground
+one step along its velocity. (2) After a tick, `get_height()` is the height the car computed for
+the ground *one step ahead*, so it must be compared with the ground at `position + velocity * step`;
+compared with the ground under the car it reads one tick of vertical travel off, which is what the
+0.17 px "gap" in #47's crossing figures is. Neither affects the game, whose car only ever gains
+velocity by driving.
+
 ## Limitations
 
 - **Crossing a ramp's lateral edge passes the car under the ramp — closed in #47.** The height map
@@ -316,7 +413,12 @@ godot --headless --path . --script res://tests/airborne_obstacle_level_test.gd
 godot --headless --path . --script res://tests/jump_ramp_visuals_test.gd
 godot --headless --path . --script res://tests/issue_5_main_session_test.gd
 godot --headless --path . --script res://tests/track_collision_physics_test.gd
+godot --headless --path . --script res://tests/vehicle_terrain_test.gd
 ```
+
+`tests/vehicle_terrain_test.gd` steps physics at 600 ticks a second under a time scale of 10, which
+keeps the production 1 / 60 s step (it pins that against the integrator's model to 0.05 px/s) and
+runs its 70 000-odd ticks in about two minutes.
 
 `tests/vehicle_height_channel_test.gd` runs its analytic-arc case twice, once on the suite's own
 0.12 hump and once on the catalog's shipped 0.06 slope, and every assertion in that case is prefixed
@@ -329,7 +431,7 @@ The graphical evidence capture is not headless:
 godot --path . --script res://tests/capture_height_channel_evidence.gd
 ```
 
-Nine mutation flags exist to prove those suites are load-bearing. Each must exit non-zero, and each
+Eleven mutation flags exist to prove those suites are load-bearing. Each must exit non-zero, and each
 must do so on its own assertion rather than on a load error — check the first `FAIL:` line, not
 just the exit code:
 
@@ -343,6 +445,8 @@ godot --headless --path . --script res://tests/airborne_obstacle_level_test.gd -
 godot --headless --path . --script res://tests/track_collision_physics_test.gd -- --break-collision
 godot --headless --path . --script res://tests/terrain_height_map_test.gd -- --break-side-wall
 godot --headless --path . --script res://tests/terrain_height_map_test.gd -- --break-flank-curvature
+godot --headless --path . --script res://tests/vehicle_terrain_test.gd -- --break-terrain-lift-off
+godot --headless --path . --script res://tests/vehicle_terrain_test.gd -- --break-speed-clamp
 ```
 
 | Flag | Breaks | First failing assertion |
@@ -356,6 +460,12 @@ godot --headless --path . --script res://tests/terrain_height_map_test.gd -- --b
 | `--break-collision` | removes the containment boundary | `seed 0 probe driven right stays inside the play area` |
 | `--break-side-wall` | zeroes the fixture ramp's flank width, restoring the hard lateral cut | `on a flat base: the car's ride height tracks the map under it on every tick (worst gap 9.0000 px)` |
 | `--break-flank-curvature` | quarters the flank width, so its curvature breaks the crossing-speed bound | `terrain plus flank curvature (0.015289650) stays under the lift-off curvature at the off-track terminal speed (0.004883371)` |
+| `--break-terrain-lift-off` | quadruples the terrain amplitude under the lift-off drive | `bare terrain never lifts the car off at max_safe_speed in the real integrator (44 airborne of 36709 ticks over 24 lines)` |
+| `--break-speed-clamp` | raises max_safe_speed to 2000 under the clamp drive | `on the synthetic descent the car never exceeds the shipped max_safe_speed (peak 683.215 of 640.0 px/s)` |
+
+The safe-pose capture-rate assertion has no flag: it is demonstrated by reverting the gate in
+`vehicle/top_down_car.gd` to `_ground_height > 0.0`, which fails the rate on all three driven seeds
+(74 of 128, 71 of 157, 54 of 160) and records a pose on a ramp on two of them.
 
 ## Tuning notes
 
