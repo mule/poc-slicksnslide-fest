@@ -25,14 +25,22 @@ extends Node2D
 ## sample, a further 1,100 to 1,500 samples, placed by distance along the line because that is
 ## how Line2D reads a gradient.
 ##
+## The same function colours the road ribbons, the boundary lines and the ramp wedges, so nothing
+## the track draws can disagree with the ground it sits on. Every base colour it multiplies is
+## chosen so that base times peak_brightness() stays inside the displayable range: the boundary
+## line's cream is the one exception, and a 6 px line saturating toward white at plus the total
+## amplitude on a slope at the bound facing the light is accepted and documented.
+##
 ## Shadows lengthen with the ground under them. The car's Shadow already fades with the car's
 ## height above the ground; an off-track solid stands on the ground, so its shadow is stretched
 ## and thrown further along SHADOW_DIRECTION by shadow_length_factor of the terrain height at its
 ## foot. Both rates are 0.15 a metre. This class owns the rule so every consumer stretches alike.
 
 ## The session's background: level ground is drawn in it so the play-area edge, where the grid
-## stops and the background shows, is not a seam.
-const GROUND_COLOR := Color(0.12549, 0.227451, 0.117647)
+## stops and the background shows, is not a seam. Lightened from the pre-terrain background
+## (#203a1e) in #50's fix round: the shading is multiplicative, so on a dark base a 45% swing was
+## a small absolute step and the off-track ground read as nearly flat beside the dirt ribbon.
+const GROUND_COLOR := Color(0.168627, 0.294118, 0.160784)
 ## Unit vector toward the light, in the ground plane: the screen's top-left.
 const LIGHT_DIRECTION := Vector2(-0.7071067811865476, -0.7071067811865476)
 ## Unit vector a shadow is thrown along: directly away from the light.
@@ -149,6 +157,11 @@ func light_term(gradient: Vector2) -> float:
 
 func ground_sample_count() -> int:
 	return _ground_sample_count
+
+
+## The largest multiplier shade() can apply before clamping: full height and full light together.
+static func peak_brightness() -> float:
+	return 1.0 + HEIGHT_CONTRAST + SLOPE_CONTRAST
 
 
 ## Vertices across the area: one at the origin, one every cell, and one on the far edge.

@@ -273,17 +273,37 @@ Two cues, one colour function, `TerrainShading.shade(base, sample)`:
   steepest saturates it. The gradient is the field's exact derivative, so the cue costs no second
   sample and no finite difference.
 
+The same function colours everything the track draws, so nothing can contradict the ground it
+sits on: the two road ribbons, the two boundary lines, and the ramp wedges. The first round left
+the wedges flat, and a ramp in a hollow drew as the brightest thing on screen — the exact failure
+this task exists to prevent; a wedge is now a six-point polygon (a foot, the crest and a foot on
+each side) coloured from the map 1 px inside each corner, so a ramp in a hollow is as dark as the
+hollow, its crest is 1.077× its feet from its own 9 px, and its two faces take the light from
+opposite sides from the wedge's own 0.06 slope (±0.17). Every fill colour is chosen so that base ×
+1.8 (full height and full light) stays inside the displayable range before the clamp — the wedge
+colour was darkened from `#9c6a33` to `#866040` for it; the boundary line's cream (`#c7a15f`,
+peak 1.405) is the one base that can saturate, and a 6 px line going toward white at the extreme
+is accepted.
+
 The ground is one `Polygon2D`: a vertex every 250 px over the play area, coloured from the sample
 at it, with the GPU interpolating between vertices. 250 px is the fingerprint and object-placement
 pitch; the finest octave the shipped catalog has is 750 px wide and 2.5 px tall, so three vertices
 per finest cell resolve everything the eye can see. Seed 0's 12 809 × 13 326 px play area is
 53 × 55 = 2 915 vertices; the largest of seeds 0–19 (seed 9, 16 962 × 14 684 px) is 69 × 60 = 4 140.
 At 4–5 µs a query that is 15–20 ms of sampling once per track build, measured at 7 µs a vertex
-all-in (colour arithmetic and array writes included), 20.6 ms for seed 0. The road ribbons stay
+all-in (colour arithmetic and array writes included), 20.6 ms for seed 0. With the four line
+gradients (about 4 × 1 100 samples, 22 ms) and six samples a wedge, a seed 0 build spends about
+45 ms on shading in all, once. The road ribbons stay
 `Line2D` nodes and take a `Gradient` with one stop per centreline sample — 1 102 to 1 496 more
 samples, 5–7 ms — placed by cumulative distance along the line, because that is how `Line2D`
-reads a gradient. Level ground is drawn in the session's background colour, so the play-area edge
-where the grid stops is not a seam. Rebuilding frees the previous grid; a seed restart frees the
+reads a gradient; the boundary lines take one the same way from their own points, another
+2 × 1 100–1 500 samples. Level ground is drawn in the session's background colour, so the play-area
+edge where the grid stops is not a seam. That colour was lightened in the fix round from `#203a1e`
+to `#2b4b29` (both the ground base and the background `ColorRect`): the shading is multiplicative,
+so on the darker base a 45% swing was a small absolute step and the off-track ground read as nearly
+flat next to the dirt; the suite now asserts an absolute luminance spread of at least 0.15 across
+the seed 0 grid (0.124 to 0.365 as shipped) rather than a relative one that a near-black base would
+pass. Rebuilding frees the previous grid; a seed restart frees the
 whole runtime with it.
 
 The one artefact of the approach is the mesh itself: `Polygon2D` splits each cell into two
@@ -301,7 +321,9 @@ along the light's axis and thrown further by `1 + 0.15 * metres` of terrain heig
 (the car's own 0.15 per metre), clamped to 0.5–2.0: a tree on a 40 px rise casts a shadow 1.48
 times as long as the same tree on level ground. The factory had placed every shadow in the
 object's local frame, so a rotated tree's shadow fell wherever the tree happened to turn; the
-shadows now fall away from the same light the ground is lit by, whatever the object's rotation.
+shadows now fall away from the same light the ground is lit by, whatever the object's rotation —
+on a track with no height query too, where the length stays the factory's but the direction is
+still the world's.
 
 ## Determinism
 

@@ -60,8 +60,9 @@ func height_query() -> HeightQuery:
 	return _height_query
 
 
-## The ground grid goes under everything else the track draws; the ribbons above it take their
-## gradients from the same shading so the road and the ground it crosses agree on every hill.
+## The ground grid goes under everything else the track draws; the ribbons, the boundary lines and
+## the ramp wedges above it take their colours from the same shading and the same map, so the road,
+## its edges, its ramps and the ground they cross agree on every hill.
 func _build_terrain_shading() -> void:
 	_shading = TerrainShading.new()
 	_shading.name = "TerrainShading"
@@ -75,7 +76,7 @@ func _build_jump_ramps() -> void:
 	visuals.name = "JumpRamps"
 	visuals.z_index = -1
 	add_child(visuals)
-	visuals.build(definition.jump_ramps)
+	visuals.build(definition.jump_ramps, _shading, _height_query)
 
 
 func _build_line(line_name: String, width: float, color: Color, z_layer: int) -> void:
@@ -99,6 +100,9 @@ func _build_boundary_line(line_name: String, points: PackedVector2Array) -> void
 	line.points = points
 	line.width = 6.0
 	line.default_color = EDGE_COLOR
+	# Shaded like the ribbons it edges, or it would stay a constant cream line and read as a
+	# bright rim wherever the dirt beside it is dark.
+	line.gradient = _shading.ribbon_gradient(points, EDGE_COLOR, _height_query)
 	line.antialiased = true
 	line.z_index = -1
 	add_child(line)

@@ -11,7 +11,9 @@ func _init() -> void:
 
 
 ## With a height query, each solid's shadow is stretched and thrown further for the ground height
-## at its foot; without one every shadow keeps its factory length, as on the flat fixtures.
+## at its foot; without one every shadow keeps its factory length, as on the flat fixtures. The
+## direction is rewritten on both paths: every shadow falls along the world shadow direction,
+## query or no query, so a flat fixture and a terrain track light their solids from the same side.
 func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog, height_query: HeightQuery = null) -> void:
 	_clear_children()
 	var decorative := Node2D.new()

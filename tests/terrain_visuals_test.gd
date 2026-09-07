@@ -16,10 +16,19 @@ extends SceneTree
 const MAIN_SCENE_PATH := "res://session/main.tscn"
 const TERRAIN_CATALOG_PATH := "res://data/default_terrain_catalog.tres"
 const OBJECT_CATALOG_PATH := "res://data/default_offtrack_object_catalog.tres"
-## Seeds 0 and 4 both place ramps, so the crest checks below are not vacuous.
+## Seeds 0 and 10 both place ramps, so the crest checks below are not vacuous, and seed 10's spawn
+## sits 14 px up its terrain, so the spawn agreement is not agreement near zero.
 const GRID_SEED := 0
-const SESSION_SEED := 4
+const SESSION_SEED := 10
 const RESTART_SEED := 5
+## The spawn agreement is only meaningful on ground that is clearly not flat: a tenth of the
+## catalog's total amplitude, 5.25 px.
+const SPAWN_HEIGHT_FLOOR := 5.0
+## Smallest luminance spread, absolute, the seed 0 ground grid must show: a relative spread would
+## pass on a near-black base that a player could not read.
+const GROUND_LUMINANCE_SPREAD := 0.15
+## The production ramp crest height, from data/default_height_channel_catalog.tres.
+const WEDGE_CREST := 9.0
 ## The session's background ColorRect. The ground grid must be this colour at zero height, so the
 ## play-area edge, where the grid stops and the background shows, is not a visible seam.
 const BACKGROUND_NODE := "BackgroundLayer/Background"
@@ -47,6 +56,7 @@ func _run() -> void:
 	_check(_verify_light_flips_across_a_crest(), "the crest verification ran to completion")
 	_check(_verify_ground_grid(), "the ground grid verification ran to completion")
 	_check(_verify_ribbon_gradients(), "the ribbon gradient verification ran to completion")
+	_check(_verify_wedges_shade_from_the_map(), "the wedge shading verification ran to completion")
 	_check(await _verify_shading_agrees_with_the_car(), "the car agreement verification ran to completion")
 	_check(_verify_object_shadows(), "the object shadow verification ran to completion")
 	_check(await _verify_rebuild_frees_shading(), "the rebuild verification ran to completion")
@@ -99,7 +109,17 @@ func _verify_shade_terms() -> bool:
 	_check(is_equal_approx(_brightness(shading.shade(base, _sample(0.0, away)), base), 1.0 + TerrainShading.SLOPE_CONTRAST), "full light contrast is SLOPE_CONTRAST")
 	var both := shading.shade(base, _sample(reference, away))
 	_check(is_equal_approx(_brightness(both, base), 1.0 + TerrainShading.HEIGHT_CONTRAST + TerrainShading.SLOPE_CONTRAST), "height and light add")
-	_check(both.r <= 1.0 and both.g <= 1.0 and both.b <= 1.0, "the brightest shade of the grass colour stays inside the displayable range")
+	# shade() clamps, so a clamped value against the clamp bound proves nothing; the intent is that no
+	# fill colour blows out, so the PRE-clamp product is asserted for every fill the track draws.
+	var peak: float = TerrainShading.peak_brightness()
+	_check(is_equal_approx(peak, 1.0 + TerrainShading.HEIGHT_CONTRAST + TerrainShading.SLOPE_CONTRAST) and is_equal_approx(peak, 1.8), "the peak multiplier is full height plus full light, 1.8")
+	for fill in [["ground", TerrainShading.GROUND_COLOR], ["grass", TrackRuntime.GRASS_COLOR], ["dirt", TrackRuntime.DIRT_COLOR], ["wedge", JumpRampVisuals.WEDGE_COLOR]]:
+		var color: Color = fill[1]
+		var brightest_channel := maxf(color.r, maxf(color.g, color.b)) * peak
+		_check(brightest_channel <= 1.0, "%s at full height and full light stays inside the displayable range before the clamp (%.3f)" % [fill[0], brightest_channel])
+	var edge_peak := maxf(TrackRuntime.EDGE_COLOR.r, maxf(TrackRuntime.EDGE_COLOR.g, TrackRuntime.EDGE_COLOR.b)) * peak
+	print("edge_color_pre_clamp_peak=%.3f (documented: the 6 px boundary line may saturate at the extreme)" % edge_peak)
+	_check(edge_peak > 1.0, "the boundary cream is the one base that can saturate, which the docs state; if it stops being so, drop the exception from them")
 	_check(TerrainShading.HEIGHT_CONTRAST > 0.0 and TerrainShading.SLOPE_CONTRAST > 0.0, "both contrasts are positive, so the checks above test a direction and not a sign convention")
 	shading.free()
 	return true
@@ -161,8 +181,6 @@ func _verify_ground_grid() -> bool:
 	var rows := _walked_count(area.position.y, area.end.y, cell)
 	var vertices := ground.polygon
 	_check(vertices.size() == columns * rows, "the grid has %d x %d vertices for a %.0f x %.0f px play area (%d)" % [columns, rows, area.size.x, area.size.y, vertices.size()])
-	_check(shading.ground_sample_count() == vertices.size(), "every vertex was sampled once (%d samples)" % shading.ground_sample_count())
-	_check(ground.vertex_colors.size() == vertices.size(), "every vertex carries its own colour")
 	_check(ground.polygons.size() == (columns - 1) * (rows - 1), "one quad per cell (%d)" % ground.polygons.size())
 	var min_corner := Vector2(INF, INF)
 	var max_corner := Vector2(-INF, -INF)
@@ -206,8 +224,21 @@ func _verify_ground_grid() -> bool:
 	var worst := 0.0
 	var brightest := -INF
 	var darkest := INF
+	var lightest_luminance := -INF
+	var darkest_luminance := INF
+	var on_wedge := 0
+	var lit := 0
+	var shaded := 0
 	for index in range(vertices.size()):
-		var expected := shading.shade(TerrainShading.GROUND_COLOR, car_map.sample_at(vertices[index]))
+		var sample := car_map.sample_at(vertices[index])
+		if sample.on_feature:
+			on_wedge += 1
+		var light := shading.light_term(sample.gradient)
+		if light > 0.1:
+			lit += 1
+		elif light < -0.1:
+			shaded += 1
+		var expected := shading.shade(TerrainShading.GROUND_COLOR, sample)
 		var actual := ground.vertex_colors[index]
 		var error := maxf(maxf(absf(actual.r - expected.r), absf(actual.g - expected.g)), maxf(absf(actual.b - expected.b), absf(actual.a - expected.a)))
 		worst = maxf(worst, error)
@@ -216,9 +247,17 @@ func _verify_ground_grid() -> bool:
 		var brightness := _brightness(actual, TerrainShading.GROUND_COLOR)
 		brightest = maxf(brightest, brightness)
 		darkest = minf(darkest, brightness)
-	print("ground_grid seed=%d vertices=%d mismatches=%d worst_channel_error=%.9f brightness=%.3f..%.3f" % [GRID_SEED, vertices.size(), mismatches, worst, darkest, brightest])
+		lightest_luminance = maxf(lightest_luminance, actual.get_luminance())
+		darkest_luminance = minf(darkest_luminance, actual.get_luminance())
+	print("ground_grid seed=%d vertices=%d mismatches=%d worst_channel_error=%.9f brightness=%.3f..%.3f luminance=%.3f..%.3f on_wedge=%d lit=%d shaded=%d" % [GRID_SEED, vertices.size(), mismatches, worst, darkest, brightest, darkest_luminance, lightest_luminance, on_wedge, lit, shaded])
 	_check(mismatches == 0, "every ground vertex is shaded from the car's height map at that vertex")
+	# Without this the agreement above would pass unchanged against a terrain-only reconstruction if
+	# no vertex happened to land on a wedge; 12 do on seed 0.
+	_check(on_wedge > 0, "%d ground vertices sit on a ramp wedge, so the agreement discriminates the summed map from bare terrain" % on_wedge)
 	_check(brightest - darkest > 0.3, "the ground actually varies in brightness across the play area (%.3f to %.3f)" % [darkest, brightest])
+	# Absolute, not relative: a relative spread passes on a near-black base a player cannot read.
+	_check(lightest_luminance - darkest_luminance >= GROUND_LUMINANCE_SPREAD, "the ground spans at least %.2f of absolute luminance (%.3f to %.3f)" % [GROUND_LUMINANCE_SPREAD, darkest_luminance, lightest_luminance])
+	_check(lit > 0 and shaded > 0, "on real terrain the light term takes both signs across the grid (%d lit, %d shaded vertices)" % [lit, shaded])
 	var background_scene := load(MAIN_SCENE_PATH) as PackedScene
 	var session := background_scene.instantiate()
 	var background := session.get_node_or_null(BACKGROUND_NODE) as ColorRect
@@ -257,6 +296,7 @@ func _verify_ribbon_gradients() -> bool:
 		_check(base.is_equal_approx(TrackRuntime.DIRT_COLOR if ribbon_name == "Dirt" else TrackRuntime.GRASS_COLOR), "%s keeps its base colour as the gradient's reference" % ribbon_name)
 		var offset_errors := 0
 		var mismatches := 0
+		var on_wedge := 0
 		var brightest := -INF
 		var darkest := INF
 		for index in range(points.size()):
@@ -264,18 +304,174 @@ func _verify_ribbon_gradients() -> bool:
 			# must be the cumulative centreline distance and not the sample index.
 			if absf(gradient.get_offset(index) - offsets[index]) > 1e-5:
 				offset_errors += 1
-			var expected := shading.shade(base, car_map.sample_at(points[index]))
+			var sample := car_map.sample_at(points[index])
+			if sample.on_feature:
+				on_wedge += 1
+			var expected := shading.shade(base, sample)
 			var actual := gradient.get_color(index)
 			if not actual.is_equal_approx(expected):
 				mismatches += 1
 			var brightness := _brightness(actual, base)
 			brightest = maxf(brightest, brightness)
 			darkest = minf(darkest, brightness)
-		print("ribbon %s stops=%d offset_errors=%d mismatches=%d brightness=%.3f..%.3f" % [ribbon_name, points.size(), offset_errors, mismatches, darkest, brightest])
+		print("ribbon %s stops=%d offset_errors=%d mismatches=%d on_wedge=%d brightness=%.3f..%.3f" % [ribbon_name, points.size(), offset_errors, mismatches, on_wedge, darkest, brightest])
 		_check(offset_errors == 0, "%s stops sit at the cumulative centreline distance" % ribbon_name)
 		_check(mismatches == 0, "%s is shaded from the car's height map at every centreline sample" % ribbon_name)
+		_check(on_wedge > 0, "%d %s stops sit on a ramp wedge, so the agreement discriminates the summed map from bare terrain" % [on_wedge, ribbon_name])
 		_check(brightest - darkest > 0.2, "%s varies in brightness around the lap (%.3f to %.3f)" % [ribbon_name, darkest, brightest])
+	# The boundary lines are shaded too, from their own points, or they would stay a constant cream
+	# rim over dirt that darkens around them.
+	for edge in [["LeftEdge", definition.left_boundary], ["RightEdge", definition.right_boundary]]:
+		var edge_name: String = edge[0]
+		var edge_points: PackedVector2Array = edge[1]
+		var line := runtime.get_node_or_null(edge_name) as Line2D
+		_check(line != null and line.gradient != null and line.gradient.get_point_count() == edge_points.size(), "%s carries one gradient stop per boundary point (%d)" % [edge_name, edge_points.size()])
+		if line == null or line.gradient == null or line.gradient.get_point_count() != edge_points.size():
+			continue
+		var mismatches := 0
+		var brightest := -INF
+		var darkest := INF
+		for index in range(edge_points.size()):
+			var expected := shading.shade(TrackRuntime.EDGE_COLOR, car_map.sample_at(edge_points[index]))
+			var actual: Color = line.gradient.get_color(index)
+			if not actual.is_equal_approx(expected):
+				mismatches += 1
+			brightest = maxf(brightest, _brightness(actual, TrackRuntime.EDGE_COLOR))
+			darkest = minf(darkest, _brightness(actual, TrackRuntime.EDGE_COLOR))
+		_check(mismatches == 0, "%s is shaded from the car's height map at every boundary point" % edge_name)
+		_check(brightest - darkest > 0.2, "%s varies in brightness around the lap (%.3f to %.3f)" % [edge_name, darkest, brightest])
 	runtime.free()
+	return true
+
+
+## Adds a constant to another query's height: the fixture ramp placed in a hollow or on a rise.
+class ShiftedMap:
+	extends HeightQuery
+
+	var inner: HeightQuery
+	var shift := 0.0
+
+
+	func sample_at(world_position: Vector2) -> HeightSample:
+		var sample := inner.sample_at(world_position)
+		return HeightSample.new(sample.ground_height + shift, sample.gradient, sample.on_feature)
+
+
+func _fixture_ramp(rotation: float) -> JumpRampPlacement:
+	var ramp := JumpRampPlacement.new()
+	ramp.stable_id = "h1:0:1"
+	ramp.transform = Transform2D(rotation, Vector2.ZERO)
+	ramp.half_length = 150.0
+	ramp.crest_height = WEDGE_CREST
+	ramp.width = 240.0
+	return ramp
+
+
+func _wedge_brightnesses(visuals: JumpRampVisuals) -> Array[float]:
+	var wedge := visuals.get_node("Ramp_h1_0_1/Wedge") as Polygon2D
+	var values: Array[float] = []
+	for color in wedge.vertex_colors:
+		values.append(_brightness(color, JumpRampVisuals.WEDGE_COLOR))
+	return values
+
+
+## The wedge is the one thing the first round left flat over shaded ground: a ramp in a hollow drew
+## as the brightest thing on screen. It now takes its colour from the same map at six points.
+func _verify_wedges_shade_from_the_map() -> bool:
+	var shading := _shading()
+	var definition := TrackDefinition.new()
+	definition.jump_ramps = [_fixture_ramp(0.0)]
+	var flat_base := TrackHeightMap.new(definition)
+	_check(flat_base.ramp_count() == 1 and not flat_base.has_terrain(), "the fixture map is one wedge on a flat base, so every difference below is the wedge's or the shift's")
+	var shifted := ShiftedMap.new()
+	shifted.inner = flat_base
+	var visuals := JumpRampVisuals.new()
+	root.add_child(visuals)
+	# Every sampled wedge point must be inside the ramp, or a foot would read bare ground.
+	var inset_ok := true
+	for corner in [Vector2(-150.0, -120.0), Vector2(0.0, -120.0), Vector2(150.0, -120.0), Vector2(150.0, 120.0), Vector2(0.0, 120.0), Vector2(-150.0, 120.0)]:
+		if not flat_base.sample_at(JumpRampVisuals.sample_point(corner)).on_feature:
+			inset_ok = false
+	_check(inset_ok, "all six wedge sample points fall inside the ramp")
+	shifted.shift = -40.0
+	visuals.build(definition.jump_ramps, shading, shifted)
+	var hollow := _wedge_brightnesses(visuals)
+	shifted.shift = 40.0
+	visuals.build(definition.jump_ramps, shading, shifted)
+	var rise := _wedge_brightnesses(visuals)
+	_check(hollow.size() == 6 and rise.size() == 6, "a shaded wedge carries six vertex colours")
+	if hollow.size() != 6 or rise.size() != 6:
+		visuals.free()
+		return false
+	var hollow_mean := 0.0
+	var rise_mean := 0.0
+	var every_vertex_darker := true
+	for index in 6:
+		hollow_mean += hollow[index] / 6.0
+		rise_mean += rise[index] / 6.0
+		if hollow[index] >= rise[index]:
+			every_vertex_darker = false
+	print("wedge hollow=%s rise=%s" % [str(hollow), str(rise)])
+	_check(hollow_mean < rise_mean, "the same wedge is drawn darker in a 40 px hollow (%.3f) than on a 40 px rise (%.3f)" % [hollow_mean, rise_mean])
+	_check(every_vertex_darker, "every one of its six vertices is darker in the hollow than on the rise")
+	_check(hollow_mean < 1.0 and rise_mean > 1.0, "the hollow wedge is darker than the flat wedge colour and the rise wedge brighter")
+	_check(is_equal_approx(rise_mean - hollow_mean, 2.0 * TerrainShading.HEIGHT_CONTRAST * 40.0 / 52.5), "the difference is exactly the height term of 80 px, %.3f" % (rise_mean - hollow_mean))
+	# On a flat base: the two faces take the light from opposite sides, and the crest is a shade
+	# brighter than the mean of the feet because the wedge's own height is in the sample.
+	shifted.shift = 0.0
+	visuals.build(definition.jump_ramps, shading, shifted)
+	var level := _wedge_brightnesses(visuals)
+	var lit_face := (level[0] + level[5]) * 0.5
+	var shaded_face := (level[2] + level[3]) * 0.5
+	var crest := (level[1] + level[4]) * 0.5
+	# The feet are sampled SAMPLE_INSET px inside the ramp, so each carries that sliver of wedge
+	# height (0.06 px, a 0.0005 brightness) plus the face's light term, worked here from the
+	# constants: slope 9 / 150 along +x against a light at 45 degrees, over the slope bound.
+	var catalog := load(TERRAIN_CATALOG_PATH) as TerrainCatalog
+	var foot_height_term: float = TerrainShading.HEIGHT_CONTRAST * (WEDGE_CREST * JumpRampVisuals.SAMPLE_INSET / 150.0) / catalog.total_amplitude()
+	var foot_light_term: float = TerrainShading.SLOPE_CONTRAST * (WEDGE_CREST / 150.0 * 0.7071067811865476) / catalog.slope_bound()
+	_check(lit_face > 1.0 and shaded_face < 1.0, "the face rising toward +x, away from the top-left light, is lit (%.3f) and the far face shaded (%.3f)" % [lit_face, shaded_face])
+	_check(absf(lit_face - (1.0 + foot_height_term + foot_light_term)) < 1e-6 and absf(shaded_face - (1.0 + foot_height_term - foot_light_term)) < 1e-6, "the faces are lit by +-%.4f about the feet's %.4f, both from the constants" % [foot_light_term, 1.0 + foot_height_term])
+	_check(absf(foot_light_term - 0.1697) < 1e-3, "the wedge face light term is 0.170 on the shipped constants, a visible cue")
+	_check(crest > (lit_face + shaded_face) * 0.5, "the crest is brighter than the mean of the feet")
+	# Turned across the light the faces are unlit, so the crest's own height is all that differs.
+	definition.jump_ramps = [_fixture_ramp(-PI * 0.25)]
+	var across := TrackHeightMap.new(definition)
+	visuals.build(definition.jump_ramps, shading, across)
+	var across_values := _wedge_brightnesses(visuals)
+	var foot := 1.0 + foot_height_term
+	_check(absf(across_values[0] - foot) < 1e-6 and absf(across_values[2] - foot) < 1e-6 and absf(across_values[3] - foot) < 1e-6 and absf(across_values[5] - foot) < 1e-6, "across the light the four feet carry only the inset's sliver of height (%.4f), no light" % foot)
+	var expected_crest := 1.0 + TerrainShading.HEIGHT_CONTRAST * WEDGE_CREST / 52.5
+	_check(is_equal_approx(across_values[1], expected_crest) and is_equal_approx(across_values[4], expected_crest), "the crest is brighter by its own 9 px, a factor of %.4f" % expected_crest)
+	_check(absf(expected_crest - 1.0771) < 1e-3, "that factor is 1.077 from the shipped constants")
+	visuals.free()
+	# Production: every wedge on seed 0 is coloured from the car's map at the inset sample points.
+	var generated: TrackDefinition = TrackGenerator.new().generate(GRID_SEED)
+	var runtime := TrackRuntime.new(generated)
+	root.add_child(runtime)
+	var car_map := TrackHeightMap.new(generated)
+	var ramps := runtime.get_node("JumpRamps") as JumpRampVisuals
+	var wedges := 0
+	var mismatches := 0
+	var off_feature := 0
+	for holder in ramps.get_children():
+		var wedge := holder.get_node("Wedge") as Polygon2D
+		if wedge.vertex_colors.size() != 6:
+			mismatches += 1
+			continue
+		wedges += 1
+		for index in 6:
+			var world := (holder as Node2D).transform * JumpRampVisuals.sample_point(wedge.polygon[index])
+			var sample := car_map.sample_at(world)
+			if not sample.on_feature:
+				off_feature += 1
+			if not wedge.vertex_colors[index].is_equal_approx(runtime.get_node("TerrainShading").shade(JumpRampVisuals.WEDGE_COLOR, sample)):
+				mismatches += 1
+	_check(wedges == generated.jump_ramps.size() and wedges > 0, "every generated wedge on seed %d carries six vertex colours (%d)" % [GRID_SEED, wedges])
+	_check(mismatches == 0, "every generated wedge vertex is shaded from the car's height map at its sample point")
+	_check(off_feature == 0, "every generated wedge sample point is inside its ramp")
+	runtime.free()
+	shading.free()
 	return true
 
 
@@ -297,7 +493,7 @@ func _verify_shading_agrees_with_the_car() -> bool:
 	var runtime_map := runtime.height_query()
 	_check(runtime_map is TrackHeightMap and (runtime_map as TrackHeightMap).has_terrain(), "the runtime shades from a TrackHeightMap with terrain")
 	var spawn_shading := runtime_map.sample_at(car.global_position).ground_height
-	_check(spawn_shading != 0.0, "the spawn is not at height zero (%.3f px), so agreement there is not agreement on flat ground" % spawn_shading)
+	_check(absf(spawn_shading) > SPAWN_HEIGHT_FLOOR, "the spawn sits more than %.1f px from level (%.3f px), so agreement there is not agreement near flat ground" % [SPAWN_HEIGHT_FLOOR, spawn_shading])
 	_check(absf(car.get_height() - spawn_shading) < 1e-6, "at the spawn the car rides at %.4f px and the shading samples %.4f px" % [car.get_height(), spawn_shading])
 	# The vertex nearest the car is coloured from the same sample the car's own map gives there.
 	var car_map := TrackHeightMap.new(definition)
@@ -404,6 +600,7 @@ func _verify_object_shadows() -> bool:
 	var plain_shadow := visuals.get_node("SolidObjects/v1_0_1_0").get_child(0) as Polygon2D
 	_check(is_equal_approx(plain_shadow.position.length(), baseline), "without a height query every shadow keeps the factory's offset distance")
 	_check(is_equal_approx(_shadow_extent(plain_shadow, rotation, along), level_extent), "without a height query the shadow polygon keeps its length")
+	_check(plain_shadow.position.rotated(rotation).normalized().is_equal_approx(TerrainShading.SHADOW_DIRECTION), "without a height query the shadow is still thrown along the world shadow direction: the reorientation applies on both paths")
 	visuals.free()
 	return true
 
