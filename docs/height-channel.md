@@ -247,6 +247,84 @@ Ramps and airborne cars are drawn, not simulated, by `world/height/jump_ramp_vis
 - `z_index` becomes 1 while airborne, so a flying car draws over scenery it is passing.
 - Dust stops while airborne; a landing restarts the one-shot landing burst.
 
+### Elevation on screen (#50)
+
+The terrain is drawn by `world/terrain/terrain_shading.gd`, a `TerrainShading` node under
+`TrackRuntime` at `z_index = -4`, and nothing in it samples a field of its own. `TrackRuntime`
+builds one `TrackHeightMap` from the definition — the same class, catalog and seed the session
+gives the car — and every elevation cue is computed from that map's samples: the ground grid, the
+two road ribbons, and the off-track shadows. `TrackRuntime.height_query()` exposes it, and the
+constructor accepts one, so a caller holding the car's map can share the instance outright. The
+rule this exists for is that presentation must not contradict physics: the car lifts and fades
+its shadow from its own height, and if the tint under it implied another height the mismatch would
+read as a broken game. `tests/terrain_visuals_test.gd` asserts the car's ride height and the
+shading's sample agree at the spawn and on a ramp crest (where terrain alone is 9 px wrong), and
+that every ground vertex and ribbon stop is coloured from a map built the way the car's is.
+
+Two cues, one colour function, `TerrainShading.shade(base, sample)`:
+
+- **Height tints.** Brightness is `1 + 0.45 * clamp(height / total_amplitude, -1, 1)`, so ground at
+  plus or minus the catalog's 52.5 px is 45% brighter or darker than the base colour and level
+  ground is the base colour exactly. Every channel scales alike, so the hue survives.
+- **Slope lights.** A light in the screen's top-left; a slope rising away from it faces it and
+  brightens by up to 35%, one rising toward it darkens by as much, one running across it is unlit,
+  and across a crest the term changes sign. It is the Lambert term of a height field,
+  `-gradient . light_direction`, scaled by the catalog's slope bound (0.0875) so terrain at its
+  steepest saturates it. The gradient is the field's exact derivative, so the cue costs no second
+  sample and no finite difference.
+
+The same function colours everything the track draws, so nothing can contradict the ground it
+sits on: the two road ribbons, the two boundary lines, and the ramp wedges. The first round left
+the wedges flat, and a ramp in a hollow drew as the brightest thing on screen — the exact failure
+this task exists to prevent; a wedge is now a six-point polygon (a foot, the crest and a foot on
+each side) coloured from the map 1 px inside each corner, so a ramp in a hollow is as dark as the
+hollow, its crest is 1.077× its feet from its own 9 px, and its two faces take the light from
+opposite sides from the wedge's own 0.06 slope (±0.17). Every fill colour is chosen so that base ×
+1.8 (full height and full light) stays inside the displayable range before the clamp — the wedge
+colour was darkened from `#9c6a33` to `#866040` for it; the boundary line's cream (`#c7a15f`,
+peak 1.405) is the one base that can saturate, and a 6 px line going toward white at the extreme
+is accepted.
+
+The ground is one `Polygon2D`: a vertex every 250 px over the play area, coloured from the sample
+at it, with the GPU interpolating between vertices. 250 px is the fingerprint and object-placement
+pitch; the finest octave the shipped catalog has is 750 px wide and 2.5 px tall, so three vertices
+per finest cell resolve everything the eye can see. Seed 0's 12 809 × 13 326 px play area is
+53 × 55 = 2 915 vertices; the largest of seeds 0–19 (seed 9, 16 962 × 14 684 px) is 69 × 60 = 4 140.
+At 4–5 µs a query that is 15–20 ms of sampling once per track build, measured at 7 µs a vertex
+all-in (colour arithmetic and array writes included), 20.6 ms for seed 0. With the four line
+gradients (about 4 × 1 100 samples, 22 ms) and six samples a wedge, a seed 0 build spends about
+45 ms on shading in all, once. The road ribbons stay
+`Line2D` nodes and take a `Gradient` with one stop per centreline sample — 1 102 to 1 496 more
+samples, 5–7 ms — placed by cumulative distance along the line, because that is how `Line2D`
+reads a gradient; the boundary lines take one the same way from their own points, another
+2 × 1 100–1 500 samples. Level ground is drawn in the session's background colour, so the play-area
+edge where the grid stops is not a seam. That colour was lightened in the fix round from `#203a1e`
+to `#2b4b29` (both the ground base and the background `ColorRect`): the shading is multiplicative,
+so on the darker base a 45% swing was a small absolute step and the off-track ground read as nearly
+flat next to the dirt; the suite now asserts an absolute luminance spread of at least 0.15 across
+the seed 0 grid (0.124 to 0.365 as shipped) rather than a relative one that a near-black base would
+pass. Rebuilding frees the previous grid; a seed restart frees the
+whole runtime with it.
+
+The one artefact of the approach is the mesh itself: `Polygon2D` splits each cell into two
+triangles and the GPU interpolates linearly within each, so where the tint is not planar across a
+cell a faint crease shows on the diagonal. With every cell split the same way those creases lined
+up into streaks across the whole area; alternate cells now start at their second corner, which
+flips the diagonal, so the creases form a lattice the eye does not follow. Halving the pitch to
+125 px was tried and only made the lattice finer, at four times the samples (11 232 for seed 0,
+about 80 ms, and up to 16 300 on the largest seed), so 250 px stays; a shader would remove the
+artefact outright, and the epic ruled a shader pipeline out for this proof of concept.
+
+Shadows lengthen with the ground under them. The car's `Shadow` already fades with the car's
+height above the ground; an off-track solid stands *on* the ground, so its shadow is stretched
+along the light's axis and thrown further by `1 + 0.15 * metres` of terrain height at its foot
+(the car's own 0.15 per metre), clamped to 0.5–2.0: a tree on a 40 px rise casts a shadow 1.48
+times as long as the same tree on level ground. The factory had placed every shadow in the
+object's local frame, so a rotated tree's shadow fell wherever the tree happened to turn; the
+shadows now fall away from the same light the ground is lit by, whatever the object's rotation —
+on a track with no height query too, where the length stays the factory's but the direction is
+still the world's.
+
 ## Determinism
 
 Ramp placement is a separate deterministic domain from the road and from off-track objects.
@@ -393,9 +471,11 @@ velocity by driving.
   height passes over a rock and still hits a tree — but ramp placement and object placement never
   bring the two within reach of each other, so it is a capability rather than something that
   happens in play. See the tuning notes below for the measurement.
-- **No elevation anywhere else — closed in #47.** The ground is now the terrain field of #49
-  under the whole play area, with the ramps summed onto it, so the road climbs and drops with it.
-  Nothing renders that yet; #50 makes it legible.
+- **No elevation anywhere else — closed in #47, drawn in #50.** The ground is now the terrain
+  field of #49 under the whole play area, with the ramps summed onto it, so the road climbs and
+  drops with it, and since #50 the ground and the road are tinted and lit from the same map the
+  car drives on (see *Elevation on screen*). Off-track solids still stand at height zero in the
+  physics sense — their collision levels do not yet read the terrain under them; #51 seats them.
 - **No mid-air control.** `airborne_steering_authority` is data and defaults to 0.0. Any non-zero
   value is a tuning decision no drive has justified yet.
 - **A landing on a solid is a collision.** Nothing keeps objects out of a landing zone; ramps are
@@ -414,7 +494,15 @@ godot --headless --path . --script res://tests/jump_ramp_visuals_test.gd
 godot --headless --path . --script res://tests/issue_5_main_session_test.gd
 godot --headless --path . --script res://tests/track_collision_physics_test.gd
 godot --headless --path . --script res://tests/vehicle_terrain_test.gd
+godot --headless --path . --script res://tests/terrain_visuals_test.gd
 ```
+
+`tests/terrain_visuals_test.gd` pins the shading: the colour function's two terms and their
+saturation, the sign flip across a crest, the ground grid's size and coverage, every vertex and
+ribbon stop coloured from a `TrackHeightMap` built the way the car's is, the car's ride height
+against the shading's sample at the spawn and on a crest in the production session, the shadow
+stretch on raised, level and lowered ground, that rebuilding frees the previous grid, and the
+build cost at a median of three under 15 µs a sample.
 
 `tests/vehicle_terrain_test.gd` steps physics at 600 ticks a second under a time scale of 10, which
 keeps the production 1 / 60 s step (it pins that against the integrator's model to 0.05 px/s) and
@@ -429,7 +517,13 @@ The graphical evidence capture is not headless:
 
 ```sh
 godot --path . --script res://tests/capture_height_channel_evidence.gd
+godot --path . --script res://tests/capture_terrain_visuals.gd
 ```
+
+The second writes the stills under [`docs/evidence/terrain/`](evidence/terrain/): the road's
+steepest, highest and lowest samples on seed 0 with the car parked on each and the diagnostics
+overlay off, and the highest- and lowest-standing trees, with the sample each still was drawn from
+in `terrain-visuals-trace.txt`.
 
 Eleven mutation flags exist to prove those suites are load-bearing. Each must exit non-zero, and each
 must do so on its own assertion rather than on a load error — check the first `FAIL:` line, not
@@ -466,6 +560,13 @@ godot --headless --path . --script res://tests/vehicle_terrain_test.gd -- --brea
 The safe-pose capture-rate assertion has no flag: it is demonstrated by reverting the gate in
 `vehicle/top_down_car.gd` to `_ground_height > 0.0`, which fails the rate on all three driven seeds
 (74 of 128, 71 of 157, 54 of 160) and records a pose on a ramp on two of them.
+
+The shading-agreement assertions have no flag either: the shading has no production switch for
+sampling the wrong field. They are demonstrated by making `TrackRuntime` reconstruct the field
+instead of building the car's map — `TerrainField.new(definition.seed, catalog)`, the track seed
+where the terrain seed belongs, fails every vertex and ribbon stop and both ride-height checks;
+`TerrainField.for_track(definition.seed, catalog)`, the right terrain without the ramps, agrees
+everywhere except on the wedges and fails the crest check by the 9 px crest height.
 
 ## Tuning notes
 

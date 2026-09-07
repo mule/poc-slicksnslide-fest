@@ -37,7 +37,8 @@ func _verify_wedges() -> bool:
 	_check(first != null, "wedges are named by stable id")
 	if first != null:
 		var wedge := first.get_node_or_null("Wedge") as Polygon2D
-		_check(wedge != null and wedge.polygon.size() == 4, "each ramp draws a four-point wedge")
+		_check(wedge != null and wedge.polygon.size() == 6, "each ramp draws a six-point wedge: a foot, the crest and a foot on each side")
+		_check(wedge != null and wedge.vertex_colors.is_empty() and wedge.color == JumpRampVisuals.WEDGE_COLOR, "without a shading and a height query the wedge is the flat wedge colour")
 		if wedge != null:
 			var min_y := INF
 			var max_y := -INF
