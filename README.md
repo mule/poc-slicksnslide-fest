@@ -123,6 +123,7 @@ godot --headless --path . --script res://tests/jump_ramp_visuals_test.gd
 godot --headless --path . --script res://tests/terrain_field_contract_test.gd
 godot --headless --path . --script res://tests/terrain_height_map_test.gd
 godot --headless --path . --script res://tests/vehicle_terrain_test.gd
+godot --headless --path . --script res://tests/terrain_visuals_test.gd
 ```
 
 These pin the ramp catalog and its derivations, keep ramp placement deterministic and separated
@@ -137,17 +138,22 @@ produces cannot stall it, drag rather than the clamp holds every descent (the cl
 synthetic slope; `-- --break-speed-clamp` fails it), bare terrain never lifts it off at top speed
 in the real integrator (`-- --break-terrain-lift-off` fails it), whole laps complete on three
 seeds, and safe poses are captured at the rate the car's own rules predict on sloped ground. It
-takes about two minutes.
+takes about two minutes. The terrain visuals suite pins the elevation drawing: ground and road
+tinted by height and lit by slope from the same `TrackHeightMap` the car drives on, asserted to
+agree with the car's own ride height at the spawn and on a ramp crest, off-track shadows that
+lengthen with the ground under them, and a build cost under 15 µs a sample.
 
 For the seeds 0-19 ramp ledger, the driven approach/apex/landing stills, the flight-reach
 measurement, and the rock-clearance still, use the graphical renderer (not `--headless`):
 
 ```sh
 godot --path . --script res://tests/capture_height_channel_evidence.gd
+godot --path . --script res://tests/capture_terrain_visuals.gd
 ```
 
-It writes the trace and the PNGs under
-[`docs/evidence/height-channel/`](docs/evidence/height-channel/); see
+The first writes the trace and the PNGs under
+[`docs/evidence/height-channel/`](docs/evidence/height-channel/), the second the elevation stills
+under [`docs/evidence/terrain/`](docs/evidence/terrain/); see
 [The height channel](docs/height-channel.md) for what each number means and for the eleven mutation
 commands that keep these suites honest.
 

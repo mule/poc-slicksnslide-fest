@@ -6,7 +6,9 @@ var _collisions: OfftrackObjectCollisions
 var _validation_errors: Array[String] = []
 
 
-func _init(placements: Array[OfftrackObjectPlacement] = [], catalog: OfftrackObjectCatalog = null) -> void:
+## The height query, when given, is the field the solids' shadows lengthen with: TrackRuntime
+## passes the map the ground shading and the car sample, so all three agree on every rise.
+func _init(placements: Array[OfftrackObjectPlacement] = [], catalog: OfftrackObjectCatalog = null, height_query: HeightQuery = null) -> void:
 	name = "OfftrackObjects"
 	y_sort_enabled = true
 	_visuals = OfftrackObjectVisuals.new()
@@ -17,7 +19,7 @@ func _init(placements: Array[OfftrackObjectPlacement] = [], catalog: OfftrackObj
 	add_child(_collisions)
 	if catalog != null:
 		var valid_placements := _validated_placements(placements, catalog)
-		_visuals.build(valid_placements, catalog)
+		_visuals.build(valid_placements, catalog, height_query)
 		_collisions.build(valid_placements, catalog)
 
 

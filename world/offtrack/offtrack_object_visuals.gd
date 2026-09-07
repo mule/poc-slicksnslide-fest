@@ -10,7 +10,9 @@ func _init() -> void:
 	y_sort_enabled = true
 
 
-func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog) -> void:
+## With a height query, each solid's shadow is stretched and thrown further for the ground height
+## at its foot; without one every shadow keeps its factory length, as on the flat fixtures.
+func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog, height_query: HeightQuery = null) -> void:
 	_clear_children()
 	var decorative := Node2D.new()
 	decorative.name = "DecorativeBatches"
@@ -20,7 +22,7 @@ func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCa
 	solids.y_sort_enabled = true
 	add_child(solids)
 	_build_decorative(placements, catalog, decorative)
-	_build_solids(placements, catalog, solids)
+	_build_solids(placements, catalog, solids, height_query)
 
 
 func visual_count() -> int:
@@ -100,7 +102,7 @@ func _maximum_scaled_mesh_extent(mesh: ArrayMesh, group: Array[OfftrackObjectPla
 	return prototype_extent * maximum_scale
 
 
-func _build_solids(placements: Array[OfftrackObjectPlacement], _catalog: OfftrackObjectCatalog, parent: Node2D) -> void:
+func _build_solids(placements: Array[OfftrackObjectPlacement], _catalog: OfftrackObjectCatalog, parent: Node2D, height_query: HeightQuery) -> void:
 	for placement in placements:
 		if placement == null or not placement.solid:
 			continue
@@ -112,9 +114,29 @@ func _build_solids(placements: Array[OfftrackObjectPlacement], _catalog: Offtrac
 		visual.position = placement.transform.origin
 		visual.rotation = placement.transform.get_rotation()
 		visual.scale = Vector2.ONE * placement.scale_factor
+		var ground_height := 0.0
+		if height_query != null:
+			ground_height = height_query.sample_at(placement.transform.origin).ground_height
+		_cast_shadow(visual.get_child(0) as Polygon2D, visual.rotation, TerrainShading.shadow_length_factor(ground_height))
 		parent.add_child(visual)
 		_solid_visual_count += 1
 		_visual_count += 1
+
+
+## Throws the shadow along the world's shadow direction, whatever the object's own rotation, at
+## the factory's offset distance times the factor, and stretches the polygon along the same axis
+## by the factor. The factory places every shadow in the object's local frame, so before this a
+## rotated tree's shadow fell wherever the tree happened to turn; the ground shading lights every
+## slope from one direction, and the shadows now fall away from that same light.
+func _cast_shadow(shadow: Polygon2D, world_rotation: float, factor: float) -> void:
+	var local_axis := TerrainShading.SHADOW_DIRECTION.rotated(-world_rotation)
+	shadow.position = local_axis * shadow.position.length() * factor
+	var stretched := PackedVector2Array()
+	stretched.resize(shadow.polygon.size())
+	for index in shadow.polygon.size():
+		var point := shadow.polygon[index]
+		stretched[index] = point + local_axis * (point.dot(local_axis) * (factor - 1.0))
+	shadow.polygon = stretched
 
 
 func _clear_children() -> void:
