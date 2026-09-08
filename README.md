@@ -124,6 +124,7 @@ godot --headless --path . --script res://tests/terrain_field_contract_test.gd
 godot --headless --path . --script res://tests/terrain_height_map_test.gd
 godot --headless --path . --script res://tests/vehicle_terrain_test.gd
 godot --headless --path . --script res://tests/terrain_visuals_test.gd
+godot --headless --path . --script res://tests/offtrack_object_terrain_test.gd
 ```
 
 These pin the ramp catalog and its derivations, keep ramp placement deterministic and separated
@@ -141,7 +142,12 @@ seeds, and safe poses are captured at the rate the car's own rules predict on sl
 takes about two minutes. The terrain visuals suite pins the elevation drawing: ground and road
 tinted by height and lit by slope from the same `TrackHeightMap` the car drives on, asserted to
 agree with the car's own ride height at the spawn and on a ramp crest, off-track shadows that
-lengthen with the ground under them, and a build cost under 15 µs a sample.
+lengthen with the ground under them, and a build cost under 15 µs a sample. The off-track object
+terrain suite seats the objects on that same map: bodies lifted and shaded from the car-path map
+on two production seeds with zero mismatches, every base colour holding a 1.4 luminance ratio
+against the ground at every height, the twenty pre-terrain object fingerprints byte for byte, and
+the rock-reachability measurement re-run over every ramp of seeds 0-19 with its verdict pinned
+(`-- --break-rock-corridor` fails it). It takes about four minutes.
 
 For the seeds 0-19 ramp ledger, the driven approach/apex/landing stills, the flight-reach
 measurement, and the rock-clearance still, use the graphical renderer (not `--headless`):

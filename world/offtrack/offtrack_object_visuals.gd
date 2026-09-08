@@ -4,17 +4,22 @@ extends Node2D
 var _visual_count := 0
 var _decorative_batch_count := 0
 var _solid_visual_count := 0
+var _decorative_instances: Dictionary = {}
 
 
 func _init() -> void:
 	y_sort_enabled = true
 
 
-## With a height query, each solid's shadow is stretched and thrown further for the ground height
-## at its foot; without one every shadow keeps its factory length, as on the flat fixtures. The
-## direction is rewritten on both paths: every shadow falls along the world shadow direction,
-## query or no query, so a flat fixture and a terrain track light their solids from the same side.
-func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog, height_query: HeightQuery = null) -> void:
+## With a height query, every object stands on the ground under it: its body is lifted up the
+## screen by TerrainShading.lift_offset of the ground height at its foot, and each solid's shadow
+## is stretched and thrown further for that height. With a shading as well, every body is coloured
+## by shade() from the same sample, so an object and the ground under it brighten and darken
+## together and their contrast is the contrast of their base colours. Without a query every object
+## sits at its placement with its factory shadow, as on the flat fixtures. The shadow direction is
+## rewritten on both paths: every shadow falls along the world shadow direction, query or no query,
+## so a flat fixture and a terrain track light their solids from the same side.
+func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog, height_query: HeightQuery = null, shading: TerrainShading = null) -> void:
 	_clear_children()
 	var decorative := Node2D.new()
 	decorative.name = "DecorativeBatches"
@@ -23,8 +28,8 @@ func build(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCa
 	solids.name = "SolidObjects"
 	solids.y_sort_enabled = true
 	add_child(solids)
-	_build_decorative(placements, catalog, decorative)
-	_build_solids(placements, catalog, solids, height_query)
+	_build_decorative(placements, catalog, decorative, height_query, shading)
+	_build_solids(placements, catalog, solids, height_query, shading)
 
 
 func visual_count() -> int:
@@ -39,7 +44,19 @@ func solid_visual_count() -> int:
 	return _solid_visual_count
 
 
-func _build_decorative(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog, parent: Node2D) -> void:
+## The batch, instance index and the batch's uploaded buffer a decorative placement was drawn
+## with, by stable id; empty if none. The buffer is the very PackedFloat32Array handed to the
+## multimesh, so a reader decoding it sees the bytes the renderer draws from.
+func decorative_instance_of(stable_id: String) -> Dictionary:
+	return _decorative_instances.get(stable_id, {})
+
+
+## Floats per instance in a batch's buffer: a 2D transform as two rows of four, plus a colour.
+static func instance_stride(with_colors: bool) -> int:
+	return 12 if with_colors else 8
+
+
+func _build_decorative(placements: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog, parent: Node2D, height_query: HeightQuery, shading: TerrainShading) -> void:
 	var groups: Dictionary = {}
 	for placement in placements:
 		if placement == null or placement.solid:
@@ -58,10 +75,10 @@ func _build_decorative(placements: Array[OfftrackObjectPlacement], catalog: Offt
 		var typed_group: Array[OfftrackObjectPlacement] = []
 		for placement in groups[key]:
 			typed_group.append(placement)
-		_add_batch(parent, key, typed_group, catalog)
+		_add_batch(parent, key, typed_group, catalog, height_query, shading)
 
 
-func _add_batch(parent: Node2D, key: String, group: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog) -> void:
+func _add_batch(parent: Node2D, key: String, group: Array[OfftrackObjectPlacement], catalog: OfftrackObjectCatalog, height_query: HeightQuery, shading: TerrainShading) -> void:
 	var first := group[0]
 	var mesh := OfftrackObjectMeshFactory.decorative_mesh(first.archetype_id, first.visual_variant)
 	if mesh == null:
@@ -69,21 +86,55 @@ func _add_batch(parent: Node2D, key: String, group: Array[OfftrackObjectPlacemen
 		return
 	var multimesh := MultiMesh.new()
 	multimesh.transform_format = MultiMesh.TRANSFORM_2D
+	var with_colors := shading != null and height_query != null
+	multimesh.use_colors = with_colors
 	multimesh.mesh = mesh
 	multimesh.instance_count = group.size()
+	var instance := MultiMeshInstance2D.new()
+	instance.name = key
+	# The whole batch is uploaded as one buffer, in the renderer's own layout: per instance the
+	# transform's two rows (x.x, y.x, 0, origin.x) and (x.y, y.y, 0, origin.y), then the colour.
+	# Kept after upload so the seating and tint of every instance can be read back exactly as
+	# uploaded; the headless renderer discards instance data, so nothing else can read it there.
+	var stride := instance_stride(with_colors)
+	var buffer := PackedFloat32Array()
+	buffer.resize(group.size() * stride)
+	# Chunk bounds grow by however far the lift moves any instance up or down the screen.
+	var lift_low := 0.0
+	var lift_high := 0.0
 	for index in range(group.size()):
 		var placement := group[index]
 		var instance_transform := placement.transform.scaled_local(Vector2.ONE * placement.scale_factor)
-		multimesh.set_instance_transform_2d(index, instance_transform)
+		var brightness := 1.0
+		if height_query != null:
+			var sample := height_query.sample_at(placement.transform.origin)
+			var lift := TerrainShading.lift_offset(sample.ground_height)
+			instance_transform.origin += lift
+			lift_low = minf(lift_low, lift.y)
+			lift_high = maxf(lift_high, lift.y)
+			if shading != null:
+				brightness = shading.brightness(sample)
+		var offset := index * stride
+		buffer[offset] = instance_transform.x.x
+		buffer[offset + 1] = instance_transform.y.x
+		buffer[offset + 3] = instance_transform.origin.x
+		buffer[offset + 4] = instance_transform.x.y
+		buffer[offset + 5] = instance_transform.y.y
+		buffer[offset + 7] = instance_transform.origin.y
+		if with_colors:
+			buffer[offset + 8] = brightness
+			buffer[offset + 9] = brightness
+			buffer[offset + 10] = brightness
+			buffer[offset + 11] = 1.0
+		_decorative_instances[placement.stable_id] = {"batch": instance, "index": index, "buffer": buffer}
+	multimesh.buffer = buffer
 	var chunk := Vector2i(floori(first.transform.origin.x / catalog.chunk_size), floori(first.transform.origin.y / catalog.chunk_size))
 	var chunk_origin := Vector2(chunk) * catalog.chunk_size
 	var mesh_extent := _maximum_scaled_mesh_extent(mesh, group)
 	multimesh.custom_aabb = AABB(
-		Vector3(chunk_origin.x - mesh_extent, chunk_origin.y - mesh_extent, WorldScale.metres(-0.08)),
-		Vector3(catalog.chunk_size + mesh_extent * 2.0, catalog.chunk_size + mesh_extent * 2.0, WorldScale.metres(0.16))
+		Vector3(chunk_origin.x - mesh_extent, chunk_origin.y - mesh_extent + lift_low, WorldScale.metres(-0.08)),
+		Vector3(catalog.chunk_size + mesh_extent * 2.0, catalog.chunk_size + mesh_extent * 2.0 + lift_high - lift_low, WorldScale.metres(0.16))
 	)
-	var instance := MultiMeshInstance2D.new()
-	instance.name = key
 	instance.multimesh = multimesh
 	instance.z_index = -1
 	parent.add_child(instance)
@@ -104,7 +155,7 @@ func _maximum_scaled_mesh_extent(mesh: ArrayMesh, group: Array[OfftrackObjectPla
 	return prototype_extent * maximum_scale
 
 
-func _build_solids(placements: Array[OfftrackObjectPlacement], _catalog: OfftrackObjectCatalog, parent: Node2D, height_query: HeightQuery) -> void:
+func _build_solids(placements: Array[OfftrackObjectPlacement], _catalog: OfftrackObjectCatalog, parent: Node2D, height_query: HeightQuery, shading: TerrainShading) -> void:
 	for placement in placements:
 		if placement == null or not placement.solid:
 			continue
@@ -116,9 +167,18 @@ func _build_solids(placements: Array[OfftrackObjectPlacement], _catalog: Offtrac
 		visual.position = placement.transform.origin
 		visual.rotation = placement.transform.get_rotation()
 		visual.scale = Vector2.ONE * placement.scale_factor
+		var body := visual.get_child(1) as Polygon2D
 		var ground_height := 0.0
 		if height_query != null:
-			ground_height = height_query.sample_at(placement.transform.origin).ground_height
+			var sample := height_query.sample_at(placement.transform.origin)
+			ground_height = sample.ground_height
+			# The lift is a screen distance; the body is a child of a rotated, scaled node, so the
+			# offset is taken back through the inverse of that node's basis or a 1.25x tree would
+			# lift 1.25x as far. The affine inverse, not basis_xform_inv: that one transposes, which
+			# only inverts an unscaled basis. The shadow stays at the foot.
+			body.position = visual.transform.affine_inverse().basis_xform(TerrainShading.lift_offset(ground_height))
+			if shading != null:
+				body.color = shading.shade(body.color, sample)
 		_cast_shadow(visual.get_child(0) as Polygon2D, visual.rotation, TerrainShading.shadow_length_factor(ground_height))
 		parent.add_child(visual)
 		_solid_visual_count += 1
@@ -147,3 +207,4 @@ func _clear_children() -> void:
 	_visual_count = 0
 	_decorative_batch_count = 0
 	_solid_visual_count = 0
+	_decorative_instances.clear()

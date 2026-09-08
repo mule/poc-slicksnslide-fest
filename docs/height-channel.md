@@ -325,6 +325,44 @@ shadows now fall away from the same light the ground is lit by, whatever the obj
 on a track with no height query too, where the length stays the factory's but the direction is
 still the world's.
 
+### Objects on the ground (#51)
+
+Off-track objects stand on the terrain rather than floating at height zero. Every solid body and
+every decorative instance is lifted up the screen by `TerrainShading.lift_offset` of the ground
+height the shared `TrackHeightMap` reports at its foot — `LIFT_PIXELS_PER_PIXEL` = 1.0, the car's
+own `lift_pixels_per_pixel`, pinned equal by the object suite so a car parked beside a rock on a
+rise draws level with it — and coloured by the same `shade()` that colours the ground, from the
+same sample. The lift is a screen direction whatever the object's rotation (the body is a child of
+a rotated node, so the offset is rotated into that frame); the shadow stays at the foot, thrown
+along the light and lengthened as before, so the body stands above its own shadow the way the car
+does. Decorative batches are uploaded as one `MultiMesh.buffer` per chunk, with the lift in each
+instance transform and the ground brightness as the instance colour, which the GPU multiplies into
+the mesh colour exactly as `shade()` multiplies a base; the visuals keep the uploaded buffer so
+the suite can decode what was drawn, because the headless renderer discards instance data.
+Batch bounds grow by the lift range so a lifted instance is never culled at a chunk edge.
+
+Placement never sees any of it. Objects are placed by seed and terrain is sampled at those
+positions afterwards; `offtrack_object_fingerprint` for seeds 0-19 is byte for byte the ledger #37
+recorded before terrain existed, and re-placing under a different terrain seed, or none,
+reproduces it. Colliders stay flat circles on the low and tall layers of #37.
+
+Shading a body from the ground's own function is what keeps it legible. #50 lightened the ground,
+and its review measured unshaded tree bodies crossing the ground's luminance at about +20 px and
++43 px of elevation — darker below, lighter above, invisible in between. Because `shade()` is
+multiplicative, a body coloured from the same sample keeps a luminance ratio against the ground
+that is a constant of its base colour, not of the hill. The rule is `BODY_CONTRAST_FLOOR` = 1.4:
+every object base colour keeps at least that ratio against `GROUND_COLOR`, lighter or darker, and
+the suite sweeps it over the whole height and light range (the ratio is flat to 0.015 until a
+channel clamps at the lit peak) and measures every production solid against the ground grid
+actually drawn under it (minimum 1.54). The floor sits between the 1.14 the review measured as
+illegible and the 1.56 the pre-#50 trees shipped with against the darker ground of the time. To
+meet it the tree greens were lifted from `#315b2f` / `#3e6b35` (1.20 / 1.42 against the new
+ground; the second only just over the floor, and lifted with the first so the two variants keep
+their step) to `#40763d` / `#4e8642` (1.56 / 1.78) and the debris brown from `#765235` (1.33)
+to `#825a3a` (1.46); rocks (1.59-1.89) and grass (1.98) already cleared it. A shading that
+tracked the ground exactly has a ratio of 1 and fails the rule; the task report shows that
+failure live.
+
 ## Determinism
 
 Ramp placement is a separate deterministic domain from the road and from off-track objects.
@@ -467,15 +505,29 @@ velocity by driving.
   ballistic apex of the fade's peak slope at `max_safe_speed`) and by the 9 px crest height; see the
   ruling above. It is a hop, not a launch, but it is new behaviour and the #52 drive should say how
   it reads.
-- **No rock can be cleared from a generated ramp.** The behaviour works — a car above the clearance
-  height passes over a rock and still hits a tree — but ramp placement and object placement never
-  bring the two within reach of each other, so it is a capability rather than something that
-  happens in play. See the tuning notes below for the measurement.
-- **No elevation anywhere else — closed in #47, drawn in #50.** The ground is now the terrain
-  field of #49 under the whole play area, with the ramps summed onto it, so the road climbs and
-  drops with it, and since #50 the ground and the road are tinted and lit from the same map the
-  car drives on (see *Elevation on screen*). Off-track solids still stand at height zero in the
-  physics sense — their collision levels do not yet read the terrain under them; #51 seats them.
+- **No rock can be cleared from a generated ramp — re-measured on terrain in #51, still true.**
+  The behaviour works — a car above the clearance height passes over a rock and still hits a tree
+  — but ramp placement and object placement never bring the two within reach of each other, so
+  it is a capability rather than something that happens in play. On terrain, at full throttle,
+  the furthest a flight carries the car past the road edge while high enough to clear a rock on
+  the ground beneath it is 130.7 px against a nearest solid at 267.8 px, and the closest any such
+  flight came to a generated rock in seeds 0-19 was 182.2 px short of touching it. See *Re-measured
+  on terrain* in the tuning notes.
+- **The car's low-layer mask compares its absolute height, not its height over the ground.**
+  `TopDownCar.get_collision_level_mask()` drops the low layer when `_height` exceeds the 12.5 px
+  clearance, and since #47 `_height` is the terrain height while grounded. A car driving on any
+  rise above 12.5 px — 412 of the 1 511 rocks in seeds 0-19 stand on one — passes through rocks
+  without leaving the ground, and a flight from a ramp on such a rise keeps the low layer dropped
+  for its whole envelope, which is how the same flights come within 42.6 px of a rock in that
+  frame: the closest pass (seed 6, ramp `h3:6:160:0`, launched from ground at +19.0 px) was
+  0.66 px above the ground at its nearest point to the rock, with the low layer already gone from
+  its mask. The vehicle was out of #51's scope; this is the first thing #52 should decide, and
+  the object suite reports both frames so the fix can be measured.
+- **No elevation anywhere else — closed in #47, drawn in #50, populated in #51.** The ground is
+  now the terrain field of #49 under the whole play area, with the ramps summed onto it, so the
+  road climbs and drops with it; since #50 the ground and the road are tinted and lit from the
+  same map the car drives on (see *Elevation on screen*); and since #51 off-track objects stand
+  on it, lifted and shaded from the same map, with their colliders still flat circles.
 - **No mid-air control.** `airborne_steering_authority` is data and defaults to 0.0. Any non-zero
   value is a tuning decision no drive has justified yet.
 - **A landing on a solid is a collision.** Nothing keeps objects out of a landing zone; ramps are
@@ -507,6 +559,17 @@ build cost at a median of three under 15 µs a sample.
 `tests/vehicle_terrain_test.gd` steps physics at 600 ticks a second under a time scale of 10, which
 keeps the production 1 / 60 s step (it pins that against the integrator's model to 0.05 px/s) and
 runs its 70 000-odd ticks in about two minutes.
+
+`tests/offtrack_object_terrain_test.gd` pins the object seating (#51): the twenty pre-terrain
+object fingerprints byte for byte, placement identical under a different terrain seed and under
+none, the lift rate equal to the car's, solids and decoratives lifted and coloured on a plateau
+fixture and on two production seeds against a car-path `TrackHeightMap` (every one of the 526 and
+706 objects, zero mismatches), the contrast rule over the full height and light range and against
+the drawn ground grid, and the rock-reachability measurement over every ramp of seeds 0-19 with
+its verdict as assertions. It steps physics the way the vehicle terrain suite does and takes about
+four minutes, most of it the 1 584-pass coarse sweep; `-- --break-rock-corridor` removes the
+recovery corridor and fills every hazard cell with a rock up to the road edge, so a flight reaches
+one and the pin fails.
 
 `tests/vehicle_height_channel_test.gd` runs its analytic-arc case twice, once on the suite's own
 0.12 hump and once on the catalog's shipped 0.06 slope, and every assertion in that case is prefixed
@@ -692,6 +755,57 @@ directions and in one frame: the above-clearance reach past the edge against the
 the whole-envelope reach past the edge against the nearest solid seeds 0-19 actually place. A
 later placement change that brings a solid within reach of a flight fails that check and sends
 whoever made it back to this section.
+
+### Re-measured on terrain (#51)
+
+Terrain changes the inputs to the measurement above: a rock on a rise stands on that rise, and a
+car launching from a ramp whose far side descends stays in the air longer. #51 re-ran the sweep
+headlessly on the production `TrackHeightMap` with terrain, over **every ramp of seeds 0-19**
+(48 ramps), with the car seated 60 px before each ramp's foot at its 600 px/s dirt terminal speed
+and held at **full throttle** to the crest, so each pass is the fastest arrival the car can make:
+crest speeds of about 597 px/s against the coasting crossings of the #37 sweep. Eleven headings
+from -85° to +85° at three lateral seats (1 584 passes, 1 455 launched) sweep every ramp; the two
+ramps reaching furthest are then swept at #37's 5° resolution within 60° of the axis at five
+seats (250 passes, 224 launched). Reach is measured in two frames on every airborne tick. The
+physical frame is height above the ground beneath the car — the frame a rock's top is in, since
+a rock stands on its own ground. The engine frame is whether the car's mask has actually dropped
+the low layer, which today compares absolute height (see *Limitations*). Every generated rock
+within 1 500 px of a ramp is compared against the flight directly, so the verdict does not rest on
+the corridor rule.
+
+| Measurement | #37 (seed 0, coasting) | #51 (seeds 0-19, full throttle) |
+| --- | ---: | ---: |
+| Furthest past the road edge while above the clearance over the ground beneath | 95.4 px | **130.7 px** |
+| Furthest past the road edge with the low layer dropped from the car's mask | 95.4 px | 288.8 px |
+| Furthest past the road edge while airborne at any height | 192.2 px | 288.8 px |
+| Nearest a solid actually sits to the road edge, seeds 0-19 | 267.8 px | 267.8 px |
+| Closest a flight above the clearance came to touching a rock | — | 182.2 px short |
+| Closest a flight with the low layer dropped came to touching a rock | — | 42.6 px short |
+| Rocks reachable | 0 | **0** |
+
+The longest above-clearance reach is seed 19's ramp `h3:19:0:2` at a 35° heading from the
+road-edge seat, crest 597.3 px/s, launching from ground at -7.4 px and landing at -18.6 px: the
+far side falls away by 11 px and the flight peaks 13.35 px over the ground beneath it. The same
+ramp swept again on a flat base (the definition with its terrain seed removed, ramps only) reaches
+95.8 px — #37's 95.4 px within half a pixel, at the same full-throttle crest — so the 35 px
+increase is the terrain beyond the crest, not the faster arrival. **The gap is 137.1 px in the
+frame that matters, and no rock is within reach on any seed.** The finding of #37 stands.
+
+Two things did change. The whole flight envelope now reaches 288.8 px past the road edge, beyond
+the 250 px corridor rule and beyond the 267.8 px nearest solid, so #37's second assertion — the
+envelope against the nearest solid — no longer holds and is retired; the suite pins that the
+envelope exceeds the rule, so a shrink is noticed, and carries the finding on the per-rock
+separations instead. And in the engine's frame a flight from a ramp on raised ground keeps the low
+layer dropped from launch to landing, which is why that frame comes within 42.6 px of a rock: seed
+6's ramp `h3:6:160:0`, launched from ground at +19.0 px on a -60° heading from the road-edge seat,
+passes rock `v1:6:-17:8` while 0.66 px above the ground with the low layer already dropped. Not a
+reachable rock, but a 43 px margin resting on a mask rule that #52 has to revisit anyway; a car
+driving on that rise passes through the same rock without jumping at all.
+
+`tests/offtrack_object_terrain_test.gd` asserts all of it: no reachable rock, both separations
+positive, the above-clearance reach inside the corridor rule, the envelope beyond it. Under
+`-- --break-rock-corridor` the corridor is removed and every hazard cell is a rock up to the road
+edge, and the sweep reaches them.
 
 ### What the rock-clearance still actually shows
 

@@ -35,6 +35,16 @@ extends Node2D
 ## height above the ground; an off-track solid stands on the ground, so its shadow is stretched
 ## and thrown further along SHADOW_DIRECTION by shadow_length_factor of the terrain height at its
 ## foot. Both rates are 0.15 a metre. This class owns the rule so every consumer stretches alike.
+##
+## Objects stand on the ground (#51). An off-track body is lifted up the screen by lift_offset of
+## the ground height at its foot, at the car's own lift rate, and coloured by shade() from the
+## same sample that colours the ground under it, so a tree on a rise draws high and bright and its
+## shadow stays at the foot. Because shade() is multiplicative, a body's luminance ratio against
+## the ground is a constant of its base colour rather than of the hill: #50's review measured
+## unshaded tree bodies crossing the ground's luminance at +20 and +43 px of elevation and
+## vanishing in between. BODY_CONTRAST_FLOOR is the rule every object base colour must satisfy
+## against GROUND_COLOR, lighter or darker, and tests/offtrack_object_terrain_test.gd sweeps it
+## over the whole height and light range and measures it against the drawn ground grid.
 
 ## The session's background: level ground is drawn in it so the play-area edge, where the grid
 ## stops and the background shows, is not a seam. Lightened from the pre-terrain background
@@ -55,6 +65,13 @@ const GROUND_CELL := TerrainField.FINGERPRINT_SPACING
 const SHADOW_LENGTHEN_PER_METRE := 0.15
 const SHADOW_LENGTH_FLOOR := 0.5
 const SHADOW_LENGTH_CEILING := 2.0
+## Screen lift per px of ground height under an object: the car's lift_pixels_per_pixel, so a car
+## parked beside a rock on the same rise draws level with it. Pinned equal by the object suite.
+const LIFT_PIXELS_PER_PIXEL := 1.0
+## Smallest luminance ratio, lighter or darker, an object base colour keeps against GROUND_COLOR.
+## Between the 1.14 the #50 review measured as illegible and the 1.56 the pre-#50 trees shipped
+## with against the darker ground of the time; the shipped colours sit at 1.46 to 1.98.
+const BODY_CONTRAST_FLOOR := 1.4
 
 var _height_reference: float
 var _slope_reference: float
@@ -135,13 +152,20 @@ func ribbon_gradient(points: PackedVector2Array, base: Color, height_query: Heig
 
 ## The base colour brightened or darkened by the height and light terms; alpha untouched.
 func shade(base: Color, sample: HeightQuery.HeightSample) -> Color:
-	var brightness := 1.0 + HEIGHT_CONTRAST * height_term(sample.ground_height) + SLOPE_CONTRAST * light_term(sample.gradient)
+	var factor := brightness(sample)
 	return Color(
-		clampf(base.r * brightness, 0.0, 1.0),
-		clampf(base.g * brightness, 0.0, 1.0),
-		clampf(base.b * brightness, 0.0, 1.0),
+		clampf(base.r * factor, 0.0, 1.0),
+		clampf(base.g * factor, 0.0, 1.0),
+		clampf(base.b * factor, 0.0, 1.0),
 		base.a,
 	)
+
+
+## The multiplier shade() applies for a sample: one on level, unlit ground. A multimesh batch
+## carries it as an instance colour, which the GPU multiplies into the mesh colour exactly as
+## shade() does, so a decorative instance and a solid body on the same sample draw alike.
+func brightness(sample: HeightQuery.HeightSample) -> float:
+	return 1.0 + HEIGHT_CONTRAST * height_term(sample.ground_height) + SLOPE_CONTRAST * light_term(sample.gradient)
 
 
 ## Height as a fraction of the catalog's total amplitude, clamped to [-1, 1].
@@ -176,3 +200,9 @@ static func ground_rows(area: Rect2) -> int:
 ## Factor by which a solid's shadow is stretched and displaced for the ground height at its foot.
 static func shadow_length_factor(ground_height: float) -> float:
 	return clampf(1.0 + WorldScale.to_metres(ground_height) * SHADOW_LENGTHEN_PER_METRE, SHADOW_LENGTH_FLOOR, SHADOW_LENGTH_CEILING)
+
+
+## Where a body standing on ground of this height is drawn relative to its foot: straight up the
+## screen for a rise, down for a hollow, in world space whatever the object's own rotation.
+static func lift_offset(ground_height: float) -> Vector2:
+	return Vector2(0.0, -ground_height * LIFT_PIXELS_PER_PIXEL)

@@ -50,12 +50,13 @@ func _ready() -> void:
 		definition.offtrack_objects,
 		preload("res://data/default_offtrack_object_catalog.tres"),
 		_height_query,
+		_shading,
 	)
 	add_child(object_runtime)
 
 
-## The height query the track's elevation cues sample. Shared with the object shadows; the
-## session may hand it to the car so both read one instance.
+## The height query the track's elevation cues sample. Shared with the off-track objects, which
+## stand on it and shade from it; the session may hand it to the car so both read one instance.
 func height_query() -> HeightQuery:
 	return _height_query
 

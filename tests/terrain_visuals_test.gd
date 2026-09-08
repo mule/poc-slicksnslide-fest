@@ -587,7 +587,11 @@ func _verify_object_shadows() -> bool:
 	var raised_extent := _shadow_extent(raised_shadow, rotation, along)
 	_check(is_equal_approx(raised_extent, level_extent * expected_factor), "the raised shadow polygon is 1.48 times as long along the light (%.2f vs %.2f px)" % [raised_extent, level_extent])
 	_check(is_equal_approx(_shadow_extent(raised_shadow, rotation, across), _shadow_extent(level_shadow, rotation, across)), "the raised shadow is no wider across the light")
-	_check(raised_body.polygon == level_body.polygon and raised_body.position == level_body.position, "the tree bodies are untouched; only the shadows differ")
+	# Since #51 the body stands on the ground: lifted up the screen by the plateau height, its
+	# polygon unchanged; the level tree's body stays at its foot. tests/offtrack_object_terrain_test.gd
+	# owns the seating rule; this pins that the shadow treatment did not move the body itself.
+	_check(raised_body.polygon == level_body.polygon, "the tree bodies keep the same polygon; the lift moves, it does not reshape")
+	_check((raised as Node2D).transform.basis_xform(raised_body.position).is_equal_approx(TerrainShading.lift_offset(raised_height)) and level_body.position == Vector2.ZERO, "the raised body is lifted by the plateau height and the level body is not")
 	_check(is_equal_approx(raised_shadow.color.a, level_shadow.color.a), "elevation changes the shadow's length, not its darkness")
 	# Lowered ground: the same pair on a plateau below zero.
 	plateau.plateau_height = -raised_height
