@@ -31,15 +31,19 @@ extends Node2D
 ## line's cream is the one exception, and a 6 px line saturating toward white at plus the total
 ## amplitude on a slope at the bound facing the light is accepted and documented.
 ##
-## Shadows lengthen with the ground under them. The car's Shadow already fades with the car's
-## height above the ground; an off-track solid stands on the ground, so its shadow is stretched
-## and thrown further along SHADOW_DIRECTION by shadow_length_factor of the terrain height at its
+## Shadows lengthen with the ground under them. The car's Shadow fades with the car's height
+## above the ground; an off-track solid stands on the ground, so its shadow is stretched and
+## thrown further along SHADOW_DIRECTION by shadow_length_factor of the terrain height at its
 ## foot. Both rates are 0.15 a metre. This class owns the rule so every consumer stretches alike.
 ##
 ## Objects stand on the ground (#51). An off-track body is lifted up the screen by lift_offset of
 ## the ground height at its foot, at the car's own lift rate, and coloured by shade() from the
-## same sample that colours the ground under it, so a tree on a rise draws high and bright and its
-## shadow stays at the foot. Because shade() is multiplicative, a body's luminance ratio against
+## same sample that colours the ground under it, so a tree on a rise draws high and bright. Its
+## shadow is anchored to the same lift (#52): it rises and falls with the body, cast from it along
+## SHADOW_DIRECTION, so the body never floats above a detached shadow and the shadow never lands on
+## the lit side in a hollow; height then reads through the lift, the tint and the shadow's length.
+## The car follows the same split: ground height lifts body and shadow together, and only height
+## above the ground opens a gap. Because shade() is multiplicative, a body's luminance ratio against
 ## the ground is a constant of its base colour rather than of the hill: #50's review measured
 ## unshaded tree bodies crossing the ground's luminance at +20 and +43 px of elevation and
 ## vanishing in between. BODY_CONTRAST_FLOOR is the rule every object base colour must satisfy

@@ -39,6 +39,9 @@ var _height_query: HeightQuery
 var _ground_gradient := Vector2.ZERO
 var _on_feature := false
 var _height := 0.0
+## The ground under the car, from the same samples that drive _height: equal to _height while
+## grounded, and the ground the car is falling toward while airborne. Presentation only.
+var _ground_height := 0.0
 var _vertical_velocity := 0.0
 var _airborne := false
 var _air_time := 0.0
@@ -52,6 +55,7 @@ var _landed_this_tick := false
 @onready var _skid_feedback: Line2D = $SkidFeedback
 @onready var _lift: Node2D = $Lift
 @onready var _shadow: Polygon2D = $Shadow
+@onready var _shadow_base_position: Vector2 = $Shadow.position
 
 
 func _ready() -> void:
@@ -95,9 +99,17 @@ func _process(delta: float) -> void:
 	_dust.emitting = on_dirt and not _airborne and get_speed() > WorldScale.metres(4.0)
 	if consume_landing_event():
 		_landing_burst.restart()
-	var metres := WorldScale.to_metres(_height)
-	_lift.position = Vector2(0.0, -_height * tuning.lift_pixels_per_pixel)
+	# Two kinds of height, two kinds of cue (#52, the off-track objects' rule). The ground under the
+	# car lifts body and shadow together, straight up the screen whatever the heading, so a car on
+	# a rise draws level with a rock on the same rise and never ahead of its own shadow. Only the
+	# height above that ground opens a gap between body and shadow, grows the body and fades the
+	# shadow. The offsets are child positions in the car's frame, so the screen-up vector is
+	# turned back through the car's rotation.
+	var above_ground := maxf(_height - _ground_height, 0.0)
+	var metres := WorldScale.to_metres(above_ground)
+	_lift.position = Vector2(0.0, -_height * tuning.lift_pixels_per_pixel).rotated(-global_rotation)
 	_lift.scale = Vector2.ONE * (1.0 + metres * tuning.scale_per_metre)
+	_shadow.position = _shadow_base_position + Vector2(0.0, -_ground_height * tuning.lift_pixels_per_pixel).rotated(-global_rotation)
 	_shadow.modulate.a = clampf(1.0 - metres * SHADOW_FADE_PER_METRE, 0.25, 1.0)
 	z_index = 1 if _airborne else 0
 	_skid_feedback.visible = _slip_ratio >= tuning.feedback_slip_threshold or _input_state.handbrake > 0.25
@@ -199,6 +211,7 @@ func set_surface_query(surface_query: SurfaceQuery) -> void:
 func set_height_query(height_query: HeightQuery) -> void:
 	_height_query = height_query
 	_height = _sample_ground_at(global_position).ground_height
+	_ground_height = _height
 
 
 func is_airborne() -> bool:
@@ -207,6 +220,11 @@ func is_airborne() -> bool:
 
 func get_height() -> float:
 	return _height
+
+
+## The ground under the car: its own height while grounded, the ground below it while airborne.
+func get_ground_height() -> float:
+	return _ground_height
 
 
 func get_vertical_velocity() -> float:
@@ -361,6 +379,7 @@ func _update_height_channel(state: PhysicsDirectBodyState2D, delta: float) -> vo
 		_vertical_velocity -= tuning.gravity * delta
 		_height += _vertical_velocity * delta
 		_air_time += delta
+		_ground_height = ahead.ground_height
 		if _height <= ahead.ground_height:
 			_land(state, ahead)
 		return
@@ -385,6 +404,7 @@ func _update_height_channel(state: PhysicsDirectBodyState2D, delta: float) -> vo
 		_airborne = true
 		_air_time = 0.0
 		_height = maxf(predicted, ahead.ground_height)
+		_ground_height = ahead.ground_height
 		return
 	# Riding the ground follows it down as far as it goes, but rises only as fast as the ground
 	# itself rises. On any continuous surface those are the same number, so a face is ridden
@@ -392,6 +412,7 @@ func _update_height_channel(state: PhysicsDirectBodyState2D, delta: float) -> vo
 	# conjunct above fixes for flight. Without it the car steps up the wall for free.
 	var rise_limit := maxf(maxf(_vertical_velocity, ground_rate_ahead) * delta, 0.0)
 	_height = minf(ahead.ground_height, _height + rise_limit)
+	_ground_height = _height
 
 
 func _land(state: PhysicsDirectBodyState2D, ground: HeightQuery.HeightSample) -> void:
@@ -400,6 +421,7 @@ func _land(state: PhysicsDirectBodyState2D, ground: HeightQuery.HeightSample) ->
 	var kept := clampf(1.0 - tuning.landing_speed_loss * WorldScale.to_metres(impact), MIN_LANDING_SPEED_FRACTION, 1.0)
 	state.linear_velocity *= kept
 	_height = ground.ground_height
+	_ground_height = _height
 	_vertical_velocity = ground_rate
 	_airborne = false
 	_landed_this_tick = true
@@ -428,6 +450,7 @@ func _apply_safe_reset(state: PhysicsDirectBodyState2D) -> void:
 	_reverse_hold_time = 0.0
 	_safe_pose_elapsed = 0.0
 	_height = _sample_ground_at(_safe_reset_pose.origin).ground_height
+	_ground_height = _height
 	_vertical_velocity = 0.0
 	_airborne = false
 	_air_time = 0.0

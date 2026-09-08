@@ -81,6 +81,9 @@ func _capture_stills(main_scene: PackedScene, lines: Array[String]) -> bool:
 		var shadow := visual.get_child(0) as Polygon2D
 		var body := visual.get_child(1) as Polygon2D
 		var lift := visual.transform.basis_xform(body.position)
+		# Since #52 the shadow is cast from the lifted body rather than from the foot.
+		var shadow_anchor := visual.transform.basis_xform(shadow.position)
+		var cast := visual.transform.basis_xform(shadow.position - body.position)
 		var ground := shading.shade(TerrainShading.GROUND_COLOR, sample)
 		# How far the body polygon reaches below its own origin on screen (rotation and scale
 		# applied), and so where its base ends up relative to the foot once lifted: positive is
@@ -89,12 +92,14 @@ func _capture_stills(main_scene: PackedScene, lines: Array[String]) -> bool:
 		for point in body.polygon:
 			body_extent_below = maxf(body_extent_below, visual.transform.basis_xform(point).y)
 		var base_above_foot := -(lift.y + body_extent_below)
-		lines.append("still=%s file=seed-%d-%s.png object=%s position=(%.1f, %.1f) height=%.2f lift_px=%.2f body_extent_below_origin_px=%.2f body_base_above_foot_px=%.2f shadow_factor=%.3f shadow_offset_px=%.2f body_luminance=%.3f ground_luminance=%.3f ratio=%.3f" % [
+		lines.append("still=%s file=seed-%d-%s.png object=%s position=(%.1f, %.1f) height=%.2f lift_px=%.2f body_extent_below_origin_px=%.2f body_base_above_foot_px=%.2f shadow_anchor_lift_px=%.2f shadow_factor=%.3f shadow_cast_from_body_px=%.2f body_luminance=%.3f ground_luminance=%.3f ratio=%.3f" % [
 			shot_name, CAPTURE_SEED, shot_name, placement.stable_id, placement.transform.origin.x, placement.transform.origin.y, sample.ground_height,
-			-lift.y, body_extent_below, base_above_foot, TerrainShading.shadow_length_factor(sample.ground_height), shadow.position.length() * placement.scale_factor,
+			-lift.y, body_extent_below, base_above_foot, -shadow_anchor.y, TerrainShading.shadow_length_factor(sample.ground_height), cast.length(),
 			body.color.get_luminance(), ground.get_luminance(), body.color.get_luminance() / ground.get_luminance(),
 		])
 		_check(is_equal_approx(lift.y, -sample.ground_height * TerrainShading.LIFT_PIXELS_PER_PIXEL), "the %s still's body is lifted by the ground height its tint was drawn from" % shot_name)
+		_check(cast.normalized().is_equal_approx(TerrainShading.SHADOW_DIRECTION) and cast.length() > 1.0, "the %s still's shadow is cast from the lifted body along the shadow direction (%.2f px)" % [shot_name, cast.length()])
+		_check(absf(shadow_anchor.y - lift.y) < cast.length(), "the %s still's shadow anchor moved with the body (%.2f vs %.2f px up the screen)" % [shot_name, -shadow_anchor.y, -lift.y])
 		_check(await _save(viewport, camera, placement.transform.origin, "seed-%d-%s.png" % [CAPTURE_SEED, shot_name]), "the %s still is saved" % shot_name)
 	# The car beside the highest tree: two lifts on one hill.
 	var high_tree: OfftrackObjectPlacement = shots[0][1]
@@ -141,6 +146,9 @@ func _open_session(main_scene: PackedScene, seed: int) -> Dictionary:
 		lifecycle.suspension_requested.disconnect(suspension)
 	session.set_session_paused(false)
 	_check(not paused, "the scene tree is running for this capture session")
+	# The "Seed N ready" banner the restart raises is session UI, not the world; a still is of the
+	# world.
+	(session.get_node("%StatusPanel") as Control).visible = false
 	var camera := Camera2D.new()
 	camera.name = "ObjectCaptureCamera"
 	camera.top_level = true

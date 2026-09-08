@@ -13,7 +13,9 @@ func _init() -> void:
 
 ## With a height query, every object stands on the ground under it: its body is lifted up the
 ## screen by TerrainShading.lift_offset of the ground height at its foot, and each solid's shadow
-## is stretched and thrown further for that height. With a shading as well, every body is coloured
+## is cast from that lifted body -- anchored to the lift, then stretched and thrown further for the
+## height -- so it stays under the body on a rise and cannot land on the lit side in a hollow
+## (#52; until then it stayed at the foot). With a shading as well, every body is coloured
 ## by shade() from the same sample, so an object and the ground under it brighten and darken
 ## together and their contrast is the contrast of their base colours. Without a query every object
 ## sits at its placement with its factory shadow, as on the flat fixtures. The shadow direction is
@@ -171,30 +173,35 @@ func _build_solids(placements: Array[OfftrackObjectPlacement], _catalog: Offtrac
 		visual.scale = Vector2.ONE * placement.scale_factor
 		var body := visual.get_child(1) as Polygon2D
 		var ground_height := 0.0
+		var lift := Vector2.ZERO
 		if height_query != null:
 			var sample := height_query.sample_at(placement.transform.origin)
 			ground_height = sample.ground_height
 			# The lift is a screen distance; the body is a child of a rotated, scaled node, so the
 			# offset is taken back through the inverse of that node's basis or a 1.25x tree would
 			# lift 1.25x as far. The affine inverse, not basis_xform_inv: that one transposes, which
-			# only inverts an unscaled basis. The shadow stays at the foot.
-			body.position = visual.transform.affine_inverse().basis_xform(TerrainShading.lift_offset(ground_height))
+			# only inverts an unscaled basis. The shadow below is cast from this same anchor.
+			lift = visual.transform.affine_inverse().basis_xform(TerrainShading.lift_offset(ground_height))
+			body.position = lift
 			if shading != null:
 				body.color = shading.shade(body.color, sample)
-		_cast_shadow(visual.get_child(0) as Polygon2D, visual.rotation, TerrainShading.shadow_length_factor(ground_height))
+		_cast_shadow(visual.get_child(0) as Polygon2D, lift, visual.rotation, TerrainShading.shadow_length_factor(ground_height))
 		parent.add_child(visual)
 		_solid_visual_count += 1
 		_visual_count += 1
 
 
-## Throws the shadow along the world's shadow direction, whatever the object's own rotation, at
-## the factory's offset distance times the factor, and stretches the polygon along the same axis
-## by the factor. The factory places every shadow in the object's local frame, so before this a
-## rotated tree's shadow fell wherever the tree happened to turn; the ground shading lights every
-## slope from one direction, and the shadows now fall away from that same light.
-func _cast_shadow(shadow: Polygon2D, world_rotation: float, factor: float) -> void:
+## Casts the shadow from the anchor -- the body's lift, in the object's local frame -- along the
+## world's shadow direction, whatever the object's own rotation, at the factory's offset distance
+## times the factor, and stretches the polygon along the same axis by the factor. The factory
+## places every shadow in the object's local frame, so before this a rotated tree's shadow fell
+## wherever the tree happened to turn; the ground shading lights every slope from one direction,
+## and the shadows now fall away from that same light. Anchoring to the lift is what keeps the
+## shadow under a raised body: with the anchor at the foot, #51's stills showed a tree on a +42 px
+## rise hovering 20 px clear of its shadow, and a tree in a hollow with its shadow on the lit side.
+func _cast_shadow(shadow: Polygon2D, anchor: Vector2, world_rotation: float, factor: float) -> void:
 	var local_axis := TerrainShading.SHADOW_DIRECTION.rotated(-world_rotation)
-	shadow.position = local_axis * shadow.position.length() * factor
+	shadow.position = anchor + local_axis * shadow.position.length() * factor
 	var stretched := PackedVector2Array()
 	stretched.resize(shadow.polygon.size())
 	for index in shadow.polygon.size():

@@ -4,5 +4,5 @@
 still=slope file=seed-0-slope.png position=(2017.5, -4010.0) height=-22.43 gradient=(-0.0308, -0.0121) height_term=-0.427 light_term=-0.347 dirt_brightness=0.686 car_height=-22.43
 still=crest file=seed-0-crest.png position=(-396.9, -3330.7) height=40.79 gradient=(0.0105, 0.0116) height_term=0.777 light_term=0.179 dirt_brightness=1.412 car_height=40.79
 still=hollow file=seed-0-hollow.png position=(2918.7, -3258.3) height=-38.02 gradient=(-0.0001, 0.0001) height_term=-0.724 light_term=0.000 dirt_brightness=0.674 car_height=-38.02
-still=tree-high file=seed-0-tree-high.png tree=v1:0:-2:-11 position=(-324.9, -2688.7) height=42.14 shadow_factor=1.506 shadow_offset_px=12.32
-still=tree-low file=seed-0-tree-low.png tree=v1:0:12:-16 position=(3096.3, -3849.8) height=-36.32 shadow_factor=0.564 shadow_offset_px=4.42
+still=tree-high file=seed-0-tree-high.png tree=v1:0:-2:-11 position=(-324.9, -2688.7) height=42.14 shadow_factor=1.506 shadow_offset_px=34.55
+still=tree-low file=seed-0-tree-low.png tree=v1:0:12:-16 position=(3096.3, -3849.8) height=-36.32 shadow_factor=0.564 shadow_offset_px=39.57

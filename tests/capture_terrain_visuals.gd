@@ -152,6 +152,9 @@ func _open_session(main_scene: PackedScene, seed: int) -> Dictionary:
 		lifecycle.suspension_requested.disconnect(suspension)
 	session.set_session_paused(false)
 	_check(not paused, "the scene tree is running for this capture session")
+	# The "Seed N ready" banner the restart raises is session UI, not the world; a still is of the
+	# world.
+	(session.get_node("%StatusPanel") as Control).visible = false
 	var camera := Camera2D.new()
 	camera.name = "TerrainCaptureCamera"
 	camera.top_level = true
