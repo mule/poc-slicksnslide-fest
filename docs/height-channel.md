@@ -1,9 +1,12 @@
 # The height channel
 
-The circuit is flat everywhere except where a generated jump ramp says otherwise. This document
-describes the one vertical axis the game has: how ground height is asked for rather than triggered,
-how ramps are placed, what the car does with a crest, what an airborne car can and cannot hit, and
-what the drive and the captures actually measured.
+The ground is the terrain field of epic #46 — see [The terrain field](terrain.md) — with a
+generated jump ramp summed onto it wherever the ramp placer put one. This document describes the
+vertical axis itself: how ground height is asked for rather than triggered, how ramps are placed,
+what the car does with a crest, what an airborne car can and cannot hit, how elevation is drawn,
+and what the drives and the captures actually measured. When it was first written the circuit was
+flat everywhere except on a ramp; the sections marked #47, #48, #50, #51 and #52 record what the
+terrain epic changed.
 
 ## A query, not a trigger
 
@@ -236,14 +239,17 @@ Ramps and airborne cars are drawn, not simulated, by `world/height/jump_ramp_vis
 
 - Each ramp is a lighter dirt quad the width of the road, a crest line across it, and a chevron on
   each face pointing at the crest, all under `TrackRuntime/JumpRamps` at `z_index = -1`.
-- The car's `Lift` node is offset by `-_height * lift_pixels_per_pixel` (1 px per px of height) and
-  scaled by `1 + metres * scale_per_metre` (+4% per metre), so the body rises off its own shadow
-  and grows slightly. The offset is a child position, so it is in the car's own frame: the body
-  separates from its shadow along the car's heading rather than toward the top of the screen. The
-  cue is the gap, not its direction, and the shadow's own offset is in the same frame, so the two
-  stay consistent — but it does mean a car pointing right reads as being *ahead* of its shadow.
-- The shadow fades with height (`SHADOW_FADE_PER_METRE` 0.15, clamped to a 0.25 floor) and stays
-  where the car actually is, so the gap between body and shadow is the readable cue.
+- The car's `Lift` node is offset by `-_height * lift_pixels_per_pixel` (1 px per px of height),
+  straight up the screen whatever the heading (#52; until then the offset was in the car's own
+  frame, so a car pointing right drew *ahead* of its shadow). The shadow is offset by the same rule
+  from the *ground* height under the car, so on a hill body and shadow rise together, level with an
+  off-track rock on the same rise, and the car never floats above its own shadow while grounded.
+- Only the height *above* the ground opens a gap between body and shadow, scales the body by
+  `1 + metres * scale_per_metre` (+4% per metre) and fades the shadow (`SHADOW_FADE_PER_METRE`
+  0.15, clamped to a 0.25 floor). A car parked on a 3 m rise draws at full shadow and full size; a
+  car 3 m in the air over level ground draws 37.5 px above a shadow at 0.55 alpha and 12% larger.
+  `tests/jump_ramp_visuals_test.gd` pins both halves on a car pointing along +x, where a
+  heading-frame lift fails every screen-frame check.
 - `z_index` becomes 1 while airborne, so a flying car draws over scenery it is passing.
 - Dust stops while airborne; a landing restarts the one-shot landing burst.
 
@@ -273,8 +279,12 @@ Two cues, one colour function, `TerrainShading.shade(base, sample)`:
   steepest saturates it. The gradient is the field's exact derivative, so the cue costs no second
   sample and no finite difference.
 
-The same function colours everything the track draws, so nothing can contradict the ground it
-sits on: the two road ribbons, the two boundary lines, and the ramp wedges. The first round left
+The same function colours the ground grid, the two road ribbons, the two boundary lines, the ramp
+wedges and, since #51, the object bodies, so none of those can contradict the ground it sits on.
+That is the whole list: the ramp crest line and chevrons, the checkpoint gates and start/finish
+line, and the car are flat-coloured furniture drawn over shaded ground — they read no height at
+all rather than the wrong one (#52 narrowed this claim; the first version said "everything the
+track draws"). The first round left
 the wedges flat, and a ramp in a hollow drew as the brightest thing on screen — the exact failure
 this task exists to prevent; a wedge is now a six-point polygon (a foot, the crest and a foot on
 each side) coloured from the map 1 px inside each corner, so a ramp in a hollow is as dark as the
@@ -323,7 +333,8 @@ times as long as the same tree on level ground. The factory had placed every sha
 object's local frame, so a rotated tree's shadow fell wherever the tree happened to turn; the
 shadows now fall away from the same light the ground is lit by, whatever the object's rotation —
 on a track with no height query too, where the length stays the factory's but the direction is
-still the world's.
+still the world's. Since #52 the shadow is cast from the *lifted* body rather than from the foot:
+see *Objects on the ground* below.
 
 ### Objects on the ground (#51)
 
@@ -333,10 +344,12 @@ height the shared `TrackHeightMap` reports at its foot — `LIFT_PIXELS_PER_PIXE
 own `lift_pixels_per_pixel`, pinned equal by the object suite so a car parked beside a rock on a
 rise draws level with it — and coloured by the same `shade()` that colours the ground, from the
 same sample. The lift is a screen direction whatever the object's rotation (the body is a child of
-a rotated node, so the offset is rotated into that frame); the shadow stays at the foot, thrown
-along the light and lengthened as before, so the body stands above its own shadow the way the car
-does — and on a high rise that is exactly how it reads; see *What the object stills show*
-below. Decorative batches are uploaded as one `MultiMesh.buffer` per chunk, with the lift in each
+a rotated node, so the offset is rotated into that frame). #51 left the shadow at the foot, thrown
+along the light and lengthened as before, so the body stood above its own shadow; its stills showed
+that reading as floating on a rise and as sunk under a lit-side shadow in a hollow, and #52
+anchored the shadow to the lift: it is cast from the lifted body along the shadow direction, at the
+factory offset times the length factor, so it stays under the body on a rise and cannot cross to
+the lit side in a hollow. See *What the object stills show* below. Decorative batches are uploaded as one `MultiMesh.buffer` per chunk, with the lift in each
 instance transform and the ground brightness as the instance colour, which the GPU multiplies into
 the mesh colour exactly as `shade()` multiplies a base; the visuals keep the uploaded buffer so
 the suite can decode what was drawn, because the headless renderer discards instance data.
@@ -371,27 +384,42 @@ failure live.
 `tests/capture_offtrack_object_terrain.gd` captures seed 0's highest tree (+42.1 px), lowest tree
 (−36.3 px) and highest rock (+43.9 px), and the car parked beside the highest tree, overlay off,
 with `docs/evidence/terrain/object-terrain-trace.txt` recording the lift, the body's extent below
-its origin, and where its base ends up relative to the foot. The honest reading of those stills:
+its origin, where its base ends up relative to the foot, and since #52 the shadow anchor's lift and
+the shadow's cast from the body. The #51 stills are kept beside the current ones with a `-51`
+suffix so the change can be seen rather than read.
 
-- **On a high rise the object reads as floating, not as standing on a rise.** The tree body at
-  +42.1 px is lifted 42 px while its polygon reaches only 22 px below its origin, so its base
-  hangs 19.9 px above the foot (the rock at +43.9 px: 24.1 px) with a strip of tinted but
-  undisplaced ground between the body and the shadow. In `seed-0-object-high.png` and
-  `seed-0-rock-high.png` every raised solid is a bright shape hovering above a detached dark
-  shadow, and nothing in the frame says "hill" except the tint.
-- **In a hollow the shadow lands on the lit side.** At −36.3 px the body is lowered 36 px while the
-  shadow stays at the foot with its shortened offset, so in `seed-0-object-low.png` the shadow
-  sits above and left of the body — toward the light — and the body reads as sunk under it.
-- **The car and the tree agree.** In `seed-0-car-beside-high.png` the car, parked heading up,
-  rides at 41.4 px and the tree stands at 42.1 px; both are drawn about 42 px above their
-  shadows and the pair is consistent. The car's lift is along its heading and the objects' is up
-  the screen, so with the car pointing right the two would separate in different directions
-  (see *Limitations*).
+**Before (#51, shadow at the foot):**
 
-This is the treatment the issue asked for and the one the car already has, and it is recorded
-here as a look for #52 to decide rather than one this task decides: the candidates are a smaller
-lift rate shared by car and objects, a lift that scales the body rather than displacing it, or
-leaving the ground tint and the shadow length as the only cues.
+- On a high rise the object read as floating. The tree body at +42.1 px was lifted 42 px while its
+  polygon reaches only 22 px below its origin, so its base hung 19.9 px above the foot (the rock at
+  +43.9 px: 24.1 px) with a strip of tinted but undisplaced ground between body and shadow: a bright
+  shape hovering above a detached dark shadow (`seed-0-object-high-51.png`, `seed-0-rock-high-51.png`).
+- In a hollow the shadow landed on the lit side. At −36.3 px the body was lowered 36 px while the
+  shadow stayed at the foot with its shortened offset, so the shadow sat above and left of the body,
+  toward the light, and the body read as sunk under it (`seed-0-object-low-51.png`). This was a
+  defect #51 introduced: before bodies moved vertically, shadows only varied in length.
+
+**After (#52, shadow anchored to the lift), same sites, same frames:**
+
+- `seed-0-object-high.png`: the shadow anchor is lifted 33.4 px with the 42.1 px body (the
+  difference is the 12.3 px cast along the shadow direction, 1.51× the factory offset), so the
+  shadow sits under the body's lower-right edge with no ground between them. The tree reads as
+  standing, with a slightly long shadow; the floating look is gone. Nothing in the frame says
+  "hill" except the tint and that shadow length.
+- `seed-0-rock-high.png`: every raised solid in the frame has its shadow attached at its
+  lower-right, cast 1.5× long; the field of hovering shapes reads as objects on lighter ground.
+- `seed-0-object-low.png`: the shadow anchor is lowered 39.5 px with the 36.3 px body and cast
+  4.4 px (0.56×) toward the lower-right, so it can no longer reach the lit side. But that short cast
+  on the darkest ground there is leaves almost nothing visible: the lowered tree reads as a flat
+  shape on dark ground with barely a shadow. This is the failure mode the fix invited — a shadow
+  reading as painted on rather than cast — and it shows on the low sites, not the high ones.
+- `seed-0-car-beside-high.png`: the car (41.4 px, heading up) and the tree (42.1 px) both stand
+  over attached shadows; the pair agrees whatever the car's heading now that its lift is in the
+  screen's frame.
+
+The lift itself, the lift rate and the tint are unchanged; only the shadow anchor moved, plus the
+car's frame. The rejected alternatives were a smaller lift (elevation stops reading on objects),
+accepting the look (the lowered case was objectively wrong, not stylised) and dropping the lift.
 
 ## Determinism
 
@@ -552,17 +580,26 @@ velocity by driving.
   for its whole envelope, which is how the same flights come within 42.6 px of a rock in that
   frame: the closest pass (seed 6, ramp `h3:6:160:0`, launched from ground at +19.0 px) was
   0.66 px above the ground at its nearest point to the rock, with the low layer already gone from
-  its mask. The vehicle was out of #51's scope; this is the first thing #52 should decide, and
-  the object suite reports both frames so the fix can be measured.
+  its mask. #52 decided to **defer** it: the fix is one comparison in the vehicle, but
+  `tests/airborne_obstacle_level_test.gd` proves the layer rule by holding a *grounded* car on a
+  raised plateau as a stand-in for flight, so that fixture has to be redesigned around a genuinely
+  airborne car first; the engine-frame column of the reachability table changes with it; and
+  whether a grounded car on a rise should hit a rock is a collision rule the epic never made. The
+  object suite reports both frames so the fix can be measured when it is taken.
 - **No elevation anywhere else — closed in #47, drawn in #50, populated in #51.** The ground is
   now the terrain field of #49 under the whole play area, with the ramps summed onto it, so the
   road climbs and drops with it; since #50 the ground and the road are tinted and lit from the
   same map the car drives on (see *Elevation on screen*); and since #51 off-track objects stand
   on it, lifted and shaded from the same map, with their colliders still flat circles.
-- **A raised object reads as floating.** Objects and the car are lifted up the screen by their
-  ground height while the ground itself is only tinted, so on a +40 px rise a tree hangs 20 px
-  clear of its own shadow and in a hollow its shadow lands on the lit side. Measured and shown in
-  *What the object stills show*; the look is #52's call.
+- **A raised object reads as floating — closed in #52.** Shadows are now anchored to the body's
+  lift, for the objects and for the car, so no body hangs clear of its own shadow and no shadow
+  lands on the lit side; see *What the object stills show*. What remains is the inverse: in a
+  hollow the shortened shadow, cast 4.4 px from a body the same size over the darkest ground, nearly
+  disappears, and the lowered object reads as a flat shape rather than as standing in a dip.
+- **Off-road relief reads through tint and shadow length only.** The ground is tinted, never
+  displaced, and the car's shadow does not lengthen with the ground as the solids' do. A hill is
+  legible on the road (0.67× to 1.41× on the ribbon) and moderately legible off it; see
+  [The terrain field](terrain.md#presentation).
 - **No mid-air control.** `airborne_steering_authority` is data and defaults to 0.0. Any non-zero
   value is a tuning decision no drive has justified yet.
 - **A landing on a solid is a collision.** Nothing keeps objects out of a landing zone; ramps are
@@ -611,21 +648,27 @@ one and the pin fails.
 with the slope it came from. The suite's other cases use the steeper hump only; it is a harsher test
 of the same model, not the shape the game ships.
 
-The graphical evidence capture is not headless:
+The graphical evidence captures are not headless:
 
 ```sh
 godot --path . --script res://tests/capture_height_channel_evidence.gd
 godot --path . --script res://tests/capture_terrain_visuals.gd
+godot --path . --script res://tests/capture_offtrack_object_terrain.gd
+godot --path . --script res://tests/capture_terrain_evidence.gd
 ```
 
-The second writes the stills under [`docs/evidence/terrain/`](evidence/terrain/): the road's
-steepest, highest and lowest samples on seed 0 with the car parked on each and the diagnostics
-overlay off, and the highest- and lowest-standing trees, with the sample each still was drawn from
-in `terrain-visuals-trace.txt`.
+The second writes stills under [`docs/evidence/terrain/`](evidence/terrain/): the road's steepest,
+highest and lowest samples on seed 0 with the car parked on each and the diagnostics overlay off,
+and the highest- and lowest-standing trees, with the sample each still was drawn from in
+`terrain-visuals-trace.txt`. The third writes the object stills of *What the object stills show*.
+The fourth writes the seeds 0-19 terrain ledger, laps seeds 0, 4 and 9 through the production
+session and writes the drive trace and the hill, slope, ramp-on-terrain, apex and landing stills;
+see [The terrain field](terrain.md#verification).
 
-Eleven mutation flags exist to prove those suites are load-bearing. Each must exit non-zero, and each
-must do so on its own assertion rather than on a load error — check the first `FAIL:` line, not
-just the exit code:
+Fifteen mutation flags exist to prove these suites are load-bearing (the whole project has
+twenty-three; [The terrain field](terrain.md#every-mutation-flag) lists them all). Each must exit
+non-zero, and each must do so on its own assertion rather than on a load error — check the first
+`FAIL:` line, not just the exit code:
 
 ```sh
 godot --headless --path . --script res://tests/jump_ramp_placement_test.gd -- --break-height-seed
@@ -639,6 +682,10 @@ godot --headless --path . --script res://tests/terrain_height_map_test.gd -- --b
 godot --headless --path . --script res://tests/terrain_height_map_test.gd -- --break-flank-curvature
 godot --headless --path . --script res://tests/vehicle_terrain_test.gd -- --break-terrain-lift-off
 godot --headless --path . --script res://tests/vehicle_terrain_test.gd -- --break-speed-clamp
+godot --headless --path . --script res://tests/terrain_field_contract_test.gd -- --break-terrain-version
+godot --headless --path . --script res://tests/terrain_field_contract_test.gd -- --break-terrain-seed
+godot --headless --path . --script res://tests/terrain_field_contract_test.gd -- --break-terrain-curvature
+godot --headless --path . --script res://tests/offtrack_object_terrain_test.gd -- --break-rock-corridor
 ```
 
 | Flag | Breaks | First failing assertion |
@@ -654,10 +701,19 @@ godot --headless --path . --script res://tests/vehicle_terrain_test.gd -- --brea
 | `--break-flank-curvature` | quarters the flank width, so its curvature breaks the crossing-speed bound | `terrain plus flank curvature (0.015289650) stays under the lift-off curvature at the off-track terminal speed (0.004883371)` |
 | `--break-terrain-lift-off` | quadruples the terrain amplitude under the lift-off drive | `bare terrain never lifts the car off at max_safe_speed in the real integrator (44 airborne of 36709 ticks over 24 lines)` |
 | `--break-speed-clamp` | raises max_safe_speed to 2000 under the clamp drive | `on the synthetic descent the car never exceeds the shipped max_safe_speed (peak 683.215 of 640.0 px/s)` |
+| `--break-terrain-version` | bumps the catalog version on every second field build | `seed 0 terrain fingerprint repeats` |
+| `--break-terrain-seed` | derives every second build's seed from the wrong domain | `seed 0 terrain fingerprint repeats` |
+| `--break-terrain-curvature` | quadruples the terrain amplitude | `the catalog's curvature bound (0.0007500000) stays under the lift-off curvature at max_safe_speed (0.0002993775)` |
+| `--break-rock-corridor` | removes the recovery corridor and fills every hazard cell with a rock up to the road edge | `no generated rock in seeds 0..19 is reachable from a flight above the clearance (21 reachable)` |
 
 The safe-pose capture-rate assertion has no flag: it is demonstrated by reverting the gate in
 `vehicle/top_down_car.gd` to `_ground_height > 0.0`, which fails the rate on all three driven seeds
 (74 of 128, 71 of 157, 54 of 160) and records a pose on a ramp on two of them.
+
+The shadow-anchor assertions have no flag either: with the anchor left at the foot (the #51 code),
+`tests/terrain_visuals_test.gd` fails five fixture assertions and `tests/offtrack_object_terrain_test.gd`
+fails its plateau fixture and reports 174 and 265 shadow mismatches on seeds 0 and 10; the #52
+report records that run.
 
 The shading-agreement assertions have no flag either: the shading has no production switch for
 sampling the wrong field. They are demonstrated by making `TrackRuntime` reconstruct the field
@@ -835,7 +891,7 @@ separations instead. And in the engine's frame a flight from a ramp on raised gr
 layer dropped from launch to landing, which is why that frame comes within 42.6 px of a rock: seed
 6's ramp `h3:6:160:0`, launched from ground at +19.0 px on a -60° heading from the road-edge seat,
 passes rock `v1:6:-17:8` while 0.66 px above the ground with the low layer already dropped. Not a
-reachable rock, but a 43 px margin resting on a mask rule that #52 has to revisit anyway; a car
+reachable rock, but a 43 px margin resting on a mask rule #52 deferred (see *Limitations*); a car
 driving on that rise passes through the same rock without jumping at all.
 
 `tests/offtrack_object_terrain_test.gd` asserts all of it: no reachable rock, both separations
@@ -871,15 +927,23 @@ is modified.
 
 ## Evidence
 
-Objects on the terrain (#51), seed 0, graphical, overlay off; values in
-[`object-terrain-trace.txt`](evidence/terrain/object-terrain-trace.txt):
+Objects on the terrain, seed 0, graphical, overlay off; values in
+[`object-terrain-trace.txt`](evidence/terrain/object-terrain-trace.txt). The `-51` files are the
+#51 stills of the same sites with the shadow at the foot, kept for comparison:
 
 | Still | What it shows |
 | --- | --- |
-| [`seed-0-object-high.png`](evidence/terrain/seed-0-object-high.png) | the highest tree, +42.1 px: body lifted 42 px, base 19.9 px above the foot, shadow 1.51× — reads as floating |
-| [`seed-0-object-low.png`](evidence/terrain/seed-0-object-low.png) | the lowest tree, −36.3 px: body lowered 36 px, shadow 0.56× on the lit side of it |
-| [`seed-0-rock-high.png`](evidence/terrain/seed-0-rock-high.png) | the highest rock, +43.9 px, among raised trees: every solid hovers above a detached shadow |
-| [`seed-0-car-beside-high.png`](evidence/terrain/seed-0-car-beside-high.png) | the car at 41.4 px beside the tree at 42.1 px: the two lifts agree |
+| [`seed-0-object-high.png`](evidence/terrain/seed-0-object-high.png) | the highest tree, +42.1 px: body lifted 42 px, shadow anchor lifted 33.4 px and cast 12.3 px (1.51×) from the body — the tree stands on its shadow |
+| [`seed-0-object-low.png`](evidence/terrain/seed-0-object-low.png) | the lowest tree, −36.3 px: body lowered 36 px, shadow cast 4.4 px (0.56×) toward the lower-right and nearly invisible on the dark ground |
+| [`seed-0-rock-high.png`](evidence/terrain/seed-0-rock-high.png) | the highest rock, +43.9 px, among raised trees: every solid has its shadow attached at its lower-right |
+| [`seed-0-car-beside-high.png`](evidence/terrain/seed-0-car-beside-high.png) | the car at 41.4 px beside the tree at 42.1 px, both standing over attached shadows |
+| [`seed-0-object-high-51.png`](evidence/terrain/seed-0-object-high-51.png) | before #52: the same tree, base 19.9 px above the foot, hovering over a detached shadow |
+| [`seed-0-object-low-51.png`](evidence/terrain/seed-0-object-low-51.png) | before #52: the same lowered tree with its shadow above and left of it, on the lit side |
+| [`seed-0-rock-high-51.png`](evidence/terrain/seed-0-rock-high-51.png) | before #52: the same rock field, every solid hovering |
+| [`seed-0-car-beside-high-51.png`](evidence/terrain/seed-0-car-beside-high-51.png) | before #52: car and tree both drawn 42 px above detached shadows |
+
+The terrain ledger, the three-seed drive trace and the hill, slope, ramp-on-terrain, apex and
+landing stills for seeds 0, 4 and 9 are listed in [The terrain field](terrain.md).
 
 Everything below is under [`docs/evidence/height-channel/`](evidence/height-channel/) and is
 regenerated by one graphical command; see
