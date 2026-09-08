@@ -701,10 +701,10 @@ godot --headless --path . --script res://tests/offtrack_object_terrain_test.gd -
 | `--break-flank-curvature` | quarters the flank width, so its curvature breaks the crossing-speed bound | `terrain plus flank curvature (0.015289650) stays under the lift-off curvature at the off-track terminal speed (0.004883371)` |
 | `--break-terrain-lift-off` | quadruples the terrain amplitude under the lift-off drive | `bare terrain never lifts the car off at max_safe_speed in the real integrator (44 airborne of 36709 ticks over 24 lines)` |
 | `--break-speed-clamp` | raises max_safe_speed to 2000 under the clamp drive | `on the synthetic descent the car never exceeds the shipped max_safe_speed (peak 683.215 of 640.0 px/s)` |
-| `--break-terrain-version` | bumps the catalog version on every second field build | `seed 0 terrain fingerprint repeats` |
-| `--break-terrain-seed` | derives every second build's seed from the wrong domain | `seed 0 terrain fingerprint repeats` |
-| `--break-terrain-curvature` | quadruples the terrain amplitude | `the catalog's curvature bound (0.0007500000) stays under the lift-off curvature at max_safe_speed (0.0002993775)` |
-| `--break-rock-corridor` | removes the recovery corridor and fills every hazard cell with a rock up to the road edge | `no generated rock in seeds 0..19 is reachable from a flight above the clearance (21 reachable)` |
+| `--break-terrain-version` | bumps the catalog version on every second field build | `two fields from the same seed and version agree bit for bit at every position` |
+| `--break-terrain-seed` | derives every second build's seed from the wrong domain | `two fields from the same seed and version agree bit for bit at every position` |
+| `--break-terrain-curvature` | quadruples the terrain amplitude | `the catalog's curvature bound (0.0007500000) stays under the lift-off curvature at max_safe_speed (0.0002993774)` |
+| `--break-rock-corridor` | removes the recovery corridor and fills every hazard cell with a rock up to the road edge | `no generated rock in seeds 0..19 is reachable from a flight above the clearance over that rock's own ground (21 reachable)` |
 
 The safe-pose capture-rate assertion has no flag: it is demonstrated by reverting the gate in
 `vehicle/top_down_car.gd` to `_ground_height > 0.0`, which fails the rate on all three driven seeds
