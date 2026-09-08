@@ -1,6 +1,12 @@
 class_name OfftrackObjectMeshFactory
 extends RefCounted
 
+## Every body colour here is a base that TerrainShading multiplies by the ground's brightness at
+## the object's foot, so each must keep TerrainShading.BODY_CONTRAST_FLOOR of luminance ratio
+## against TerrainShading.GROUND_COLOR on its own: the ratio survives the shading unchanged. The
+## trees and the debris were lifted in #51 to restore the ratios they had before #50 lightened
+## the ground (the old #315b2f tree sat at 1.2 against the new ground and vanished on a rise).
+
 
 static func decorative_mesh(archetype_id: StringName, variant: int) -> ArrayMesh:
 	var vertices := PackedVector3Array()
@@ -27,7 +33,7 @@ static func decorative_mesh(archetype_id: StringName, variant: int) -> ArrayMesh
 				Vector3(WorldScale.metres(-0.32), WorldScale.metres(0.4), WorldScale.metres(0.0)),
 			])
 			colors.resize(vertices.size())
-			colors.fill(Color("765235"))
+			colors.fill(Color("825a3a"))
 		_:
 			return null
 	var arrays := []
@@ -60,7 +66,7 @@ static func solid_visual(archetype_id: StringName, variant: int) -> Node2D:
 			Vector2(WorldScale.metres(1.6), WorldScale.metres(0.4)),
 			Vector2(WorldScale.metres(0.0), WorldScale.metres(1.76)),
 		])
-		body.color = Color("315b2f") if variant == 0 else Color("3e6b35")
+		body.color = Color("40763d") if variant == 0 else Color("4e8642")
 	elif archetype_id == &"rock":
 		shadow.polygon = PackedVector2Array([
 			Vector2(WorldScale.metres(-1.44), WorldScale.metres(0.64)),

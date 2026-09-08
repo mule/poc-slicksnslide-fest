@@ -55,6 +55,14 @@ archetype, and variant. Trees and rocks remain individual nodes in a Y-sorted co
 depth relationship with the car stays readable. Solid circles are grouped beneath chunk-local
 `StaticBody2D` nodes.
 
+Since #51 every object stands on the terrain: given the track's height query and shading, a body
+is lifted up the screen by the ground height at its foot at the car's lift rate and coloured by
+the same function that colours the ground, its shadow staying at the foot and lengthening with the
+height. Placement does not consult terrain — terrain is sampled at the placed positions afterwards
+— so the fingerprint is unchanged, and colliders stay flat circles. Every base colour keeps a
+luminance ratio of at least 1.4 against the ground colour, so an object never fades into the ground
+at any height; see [Objects on the ground](height-channel.md#objects-on-the-ground-51).
+
 Before either consumer builds a record, runtime validation resolves its catalog archetype once and
 requires its `solid` and `collision_profile` fields to agree with that archetype. A rejected record
 reports a validation error and creates neither a visual nor a collider; valid sibling records still
@@ -103,9 +111,12 @@ desktop budgets:
 /home/japurane/.local/bin/godot --headless --path . --script res://tests/offtrack_object_collision_test.gd
 /home/japurane/.local/bin/godot --headless --path . --script res://tests/offtrack_object_runtime_test.gd
 /home/japurane/.local/bin/godot --headless --path . --script res://tests/offtrack_object_performance_test.gd
+/home/japurane/.local/bin/godot --headless --path . --script res://tests/offtrack_object_terrain_test.gd
 ```
 
-The one-time placement p95 budget is 80 ms and runtime-construction p95 budget is 100 ms over
+The terrain suite pins the object seating, shading and contrast rule, the twenty pre-terrain
+fingerprints, and the rock-reachability measurement; it takes about four minutes and
+`-- --break-rock-corridor` must fail it. The one-time placement p95 budget is 80 ms and runtime-construction p95 budget is 100 ms over
 seeds 0-19. The 80 ms placement budget is tight on the desktop reference machine: under other
 CPU load its p95 has been observed between roughly 67 ms and 165 ms, so
 `offtrack_object_placement_test` and `offtrack_object_performance_test` fail between a third and
