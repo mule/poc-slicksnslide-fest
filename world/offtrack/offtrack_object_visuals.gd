@@ -45,8 +45,9 @@ func solid_visual_count() -> int:
 
 
 ## The batch, instance index and the batch's uploaded buffer a decorative placement was drawn
-## with, by stable id; empty if none. The buffer is the very PackedFloat32Array handed to the
-## multimesh, so a reader decoding it sees the bytes the renderer draws from.
+## with, by stable id; empty if none. Packed arrays are copy-on-write, so the buffer stored here
+## is a copy equal to the one uploaded: it is recorded after the fill, and nothing writes to
+## either afterwards, so a reader decoding it sees the values the renderer draws from.
 func decorative_instance_of(stable_id: String) -> Dictionary:
 	return _decorative_instances.get(stable_id, {})
 
@@ -94,7 +95,7 @@ func _add_batch(parent: Node2D, key: String, group: Array[OfftrackObjectPlacemen
 	instance.name = key
 	# The whole batch is uploaded as one buffer, in the renderer's own layout: per instance the
 	# transform's two rows (x.x, y.x, 0, origin.x) and (x.y, y.y, 0, origin.y), then the colour.
-	# Kept after upload so the seating and tint of every instance can be read back exactly as
+	# Recorded once filled, so the seating and tint of every instance can be read back as
 	# uploaded; the headless renderer discards instance data, so nothing else can read it there.
 	var stride := instance_stride(with_colors)
 	var buffer := PackedFloat32Array()
@@ -126,8 +127,9 @@ func _add_batch(parent: Node2D, key: String, group: Array[OfftrackObjectPlacemen
 			buffer[offset + 9] = brightness
 			buffer[offset + 10] = brightness
 			buffer[offset + 11] = 1.0
-		_decorative_instances[placement.stable_id] = {"batch": instance, "index": index, "buffer": buffer}
 	multimesh.buffer = buffer
+	for index in range(group.size()):
+		_decorative_instances[group[index].stable_id] = {"batch": instance, "index": index, "buffer": buffer}
 	var chunk := Vector2i(floori(first.transform.origin.x / catalog.chunk_size), floori(first.transform.origin.y / catalog.chunk_size))
 	var chunk_origin := Vector2(chunk) * catalog.chunk_size
 	var mesh_extent := _maximum_scaled_mesh_extent(mesh, group)

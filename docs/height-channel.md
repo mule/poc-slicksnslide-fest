@@ -335,7 +335,8 @@ rise draws level with it — and coloured by the same `shade()` that colours the
 same sample. The lift is a screen direction whatever the object's rotation (the body is a child of
 a rotated node, so the offset is rotated into that frame); the shadow stays at the foot, thrown
 along the light and lengthened as before, so the body stands above its own shadow the way the car
-does. Decorative batches are uploaded as one `MultiMesh.buffer` per chunk, with the lift in each
+does — and on a high rise that is exactly how it reads; see *What the object stills show*
+below. Decorative batches are uploaded as one `MultiMesh.buffer` per chunk, with the lift in each
 instance transform and the ground brightness as the instance colour, which the GPU multiplies into
 the mesh colour exactly as `shade()` multiplies a base; the visuals keep the uploaded buffer so
 the suite can decode what was drawn, because the headless renderer discards instance data.
@@ -352,9 +353,11 @@ and its review measured unshaded tree bodies crossing the ground's luminance at 
 multiplicative, a body coloured from the same sample keeps a luminance ratio against the ground
 that is a constant of its base colour, not of the hill. The rule is `BODY_CONTRAST_FLOOR` = 1.4:
 every object base colour keeps at least that ratio against `GROUND_COLOR`, lighter or darker, and
-the suite sweeps it over the whole height and light range (the ratio is flat to 0.015 until a
-channel clamps at the lit peak) and measures every production solid against the ground grid
-actually drawn under it (minimum 1.54). The floor sits between the 1.14 the review measured as
+the suite sweeps it over the whole height and light range (the ratio is flat to 0.015; grass is
+the only colour whose channel clamps at the lit peak, and the sweep's worst case is simply debris'
+base ratio) and measures every production object, solid or decorative, against the ground grid
+actually drawn where its lifted body sits, up to 52 px from its foot, where the slope bound lets
+the drawn ground differ from the foot by about 5% (minimum 1.42, seeds 0 and 10, debris both times). The floor sits between the 1.14 the review measured as
 illegible and the 1.56 the pre-#50 trees shipped with against the darker ground of the time. To
 meet it the tree greens were lifted from `#315b2f` / `#3e6b35` (1.20 / 1.42 against the new
 ground; the second only just over the floor, and lifted with the first so the two variants keep
@@ -362,6 +365,33 @@ their step) to `#40763d` / `#4e8642` (1.56 / 1.78) and the debris brown from `#7
 to `#825a3a` (1.46); rocks (1.59-1.89) and grass (1.98) already cleared it. A shading that
 tracked the ground exactly has a ratio of 1 and fails the rule; the task report shows that
 failure live.
+
+#### What the object stills show
+
+`tests/capture_offtrack_object_terrain.gd` captures seed 0's highest tree (+42.1 px), lowest tree
+(−36.3 px) and highest rock (+43.9 px), and the car parked beside the highest tree, overlay off,
+with `docs/evidence/terrain/object-terrain-trace.txt` recording the lift, the body's extent below
+its origin, and where its base ends up relative to the foot. The honest reading of those stills:
+
+- **On a high rise the object reads as floating, not as standing on a rise.** The tree body at
+  +42.1 px is lifted 42 px while its polygon reaches only 22 px below its origin, so its base
+  hangs 19.9 px above the foot (the rock at +43.9 px: 24.1 px) with a strip of tinted but
+  undisplaced ground between the body and the shadow. In `seed-0-object-high.png` and
+  `seed-0-rock-high.png` every raised solid is a bright shape hovering above a detached dark
+  shadow, and nothing in the frame says "hill" except the tint.
+- **In a hollow the shadow lands on the lit side.** At −36.3 px the body is lowered 36 px while the
+  shadow stays at the foot with its shortened offset, so in `seed-0-object-low.png` the shadow
+  sits above and left of the body — toward the light — and the body reads as sunk under it.
+- **The car and the tree agree.** In `seed-0-car-beside-high.png` the car, parked heading up,
+  rides at 41.4 px and the tree stands at 42.1 px; both are drawn about 42 px above their
+  shadows and the pair is consistent. The car's lift is along its heading and the objects' is up
+  the screen, so with the car pointing right the two would separate in different directions
+  (see *Limitations*).
+
+This is the treatment the issue asked for and the one the car already has, and it is recorded
+here as a look for #52 to decide rather than one this task decides: the candidates are a smaller
+lift rate shared by car and objects, a lift that scales the body rather than displacing it, or
+leaving the ground tint and the shadow length as the only cues.
 
 ## Determinism
 
@@ -511,7 +541,8 @@ velocity by driving.
   it is a capability rather than something that happens in play. On terrain, at full throttle,
   the furthest a flight carries the car past the road edge while high enough to clear a rock on
   the ground beneath it is 130.7 px against a nearest solid at 267.8 px, and the closest any such
-  flight came to a generated rock in seeds 0-19 was 182.2 px short of touching it. See *Re-measured
+  flight came to a generated rock in seeds 0-19, scored against that rock's own ground, was
+  167.6 px short of touching it. See *Re-measured
   on terrain* in the tuning notes.
 - **The car's low-layer mask compares its absolute height, not its height over the ground.**
   `TopDownCar.get_collision_level_mask()` drops the low layer when `_height` exceeds the 12.5 px
@@ -528,6 +559,10 @@ velocity by driving.
   road climbs and drops with it; since #50 the ground and the road are tinted and lit from the
   same map the car drives on (see *Elevation on screen*); and since #51 off-track objects stand
   on it, lifted and shaded from the same map, with their colliders still flat circles.
+- **A raised object reads as floating.** Objects and the car are lifted up the screen by their
+  ground height while the ground itself is only tinted, so on a +40 px rise a tree hangs 20 px
+  clear of its own shadow and in a hollow its shadow lands on the lit side. Measured and shown in
+  *What the object stills show*; the look is #52's call.
 - **No mid-air control.** `airborne_steering_authority` is data and defaults to 0.0. Any non-zero
   value is a tuning decision no drive has justified yet.
 - **A landing on a solid is a collision.** Nothing keeps objects out of a landing zone; ramps are
@@ -766,12 +801,13 @@ and held at **full throttle** to the crest, so each pass is the fastest arrival 
 crest speeds of about 597 px/s against the coasting crossings of the #37 sweep. Eleven headings
 from -85° to +85° at three lateral seats (1 584 passes, 1 455 launched) sweep every ramp; the two
 ramps reaching furthest are then swept at #37's 5° resolution within 60° of the axis at five
-seats (250 passes, 224 launched). Reach is measured in two frames on every airborne tick. The
-physical frame is height above the ground beneath the car — the frame a rock's top is in, since
-a rock stands on its own ground. The engine frame is whether the car's mask has actually dropped
-the low layer, which today compares absolute height (see *Limitations*). Every generated rock
-within 1 500 px of a ramp is compared against the flight directly, so the verdict does not rest on
-the corridor rule.
+seats (250 passes, 224 launched). Reach past the road edge is a field measure, taken while the
+car is above the clearance over the ground beneath it. Every generated rock within 1 500 px of a
+ramp is then compared against the flight directly, each in the frame its own top is in: the car's
+absolute height against that rock's ground plus the clearance, so a rock on a rise is scored on
+its rise and one in a hollow on its hollow. The engine frame is whether the car's mask has
+actually dropped the low layer, which today compares absolute height (see *Limitations*). The
+verdict does not rest on the corridor rule.
 
 | Measurement | #37 (seed 0, coasting) | #51 (seeds 0-19, full throttle) |
 | --- | ---: | ---: |
@@ -779,7 +815,7 @@ the corridor rule.
 | Furthest past the road edge with the low layer dropped from the car's mask | 95.4 px | 288.8 px |
 | Furthest past the road edge while airborne at any height | 192.2 px | 288.8 px |
 | Nearest a solid actually sits to the road edge, seeds 0-19 | 267.8 px | 267.8 px |
-| Closest a flight above the clearance came to touching a rock | — | 182.2 px short |
+| Closest a flight above a rock's own clearance came to touching it | — | **167.6 px short** |
 | Closest a flight with the low layer dropped came to touching a rock | — | 42.6 px short |
 | Rocks reachable | 0 | **0** |
 
@@ -834,6 +870,16 @@ opens and asserts the tree is running before it measures anything. Nothing else 
 is modified.
 
 ## Evidence
+
+Objects on the terrain (#51), seed 0, graphical, overlay off; values in
+[`object-terrain-trace.txt`](evidence/terrain/object-terrain-trace.txt):
+
+| Still | What it shows |
+| --- | --- |
+| [`seed-0-object-high.png`](evidence/terrain/seed-0-object-high.png) | the highest tree, +42.1 px: body lifted 42 px, base 19.9 px above the foot, shadow 1.51× — reads as floating |
+| [`seed-0-object-low.png`](evidence/terrain/seed-0-object-low.png) | the lowest tree, −36.3 px: body lowered 36 px, shadow 0.56× on the lit side of it |
+| [`seed-0-rock-high.png`](evidence/terrain/seed-0-rock-high.png) | the highest rock, +43.9 px, among raised trees: every solid hovers above a detached shadow |
+| [`seed-0-car-beside-high.png`](evidence/terrain/seed-0-car-beside-high.png) | the car at 41.4 px beside the tree at 42.1 px: the two lifts agree |
 
 Everything below is under [`docs/evidence/height-channel/`](evidence/height-channel/) and is
 regenerated by one graphical command; see

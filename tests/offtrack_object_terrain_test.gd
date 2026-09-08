@@ -20,8 +20,8 @@ extends SceneTree
 ##
 ## The suite also re-runs #37's rock-reachability measurement on terrain: the car is launched over
 ## every ramp of seeds 0..19 across a heading and lateral-seat sweep, its flight is compared
-## against every generated rock near the ramp while it is above the clearance height over the
-## ground beneath it, and the result is pinned as an assertion whichever way it lands. Mutation:
+## against every generated rock near the ramp while it is above the clearance height over that
+## rock's own ground, and the result is pinned as an assertion whichever way it lands. Mutation:
 ##   -- --break-rock-corridor  removes the recovery corridor and fills every hazard cell with a rock
 ##                             up to the road edge, so a flight does reach one and the pin fails
 
@@ -344,7 +344,6 @@ func _verify_contrast_rule_across_the_range() -> bool:
 	var slope := terrain.slope_bound()
 	var colors := _base_colors()
 	_check(colors.size() == 11, "eleven archetype and variant colours are under the rule (%d)" % colors.size())
-	_check(TerrainShading.BODY_CONTRAST_FLOOR > 1.0, "the contrast floor is a real ratio (%.2f)" % TerrainShading.BODY_CONTRAST_FLOOR)
 	var ground_luminances: Array[float] = []
 	var worst_key := ""
 	var worst := INF
@@ -378,12 +377,20 @@ func _verify_contrast_rule_across_the_range() -> bool:
 	var darkest_ground: float = ground_luminances.min()
 	var lightest_ground: float = ground_luminances.max()
 	_check(lightest_ground / darkest_ground > 2.5, "the sweep spans the ground's real range (luminance %.3f to %.3f), not a sliver of it" % [darkest_ground, lightest_ground])
-	# The sign never flips: the body is on one side of the ground across the whole sweep. A ratio
-	# of one somewhere in the range is exactly the invisibility #50 measured.
-	var tree_base: Color = colors["tree:0"]
-	var lighter_at_bottom := shading.shade(tree_base, HeightQuery.HeightSample.new(-amplitude, Vector2.ZERO)).get_luminance() > shading.shade(TerrainShading.GROUND_COLOR, HeightQuery.HeightSample.new(-amplitude, Vector2.ZERO)).get_luminance()
-	var lighter_at_top := shading.shade(tree_base, HeightQuery.HeightSample.new(amplitude, Vector2.ZERO)).get_luminance() > shading.shade(TerrainShading.GROUND_COLOR, HeightQuery.HeightSample.new(amplitude, Vector2.ZERO)).get_luminance()
-	_check(lighter_at_bottom == lighter_at_top, "the tree body is on the same side of the ground's luminance in the deepest hollow and on the highest rise: no sign flip")
+	# The sign never flips: every body is strictly on one side of the ground's luminance in the
+	# deepest hollow and strictly on the same side on the highest rise. Strict, so a body the same
+	# colour as the ground -- the invisibility #50 measured -- fails here rather than comparing
+	# equal on both sides.
+	var flips := 0
+	for key in colors.keys():
+		var base: Color = colors[key]
+		var bottom := HeightQuery.HeightSample.new(-amplitude, Vector2.ZERO)
+		var top := HeightQuery.HeightSample.new(amplitude, Vector2.ZERO)
+		var bottom_side := signf(shading.shade(base, bottom).get_luminance() - shading.shade(TerrainShading.GROUND_COLOR, bottom).get_luminance())
+		var top_side := signf(shading.shade(base, top).get_luminance() - shading.shade(TerrainShading.GROUND_COLOR, top).get_luminance())
+		if bottom_side == 0.0 or top_side == 0.0 or bottom_side != top_side:
+			flips += 1
+	_check(flips == 0, "every body is strictly on one side of the ground's luminance in the deepest hollow and on the highest rise: no sign flip, no equality (%d offenders)" % flips)
 	return true
 
 
@@ -426,7 +433,9 @@ func _verify_production_objects(seed: int) -> bool:
 	var lowest := INF
 	var min_contrast := INF
 	var min_contrast_id := ""
+	var min_foot_contrast := INF
 	var contrast_failures := 0
+	var worst_archetype_seen := false
 	for placement in definition.offtrack_objects:
 		var sample := car_map.sample_at(placement.transform.origin)
 		var expected_lift := TerrainShading.lift_offset(sample.ground_height)
@@ -434,6 +443,9 @@ func _verify_production_objects(seed: int) -> bool:
 		var base: Color = colors[key]
 		highest = maxf(highest, sample.ground_height)
 		lowest = minf(lowest, sample.ground_height)
+		# The colour on screen: a solid body's own colour; a decorative's mesh colour times its
+		# instance colour, which is what the GPU multiplies and what shade() computes.
+		var drawn: Color
 		if placement.solid:
 			solids += 1
 			var visual := visuals.get_node("SolidObjects/%s" % placement.stable_id.replace(":", "_")) as Node2D
@@ -442,12 +454,7 @@ func _verify_production_objects(seed: int) -> bool:
 				lift_mismatches += 1
 			if not _colors_match(body.color, shading.shade(base, sample)):
 				color_mismatches += 1
-			var contrast := _contrast(body.color, _drawn_ground_color(ground, definition.play_area, placement.transform.origin))
-			if contrast < min_contrast:
-				min_contrast = contrast
-				min_contrast_id = "%s %s h=%.1f" % [placement.stable_id, key, sample.ground_height]
-			if contrast < TerrainShading.BODY_CONTRAST_FLOOR:
-				contrast_failures += 1
+			drawn = body.color
 		else:
 			decoratives += 1
 			var instance: Dictionary = visuals.decorative_instance_of(placement.stable_id)
@@ -461,13 +468,28 @@ func _verify_production_objects(seed: int) -> bool:
 			var brightness := shading.brightness(sample)
 			if not batch.multimesh.use_colors or not _colors_match(_instance_color(instance), Color(brightness, brightness, brightness, 1.0)):
 				color_mismatches += 1
-	print("production seed=%d solids=%d decoratives=%d lift_mismatches=%d color_mismatches=%d heights=%.1f..%.1f min_contrast=%.3f at %s contrast_failures=%d" % [seed, solids, decoratives, lift_mismatches, color_mismatches, lowest, highest, min_contrast, min_contrast_id, contrast_failures])
+			var tint := _instance_color(instance)
+			drawn = Color(minf(base.r * tint.r, 1.0), minf(base.g * tint.g, 1.0), minf(base.b * tint.b, 1.0), 1.0)
+		if placement.archetype_id == &"debris":
+			worst_archetype_seen = true
+		# Against the ground the lifted body actually overlaps, not only the ground at its foot:
+		# up to 52 px away, where the slope bound allows the drawn ground to differ by about 5%.
+		var foot_contrast := _contrast(drawn, _drawn_ground_color(ground, definition.play_area, placement.transform.origin))
+		var contrast := _contrast(drawn, _drawn_ground_color(ground, definition.play_area, placement.transform.origin + expected_lift))
+		min_foot_contrast = minf(min_foot_contrast, foot_contrast)
+		if contrast < min_contrast:
+			min_contrast = contrast
+			min_contrast_id = "%s %s h=%.1f" % [placement.stable_id, key, sample.ground_height]
+		if contrast < TerrainShading.BODY_CONTRAST_FLOOR:
+			contrast_failures += 1
+	print("production seed=%d solids=%d decoratives=%d lift_mismatches=%d color_mismatches=%d heights=%.1f..%.1f min_contrast_at_body=%.3f at %s min_contrast_at_foot=%.3f contrast_failures=%d" % [seed, solids, decoratives, lift_mismatches, color_mismatches, lowest, highest, min_contrast, min_contrast_id, min_foot_contrast, contrast_failures])
 	_check(solids > 0 and decoratives > 0, "seed %d places both solids and decoratives" % seed)
 	_check(highest - lowest > 2.0 * SIGN_FLIP_BAND_FLOOR, "seed %d objects span %.1f px of ground height, so the checks cover real relief" % [seed, highest - lowest])
 	_check(highest >= SIGN_FLIP_BAND_FLOOR, "seed %d has an object at +%.1f px, inside the band where unshaded trees vanished" % [seed, highest])
 	_check(lift_mismatches == 0, "seed %d: every object is lifted by the car-path map's height at its foot (%d mismatches)" % [seed, lift_mismatches])
 	_check(color_mismatches == 0, "seed %d: every object is coloured from the car-path map's sample at its foot (%d mismatches)" % [seed, color_mismatches])
-	_check(contrast_failures == 0, "seed %d: every solid keeps %.2f of contrast against the ground drawn under it (min %.3f at %s)" % [seed, TerrainShading.BODY_CONTRAST_FLOOR, min_contrast, min_contrast_id])
+	_check(worst_archetype_seen, "seed %d places debris, the archetype with the lowest base ratio, so the floor is tested where it is tightest" % seed)
+	_check(contrast_failures == 0, "seed %d: every object, solid or decorative, keeps %.2f of contrast against the ground drawn where its lifted body sits (min %.3f at %s)" % [seed, TerrainShading.BODY_CONTRAST_FLOOR, min_contrast, min_contrast_id])
 	runtime.free()
 	return true
 
@@ -554,7 +576,7 @@ func _rocks_for(definition: TrackDefinition) -> Array[OfftrackObjectPlacement]:
 
 ## One launch: the car seated before the ramp's foot on the heading, released at the seat speed,
 ## followed until it lands. Returns the pass record; `result` accumulates the sweep's maxima.
-func _launch(car: TopDownCar, map: TrackHeightMap, surface: TrackSurfaceMap, definition: TrackDefinition, ramp: JumpRampPlacement, rocks: Array[OfftrackObjectPlacement], degrees: float, fraction: float, result: Dictionary) -> Dictionary:
+func _launch(car: TopDownCar, map: TrackHeightMap, surface: TrackSurfaceMap, definition: TrackDefinition, ramp: JumpRampPlacement, rocks: Array[OfftrackObjectPlacement], rock_grounds: PackedFloat64Array, degrees: float, fraction: float, result: Dictionary) -> Dictionary:
 	var axis := ramp.transform.x.normalized()
 	var perpendicular := Vector2(-axis.y, axis.x)
 	var half_width: float = definition.track_width * 0.5
@@ -567,7 +589,7 @@ func _launch(car: TopDownCar, map: TrackHeightMap, surface: TrackSurfaceMap, def
 	throttle.throttle = 1.0
 	car.set_input_state(throttle)
 	var rock_radius := _object_catalog.archetype_by_id(&"rock").collision_radius
-	var record := {"launched": false, "settled": settled, "crest_speed": 0.0, "launch_ground": 0.0, "landing_ground": 0.0, "beyond_edge_above": 0.0, "beyond_edge_engine": 0.0, "beyond_edge_airborne": 0.0, "peak_above_ground": 0.0, "min_separation": INF, "min_separation_engine": INF, "min_separation_airborne": INF, "nearest_rock": "", "nearest_rock_engine": "", "engine_height": 0.0, "ticks_above": 0}
+	var record := {"launched": false, "settled": settled, "crest_speed": 0.0, "launch_ground": 0.0, "landing_ground": 0.0, "beyond_edge_above": 0.0, "beyond_edge_engine": 0.0, "beyond_edge_airborne": 0.0, "peak_above_ground": 0.0, "min_separation": INF, "min_separation_engine": INF, "min_separation_airborne": INF, "nearest_rock": "", "nearest_rock_engine": "", "engine_height": 0.0, "ticks_above": 0, "ticks_engine": 0, "centreline_fallbacks": 0}
 	for tick in REACH_TICKS:
 		await physics_frame
 		var position := car.global_position
@@ -580,23 +602,35 @@ func _launch(car: TopDownCar, map: TrackHeightMap, surface: TrackSurfaceMap, def
 				record.launch_ground = ground
 			record.peak_above_ground = maxf(record.peak_above_ground, above_ground)
 			var centreline := surface.distance_to_centerline(position, CENTRELINE_SEARCH_RADIUS)
-			var beyond_edge := maxf(centreline - half_width, 0.0) if is_finite(centreline) else CENTRELINE_SEARCH_RADIUS - half_width
+			# A lookup that finds no centreline within the radius is counted, not silently turned
+			# into a large reach; the sweep asserts the count is zero.
+			var beyond_edge := CENTRELINE_SEARCH_RADIUS - half_width
+			if is_finite(centreline):
+				beyond_edge = maxf(centreline - half_width, 0.0)
+			else:
+				record.centreline_fallbacks += 1
 			record.beyond_edge_airborne = maxf(record.beyond_edge_airborne, beyond_edge)
 			var mask_dropped_low := car.get_collision_level_mask() == TopDownCar.TALL_LAYER
+			# Reach past the edge is a field measure, taken while the car is above the clearance
+			# over the ground beneath it; each rock below is scored against its own ground.
 			var above_clearance := above_ground > _tuning.low_obstacle_clearance
 			if mask_dropped_low:
+				record.ticks_engine += 1
 				record.beyond_edge_engine = maxf(record.beyond_edge_engine, beyond_edge)
 			if above_clearance:
 				record.ticks_above += 1
 				record.beyond_edge_above = maxf(record.beyond_edge_above, beyond_edge)
-			for rock in rocks:
+			for index in rocks.size():
+				var rock := rocks[index]
 				var separation := position.distance_to(rock.transform.origin) - (rock_radius * rock.scale_factor + CAR_COLLISION_RADIUS)
 				record.min_separation_airborne = minf(record.min_separation_airborne, separation)
 				if mask_dropped_low and separation < record.min_separation_engine:
 					record.min_separation_engine = separation
 					record.nearest_rock_engine = rock.stable_id
 					record.engine_height = above_ground
-				if above_clearance and separation < record.min_separation:
+				# The physical frame: the car's height against the rock's top, which stands
+				# low_obstacle_clearance above the rock's own ground.
+				if car.get_height() - rock_grounds[index] > _tuning.low_obstacle_clearance and separation < record.min_separation:
 					record.min_separation = separation
 					record.nearest_rock = rock.stable_id
 		elif record.launched:
@@ -612,6 +646,8 @@ func _launch(car: TopDownCar, map: TrackHeightMap, surface: TrackSurfaceMap, def
 	result.beyond_edge_engine = maxf(result.beyond_edge_engine, record.beyond_edge_engine)
 	result.beyond_edge_airborne = maxf(result.beyond_edge_airborne, record.beyond_edge_airborne)
 	result.ticks_above += record.ticks_above
+	result.ticks_engine += record.ticks_engine
+	result.centreline_fallbacks += record.centreline_fallbacks
 	if record.min_separation_engine < result.min_separation_engine:
 		result.min_separation_engine = record.min_separation_engine
 		result.closest_engine = {"seed": definition.seed, "ramp": ramp.stable_id, "rock": record.nearest_rock_engine, "degrees": degrees, "fraction": fraction, "crest_speed": record.crest_speed, "height_above_ground_there": record.engine_height, "launch_ground": record.launch_ground}
@@ -629,7 +665,7 @@ func _launch(car: TopDownCar, map: TrackHeightMap, surface: TrackSurfaceMap, def
 
 
 func _new_sweep_result() -> Dictionary:
-	return {"passes": 0, "launched": 0, "unsettled": 0, "ticks_above": 0, "beyond_edge_above": 0.0, "beyond_edge_engine": 0.0, "beyond_edge_airborne": 0.0, "min_separation": INF, "min_separation_engine": INF, "min_separation_airborne": INF, "reachable": [], "longest": {}, "closest": {}, "closest_engine": {}, "ramp_reaches": {}, "rocks": 0, "ramps": 0}
+	return {"passes": 0, "launched": 0, "unsettled": 0, "ticks_above": 0, "beyond_edge_above": 0.0, "beyond_edge_engine": 0.0, "beyond_edge_airborne": 0.0, "min_separation": INF, "min_separation_engine": INF, "min_separation_airborne": INF, "reachable": [], "longest": {}, "closest": {}, "closest_engine": {}, "ramp_reaches": {}, "rocks": 0, "ramps": 0, "ticks_engine": 0, "centreline_fallbacks": 0}
 
 
 func _sweep(definition: TrackDefinition, ramps: Array[JumpRampPlacement], headings: Array, fractions: Array, result: Dictionary) -> bool:
@@ -641,14 +677,16 @@ func _sweep(definition: TrackDefinition, ramps: Array[JumpRampPlacement], headin
 	var all_rocks := _rocks_for(definition)
 	for ramp in ramps:
 		var rocks: Array[OfftrackObjectPlacement] = []
+		var rock_grounds := PackedFloat64Array()
 		for rock in all_rocks:
 			if rock.transform.origin.distance_to(ramp.transform.origin) <= ROCK_SEARCH_RADIUS:
 				rocks.append(rock)
+				rock_grounds.append(map.sample_at(rock.transform.origin).ground_height)
 		result.rocks += rocks.size()
 		result.ramps += 1
 		for degrees in headings:
 			for fraction in fractions:
-				await _launch(car, map, surface, definition, ramp, rocks, float(degrees), float(fraction), result)
+				await _launch(car, map, surface, definition, ramp, rocks, rock_grounds, float(degrees), float(fraction), result)
 	context.world.queue_free()
 	await process_frame
 	return true
@@ -667,11 +705,11 @@ func _nearest_solid_beyond_edge() -> float:
 
 
 ## #37's measurement, re-run on terrain. Sideways reach past the road edge is measured while the
-## car is above the clearance height over the ground beneath it -- the frame a rock's top is in,
-## since a rock on a rise stands on that rise -- and, separately, while the car's own mask has
-## dropped the low layer, which today compares its absolute height. Every generated rock near each
-## ramp is checked against the flight directly, so the verdict does not rest on the corridor rule
-## alone. Whichever way the numbers land, they are pinned here.
+## car is above the clearance height over the ground beneath it, and, separately, while the car's
+## own mask has dropped the low layer, which today compares its absolute height. Every generated
+## rock near each ramp is checked against the flight directly, each in the frame its top is in:
+## the car's height against the rock's own ground plus the clearance. So the verdict does not rest
+## on the corridor rule alone. Whichever way the numbers land, they are pinned here.
 func _verify_rock_reachability() -> bool:
 	var rocks_total := 0
 	var rocks_above_clearance := 0
@@ -697,6 +735,7 @@ func _verify_rock_reachability() -> bool:
 	_check(coarse.unsettled == 0, "every pass started from a grounded car (%d did not)" % coarse.unsettled)
 	_check(coarse.launched >= coarse.passes / 2, "at least half the sweep left the ground (%d of %d), so the maximum is taken over the envelope" % [coarse.launched, coarse.passes])
 	_check(coarse.ticks_above > 0 and coarse.beyond_edge_above > 0.0, "the sweep observed flight past the road edge above the clearance, so the reach is measured rather than vacuous")
+	_check(coarse.ticks_engine > 0 and coarse.beyond_edge_engine > 0.0, "the sweep observed flight past the road edge with the low layer dropped from the car's mask (%d ticks), so the engine-frame figures are measured rather than vacuous" % coarse.ticks_engine)
 	_check(coarse.ramp_reaches.size() >= FINE_RAMPS, "at least %d ramps produced flight above the clearance past the edge (%d), so the refinement below has real candidates" % [FINE_RAMPS, coarse.ramp_reaches.size()])
 	# Refine at #37's angular resolution on the ramps the coarse sweep found reaching furthest.
 	var ranked: Array = coarse.ramp_reaches.keys()
@@ -750,8 +789,10 @@ func _verify_rock_reachability() -> bool:
 	# the above-clearance reach off; but the whole envelope, at any height, now reaches past the
 	# rule, so #37's envelope-versus-nearest-solid bound is retired and the per-rock separations
 	# stand in its place. If a later change moves any of this, the lines below say so.
-	_check(reachable.is_empty(), "no generated rock in seeds 0..19 is reachable from a flight above the clearance (%d reachable)" % reachable.size())
-	_check(min_separation > 0.0, "the closest a flight above the clearance came to a rock's contact distance is %.1f px, on the far side of it" % min_separation)
+	_check(coarse.centreline_fallbacks + fine.centreline_fallbacks + flat.centreline_fallbacks == 0, "every airborne tick found the centreline within %.0f px (%d fallbacks), so no reach figure was manufactured by a failed lookup" % [CENTRELINE_SEARCH_RADIUS, coarse.centreline_fallbacks + fine.centreline_fallbacks + flat.centreline_fallbacks])
+	_check(is_finite(min_separation) and is_finite(min_separation_engine), "both separations were measured against real rocks (physical %.1f px, engine %.1f px), neither left at its initial infinity" % [min_separation, min_separation_engine])
+	_check(reachable.is_empty(), "no generated rock in seeds 0..19 is reachable from a flight above the clearance over that rock's own ground (%d reachable)" % reachable.size())
+	_check(min_separation > 0.0, "the closest a flight above a rock's clearance came to that rock's contact distance is %.1f px, on the far side of it" % min_separation)
 	_check(min_separation_engine > 0.0, "the closest a flight with the low layer dropped from the car's mask came to a rock's contact distance is %.1f px, on the far side of it" % min_separation_engine)
 	_check(reach_above < _object_catalog.solid_clearance, "a flight drifts at most %.1f px past the road edge while above the clearance, against the catalog's %.1f px corridor" % [reach_above, _object_catalog.solid_clearance])
 	_check(reach_airborne >= _object_catalog.solid_clearance, "the whole flight envelope (%.1f px past the road edge) now exceeds the %.1f px corridor rule, so the rule alone no longer proves a rock out of reach and the per-rock checks above carry the finding; if this fails, the envelope has shrunk and docs/height-channel.md must say so" % [reach_airborne, _object_catalog.solid_clearance])
@@ -759,8 +800,8 @@ func _verify_rock_reachability() -> bool:
 
 
 func _print_sweep(label: String, result: Dictionary, seconds: float) -> void:
-	print("reach %s ramps=%d rocks_near_ramps=%d passes=%d launched=%d unsettled=%d ticks_above_clearance=%d max_beyond_edge_airborne_px=%.1f max_beyond_edge_above_local_clearance_px=%.1f max_beyond_edge_engine_mask_px=%.1f min_rock_separation_above_clearance_px=%.1f min_rock_separation_engine_mask_px=%.1f min_rock_separation_airborne_px=%.1f ramps_with_reach=%d seconds=%.1f" % [
-		label, result.ramps, result.rocks, result.passes, result.launched, result.unsettled, result.ticks_above, result.beyond_edge_airborne, result.beyond_edge_above, result.beyond_edge_engine, result.min_separation, result.min_separation_engine, result.min_separation_airborne, result.ramp_reaches.size(), seconds
+	print("reach %s ramps=%d rocks_near_ramps=%d passes=%d launched=%d unsettled=%d ticks_above_clearance=%d max_beyond_edge_airborne_px=%.1f max_beyond_edge_above_local_clearance_px=%.1f max_beyond_edge_engine_mask_px=%.1f min_rock_separation_above_clearance_px=%.1f min_rock_separation_engine_mask_px=%.1f min_rock_separation_airborne_px=%.1f ramps_with_reach=%d ticks_engine_mask=%d centreline_fallbacks=%d seconds=%.1f" % [
+		label, result.ramps, result.rocks, result.passes, result.launched, result.unsettled, result.ticks_above, result.beyond_edge_airborne, result.beyond_edge_above, result.beyond_edge_engine, result.min_separation, result.min_separation_engine, result.min_separation_airborne, result.ramp_reaches.size(), result.ticks_engine, result.centreline_fallbacks, seconds
 	])
 	print("reach %s longest=%s" % [label, result.longest])
 	print("reach %s closest=%s" % [label, result.closest])

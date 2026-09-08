@@ -155,6 +155,7 @@ measurement, and the rock-clearance still, use the graphical renderer (not `--he
 ```sh
 godot --path . --script res://tests/capture_height_channel_evidence.gd
 godot --path . --script res://tests/capture_terrain_visuals.gd
+godot --path . --script res://tests/capture_offtrack_object_terrain.gd
 ```
 
 The first writes the trace and the PNGs under
