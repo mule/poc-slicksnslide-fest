@@ -67,6 +67,8 @@ const SIGN_FLIP_BAND_FLOOR := 20.0
 const CONTRAST_HEIGHT_STEPS := 21
 const CONTRAST_LIGHT_STEPS := 9
 const COLOR_TOLERANCE := 1e-5
+## The shadow offset OfftrackObjectMeshFactory bakes into every solid: (0.32 m, 0.48 m).
+const FACTORY_SHADOW_OFFSET := Vector2(4.0, 6.0)
 ## The reach sweep. The car is seated just before the ramp's foot at its terminal speed on dirt
 ## and held at full throttle to the crest, so each pass is the fastest arrival the car can make
 ## and the reach is an upper envelope; the crest speed is measured and reported. Every ramp of
@@ -244,8 +246,16 @@ func _verify_solids_seated_on_a_plateau() -> bool:
 	_check(rock.scale.is_equal_approx(Vector2.ONE * 1.2) and not rock_body.position.is_equal_approx(raised_body.position.rotated(rotation - 2.0)), "the rock's local offset differs from the tree's because its scale is folded out of it")
 	_check(level_body.position == Vector2.ZERO, "on level ground the body stays at its foot")
 	_check(raised_body.polygon == level_body.polygon, "the lift moves the body; it does not reshape it")
-	_check(raised_shadow.position.rotated(rotation).normalized().is_equal_approx(TerrainShading.SHADOW_DIRECTION), "the shadow stays at the foot, thrown along the shadow direction, so the body stands above its own shadow")
-	_check(raised_shadow.position.length() > 1.0 and not raised_shadow.position.is_equal_approx(raised_body.position), "the shadow is not lifted with the body")
+	# The shadow is anchored to the body's lift (#52): cast from the lifted body along the shadow
+	# direction at the factory offset times the length factor, so it stays under the body on a rise
+	# and cannot cross to the lit side in a hollow. Until #52 it stayed at the foot, and #51's
+	# stills showed a raised body floating over a detached shadow and a lowered body sunk under one.
+	var raised_cast := (raised_shadow.position - raised_body.position).rotated(rotation)
+	var expected_cast := FACTORY_SHADOW_OFFSET.length() * TerrainShading.shadow_length_factor(raised_height)
+	_check(raised_cast.normalized().is_equal_approx(TerrainShading.SHADOW_DIRECTION), "the raised shadow is cast from the lifted body along the world shadow direction")
+	_check(is_equal_approx(raised_cast.length(), expected_cast), "the raised shadow is cast %.2f px from the body: the factory offset times the length factor" % expected_cast)
+	var raised_anchor := raised.transform.basis_xform(raised_shadow.position)
+	_check(raised_anchor.y < expected_lift.y * 0.5, "the raised shadow's anchor rises with the body (%.1f px up the screen); it is not left at the foot" % -raised_anchor.y)
 	# Colour: the same function the ground uses, from the same sample.
 	var base := (OfftrackObjectMeshFactory.solid_visual(&"tree", 0).get_child(1) as Polygon2D).color
 	var raised_sample := plateau.sample_at(Vector2(500.0, 0.0))
@@ -258,6 +268,10 @@ func _verify_solids_seated_on_a_plateau() -> bool:
 	var lowered_body := visuals.get_node("SolidObjects/v1_0_1_0").get_child(1) as Polygon2D
 	_check((visuals.get_node("SolidObjects/v1_0_1_0") as Node2D).transform.basis_xform(lowered_body.position).is_equal_approx(TerrainShading.lift_offset(-raised_height)), "in a hollow the body is lowered down the screen")
 	_check(lowered_body.color.get_luminance() < base.get_luminance(), "in a hollow the body is darker than its base")
+	var lowered_shadow := visuals.get_node("SolidObjects/v1_0_1_0").get_child(0) as Polygon2D
+	var lowered_cast := (lowered_shadow.position - lowered_body.position).rotated(rotation)
+	_check(lowered_cast.normalized().is_equal_approx(TerrainShading.SHADOW_DIRECTION) and lowered_cast.dot(TerrainShading.SHADOW_DIRECTION) > 1.0, "in a hollow the shadow still falls away from the light from the lowered body; a foot-anchored shadow lands on the lit side here")
+	_check(lowered_cast.length() < FACTORY_SHADOW_OFFSET.length() - 1e-3, "in a hollow the shadow is cast shorter than on level ground (%.2f px)" % lowered_cast.length())
 	# No query, no shading: the pre-terrain fixtures draw as before.
 	visuals.build(placements, _object_catalog)
 	var plain_body := visuals.get_node("SolidObjects/v1_0_1_0").get_child(1) as Polygon2D
@@ -429,6 +443,7 @@ func _verify_production_objects(seed: int) -> bool:
 	var decoratives := 0
 	var lift_mismatches := 0
 	var color_mismatches := 0
+	var shadow_mismatches := 0
 	var highest := -INF
 	var lowest := INF
 	var min_contrast := INF
@@ -454,6 +469,13 @@ func _verify_production_objects(seed: int) -> bool:
 				lift_mismatches += 1
 			if not _colors_match(body.color, shading.shade(base, sample)):
 				color_mismatches += 1
+			# The shadow is cast from the lifted body, along the world shadow direction, at the
+			# factory offset (scaled with the object) times the length factor for its ground.
+			var shadow := visual.get_child(0) as Polygon2D
+			var cast := visual.transform.basis_xform(shadow.position - body.position)
+			var expected_cast := FACTORY_SHADOW_OFFSET.length() * placement.scale_factor * TerrainShading.shadow_length_factor(sample.ground_height)
+			if not cast.normalized().is_equal_approx(TerrainShading.SHADOW_DIRECTION) or not is_equal_approx(cast.length(), expected_cast):
+				shadow_mismatches += 1
 			drawn = body.color
 		else:
 			decoratives += 1
@@ -482,12 +504,13 @@ func _verify_production_objects(seed: int) -> bool:
 			min_contrast_id = "%s %s h=%.1f" % [placement.stable_id, key, sample.ground_height]
 		if contrast < TerrainShading.BODY_CONTRAST_FLOOR:
 			contrast_failures += 1
-	print("production seed=%d solids=%d decoratives=%d lift_mismatches=%d color_mismatches=%d heights=%.1f..%.1f min_contrast_at_body=%.3f at %s min_contrast_at_foot=%.3f contrast_failures=%d" % [seed, solids, decoratives, lift_mismatches, color_mismatches, lowest, highest, min_contrast, min_contrast_id, min_foot_contrast, contrast_failures])
+	print("production seed=%d solids=%d decoratives=%d lift_mismatches=%d color_mismatches=%d shadow_mismatches=%d heights=%.1f..%.1f min_contrast_at_body=%.3f at %s min_contrast_at_foot=%.3f contrast_failures=%d" % [seed, solids, decoratives, lift_mismatches, color_mismatches, shadow_mismatches, lowest, highest, min_contrast, min_contrast_id, min_foot_contrast, contrast_failures])
 	_check(solids > 0 and decoratives > 0, "seed %d places both solids and decoratives" % seed)
 	_check(highest - lowest > 2.0 * SIGN_FLIP_BAND_FLOOR, "seed %d objects span %.1f px of ground height, so the checks cover real relief" % [seed, highest - lowest])
 	_check(highest >= SIGN_FLIP_BAND_FLOOR, "seed %d has an object at +%.1f px, inside the band where unshaded trees vanished" % [seed, highest])
 	_check(lift_mismatches == 0, "seed %d: every object is lifted by the car-path map's height at its foot (%d mismatches)" % [seed, lift_mismatches])
 	_check(color_mismatches == 0, "seed %d: every object is coloured from the car-path map's sample at its foot (%d mismatches)" % [seed, color_mismatches])
+	_check(shadow_mismatches == 0, "seed %d: every solid's shadow is cast from its lifted body along the shadow direction at the lengthened factory offset (%d mismatches)" % [seed, shadow_mismatches])
 	_check(worst_archetype_seen, "seed %d places debris, the archetype with the lowest base ratio, so the floor is tested where it is tightest" % seed)
 	_check(contrast_failures == 0, "seed %d: every object, solid or decorative, keeps %.2f of contrast against the ground drawn where its lifted body sits (min %.3f at %s)" % [seed, TerrainShading.BODY_CONTRAST_FLOOR, min_contrast, min_contrast_id])
 	runtime.free()

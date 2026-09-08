@@ -57,8 +57,9 @@ depth relationship with the car stays readable. Solid circles are grouped beneat
 
 Since #51 every object stands on the terrain: given the track's height query and shading, a body
 is lifted up the screen by the ground height at its foot at the car's lift rate and coloured by
-the same function that colours the ground, its shadow staying at the foot and lengthening with the
-height. Placement does not consult terrain — terrain is sampled at the placed positions afterwards
+the same function that colours the ground; since #52 its shadow is cast from that lifted body
+rather than left at the foot, lengthening with the height, so a raised object no longer floats
+above a detached shadow and a lowered one never has its shadow on the lit side. Placement does not consult terrain — terrain is sampled at the placed positions afterwards
 — so the fingerprint is unchanged, and colliders stay flat circles. Every base colour keeps a
 luminance ratio of at least 1.4 against the ground colour, so an object never fades into the ground
 at any height; see [Objects on the ground](height-channel.md#objects-on-the-ground-51).

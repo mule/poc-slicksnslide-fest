@@ -575,8 +575,13 @@ func _verify_object_shadows() -> bool:
 	_check(raised_shadow != null and level_shadow != null, "each solid's first child is its shadow polygon")
 	var baseline := FACTORY_SHADOW_OFFSET.length()
 	_check(is_equal_approx(level_shadow.position.length(), baseline), "on level ground the shadow sits at the factory's offset distance, %.2f px" % baseline)
-	_check(is_equal_approx(raised_shadow.position.length(), baseline * expected_factor), "on the plateau the shadow is displaced 1.48 times as far (%.2f px)" % raised_shadow.position.length())
-	_check(raised_shadow.position.length() > level_shadow.position.length(), "the raised tree's shadow is thrown further than the level tree's")
+	# Since #52 the shadow is anchored to the lifted body, so its cast is measured from the body.
+	var raised_cast := raised_shadow.position - raised_body.position
+	_check(is_equal_approx(raised_cast.length(), baseline * expected_factor), "on the plateau the shadow is cast 1.48 times as far from the body (%.2f px)" % raised_cast.length())
+	_check(raised_cast.length() > level_shadow.position.length(), "the raised tree's shadow is thrown further than the level tree's")
+	_check(raised_cast.rotated(rotation).normalized().is_equal_approx(TerrainShading.SHADOW_DIRECTION), "the raised shadow is cast from the body along the world shadow direction")
+	var raised_anchor := (raised as Node2D).transform.basis_xform(raised_shadow.position)
+	_check(raised_anchor.y < TerrainShading.lift_offset(raised_height).y * 0.5, "the raised shadow's anchor is lifted with the body (%.1f px up the screen) rather than left at the foot" % -raised_anchor.y)
 	# Shadows fall away from the light in world space, whatever the object's own rotation, so the
 	# cue agrees with the ground shading's light.
 	var world_offset := level_shadow.position.rotated(rotation)
@@ -596,8 +601,11 @@ func _verify_object_shadows() -> bool:
 	# Lowered ground: the same pair on a plateau below zero.
 	plateau.plateau_height = -raised_height
 	visuals.build(placements, catalog, plateau)
-	var lowered_shadow := visuals.get_node("SolidObjects/v1_0_1_0").get_child(0) as Polygon2D
-	_check(lowered_shadow.position.length() < baseline - 1e-3, "a tree in a hollow casts a shorter shadow than one on level ground (%.2f px)" % lowered_shadow.position.length())
+	var lowered := visuals.get_node("SolidObjects/v1_0_1_0") as Node2D
+	var lowered_shadow := lowered.get_child(0) as Polygon2D
+	var lowered_cast := lowered_shadow.position - (lowered.get_child(1) as Polygon2D).position
+	_check(lowered_cast.length() < baseline - 1e-3, "a tree in a hollow casts a shorter shadow than one on level ground (%.2f px)" % lowered_cast.length())
+	_check(lowered_cast.rotated(rotation).normalized().is_equal_approx(TerrainShading.SHADOW_DIRECTION), "in a hollow the shadow still falls away from the light from the lowered body; #51's stills showed a foot-anchored shadow on the lit side")
 	_check(_shadow_extent(lowered_shadow, rotation, along) < level_extent, "the hollow's shadow polygon is shorter along the light")
 	# No height query at all: the pre-terrain fixtures, whose shadows keep the factory's length.
 	visuals.build(placements, catalog)

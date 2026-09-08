@@ -1,10 +1,17 @@
 extends SceneTree
 
-## Ramps draw one wedge each, the car body lifts and scales away from its grounded shadow, an
-## airborne car draws above y-sorted objects, and dust stays off in the air.
+## Ramps draw one wedge each; the car's ground height lifts body and shadow together, straight up
+## the screen, while only its height above the ground opens a gap, grows the body and fades the
+## shadow (#52, the off-track objects' rule); an airborne car draws above y-sorted objects; and
+## dust stays off in the air.
 
 const VEHICLE_SCENE := preload("res://vehicle/top_down_car.tscn")
 const TUNING_PATH := "res://data/default_vehicle_tuning.tres"
+## The shadow offset the car scene bakes in: vehicle/top_down_car.tscn, Shadow.position.
+const SHADOW_BASE := Vector2(4.0, 6.0)
+## The airborne fixture must be clearly in the air before its gap is read, or a near-zero gap
+## would pass every ratio below.
+const AIRBORNE_GAP_FLOOR := 10.0
 
 var _failures: Array[String] = []
 var _checks := 0
@@ -54,6 +61,8 @@ func _verify_wedges() -> bool:
 	return true
 
 
+## The fixture car points along +x (rotation PI/2), so a lift applied in the car's own frame, as
+## it was until #52, fails every screen-frame pin here: the car would draw ahead of its shadow.
 func _verify_body_lift_and_shadow() -> bool:
 	var tuning := load(TUNING_PATH) as VehicleTuning
 	for metres in [0.0, 1.0, 3.0]:
@@ -64,14 +73,47 @@ func _verify_body_lift_and_shadow() -> bool:
 		var lift := car.get_node("Lift") as Node2D
 		var shadow := car.get_node("Shadow") as Polygon2D
 		var height := WorldScale.metres(metres)
-		_check(is_equal_approx(lift.position.y, -height * tuning.lift_pixels_per_pixel), "at %.0f m the body lifts %.1f px" % [metres, height * tuning.lift_pixels_per_pixel])
-		_check(is_equal_approx(lift.scale.x, 1.0 + metres * tuning.scale_per_metre), "at %.0f m the body scales to %.2f" % [metres, 1.0 + metres * tuning.scale_per_metre])
-		_check(is_equal_approx(shadow.position.y, 6.0), "the shadow stays on the ground at %.0f m" % metres)
-		var expected_alpha := clampf(1.0 - metres * TopDownCar.SHADOW_FADE_PER_METRE, 0.25, 1.0)
-		_check(is_equal_approx(shadow.modulate.a, expected_alpha), "the shadow fades to %.2f at %.0f m" % [expected_alpha, metres])
+		var expected := Vector2(0.0, -height * tuning.lift_pixels_per_pixel)
+		_check(not car.is_airborne() and is_equal_approx(car.get_height(), height) and is_equal_approx(car.get_ground_height(), height), "at %.0f m the fixture car stands on the plateau, so the pins below are ground cues" % metres)
+		_check(car.transform.basis_xform(lift.position).is_equal_approx(expected), "on ground at %.0f m the body lifts %.1f px straight up the screen, not along the heading" % [metres, height * tuning.lift_pixels_per_pixel])
+		_check(car.transform.basis_xform(shadow.position - SHADOW_BASE).is_equal_approx(expected), "on ground at %.0f m the shadow is anchored to the same lift, so a parked car does not float above its shadow" % metres)
+		_check(is_equal_approx(lift.scale.x, 1.0), "on the ground at %.0f m the body does not grow: scale is an air cue" % metres)
+		_check(is_equal_approx(shadow.modulate.a, 1.0), "on the ground at %.0f m the shadow does not fade: the fade is an air cue" % metres)
 		_check(lift.get_node_or_null("Body") != null and lift.get_node_or_null("Windshield") != null and lift.get_node_or_null("DirectionMark") != null, "the body parts live under Lift")
 		context.world.queue_free()
 		await process_frame
+	# Airborne: off a 40 px plateau edge onto level ground. The shadow sits at its base over the
+	# ground below (height zero), the body lifts by the car's height, and the gap, the growth and
+	# the fade all follow that same height above the ground.
+	var context := _make_car(40.0, 50.0)
+	var car: TopDownCar = context.car
+	var controls := VehicleInputState.new()
+	controls.throttle = 1.0
+	car.set_input_state(controls)
+	var seen_airborne := false
+	for _tick in range(240):
+		await physics_frame
+		await process_frame
+		if car.is_airborne():
+			seen_airborne = true
+			# process_frame fires before Node._process(); present the airborne state just seen.
+			await process_frame
+			break
+	_check(seen_airborne, "the car falls off the plateau edge")
+	var lift := car.get_node("Lift") as Node2D
+	var shadow := car.get_node("Shadow") as Polygon2D
+	var body_lift := car.transform.basis_xform(lift.position)
+	var shadow_lift := car.transform.basis_xform(shadow.position - SHADOW_BASE)
+	var gap := shadow_lift.y - body_lift.y
+	_check(gap > AIRBORNE_GAP_FLOOR, "in the air a gap of %.1f px opens between body and shadow" % gap)
+	_check(is_zero_approx(shadow_lift.length()) and is_zero_approx(car.get_ground_height()), "over level ground the airborne shadow sits at its base: it is anchored to the ground, not to the body")
+	_check(absf(body_lift.x) < 1e-3, "the airborne body lifts straight up the screen")
+	_check(absf(body_lift.y + car.get_height() * tuning.lift_pixels_per_pixel) <= 0.1 * car.get_height(), "the airborne body lift (%.1f px) is the car's height above the ground (%.1f px), to within the tick between physics and draw" % [-body_lift.y, car.get_height()])
+	var presented_metres := WorldScale.to_metres(gap)
+	_check(is_equal_approx(lift.scale.x, 1.0 + presented_metres * tuning.scale_per_metre), "in the air the body grows by the presented height above the ground (%.2f)" % lift.scale.x)
+	_check(is_equal_approx(shadow.modulate.a, clampf(1.0 - presented_metres * TopDownCar.SHADOW_FADE_PER_METRE, 0.25, 1.0)), "in the air the shadow fades by the presented height above the ground (%.2f)" % shadow.modulate.a)
+	context.world.queue_free()
+	await process_frame
 	return true
 
 
