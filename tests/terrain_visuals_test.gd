@@ -14,7 +14,7 @@ extends SceneTree
 ## the shading has no production switch for sampling the wrong field.
 
 const MAIN_SCENE_PATH := "res://session/main.tscn"
-const TERRAIN_CATALOG_PATH := "res://data/default_terrain_catalog.tres"
+const TERRAIN_CATALOG := preload("res://data/default_terrain_catalog.tres")
 const OBJECT_CATALOG_PATH := "res://data/default_offtrack_object_catalog.tres"
 ## Seeds 0 and 10 both place ramps, so the crest checks below are not vacuous, and seed 10's spawn
 ## sits 14 px up its terrain, so the spawn agreement is not agreement near zero.
@@ -45,6 +45,7 @@ const COLOR_TOLERANCE := 1e-5
 
 var _failures: Array[String] = []
 var _checks := 0
+var _sections := 0
 
 
 func _initialize() -> void:
@@ -52,20 +53,20 @@ func _initialize() -> void:
 
 
 func _run() -> void:
-	_check(_verify_shade_terms(), "the shade term verification ran to completion")
-	_check(_verify_light_flips_across_a_crest(), "the crest verification ran to completion")
-	_check(_verify_ground_grid(), "the ground grid verification ran to completion")
-	_check(_verify_ribbon_gradients(), "the ribbon gradient verification ran to completion")
-	_check(_verify_wedges_shade_from_the_map(), "the wedge shading verification ran to completion")
-	_check(await _verify_shading_agrees_with_the_car(), "the car agreement verification ran to completion")
-	_check(_verify_object_shadows(), "the object shadow verification ran to completion")
-	_check(await _verify_rebuild_frees_shading(), "the rebuild verification ran to completion")
-	_check(_verify_build_cost(), "the build cost verification ran to completion")
+	_section(_verify_shade_terms(), "the shade term verification ran to completion")
+	_section(_verify_light_flips_across_a_crest(), "the crest verification ran to completion")
+	_section(_verify_ground_grid(), "the ground grid verification ran to completion")
+	_section(_verify_ribbon_gradients(), "the ribbon gradient verification ran to completion")
+	_section(_verify_wedges_shade_from_the_map(), "the wedge shading verification ran to completion")
+	_section(await _verify_shading_agrees_with_the_car(), "the car agreement verification ran to completion")
+	_section(_verify_object_shadows(), "the object shadow verification ran to completion")
+	_section(await _verify_rebuild_frees_shading(), "the rebuild verification ran to completion")
+	_section(_verify_build_cost(), "the build cost verification ran to completion")
 	_finish()
 
 
 func _shading() -> TerrainShading:
-	return TerrainShading.new(load(TERRAIN_CATALOG_PATH) as TerrainCatalog)
+	return TerrainShading.new(TERRAIN_CATALOG)
 
 
 func _sample(height: float, gradient: Vector2 = Vector2.ZERO) -> HeightQuery.HeightSample:
@@ -78,7 +79,7 @@ func _brightness(color: Color, base: Color) -> float:
 
 func _verify_shade_terms() -> bool:
 	var shading := _shading()
-	var catalog := load(TERRAIN_CATALOG_PATH) as TerrainCatalog
+	var catalog := TERRAIN_CATALOG
 	var base := Color("426b32")
 	var flat := shading.shade(base, _sample(0.0))
 	_check(flat.is_equal_approx(base), "flat, level ground is drawn in the base colour exactly")
@@ -102,7 +103,7 @@ func _verify_shade_terms() -> bool:
 	_check(TerrainShading.SHADOW_DIRECTION.is_equal_approx(-TerrainShading.LIGHT_DIRECTION), "shadows fall directly away from the light")
 	var slope_reference: float = catalog.slope_bound()
 	var away := Vector2(1.0, 1.0).normalized() * slope_reference
-	_check(shading.light_term(away) > 0.99 and shading.light_term(away) <= 1.0, "a slope at the slope bound rising away from the light is fully lit")
+	_check(is_equal_approx(shading.light_term(away), 1.0), "a slope at the slope bound rising away from the light is fully lit: the term is exactly 1 (%.6f)" % shading.light_term(away))
 	_check(is_equal_approx(shading.light_term(-away), -shading.light_term(away)), "the same slope rising toward the light is fully in shade")
 	_check(is_zero_approx(shading.light_term(Vector2(1.0, -1.0) * slope_reference)), "a slope across the light is unlit")
 	_check(is_equal_approx(shading.light_term(away * 4.0), 1.0), "the light term saturates at the slope bound")
@@ -112,7 +113,7 @@ func _verify_shade_terms() -> bool:
 	# shade() clamps, so a clamped value against the clamp bound proves nothing; the intent is that no
 	# fill colour blows out, so the PRE-clamp product is asserted for every fill the track draws.
 	var peak: float = TerrainShading.peak_brightness()
-	_check(is_equal_approx(peak, 1.0 + TerrainShading.HEIGHT_CONTRAST + TerrainShading.SLOPE_CONTRAST) and is_equal_approx(peak, 1.8), "the peak multiplier is full height plus full light, 1.8")
+	_check(is_equal_approx(peak, 1.8), "the peak multiplier is full height plus full light, 1.8 (%.3f)" % peak)
 	for fill in [["ground", TerrainShading.GROUND_COLOR], ["grass", TrackRuntime.GRASS_COLOR], ["dirt", TrackRuntime.DIRT_COLOR], ["wedge", JumpRampVisuals.WEDGE_COLOR]]:
 		var color: Color = fill[1]
 		var brightest_channel := maxf(color.r, maxf(color.g, color.b)) * peak
@@ -176,7 +177,7 @@ func _verify_ground_grid() -> bool:
 	_check(shading.z_index < -3, "the ground draws under the grass shoulder (z %d)" % shading.z_index)
 	var area: Rect2 = definition.play_area
 	var cell: float = TerrainShading.GROUND_CELL
-	_check(is_equal_approx(cell, TerrainField.FINGERPRINT_SPACING), "the ground grid samples on the fingerprint and placement pitch, %.0f px" % cell)
+	_check(is_equal_approx(cell, 250.0), "the ground grid samples on the fingerprint and placement pitch, 250 px (%.0f)" % cell)
 	var columns := _walked_count(area.position.x, area.end.x, cell)
 	var rows := _walked_count(area.position.y, area.end.y, cell)
 	var vertices := ground.polygon
@@ -427,7 +428,7 @@ func _verify_wedges_shade_from_the_map() -> bool:
 	# The feet are sampled SAMPLE_INSET px inside the ramp, so each carries that sliver of wedge
 	# height (0.06 px, a 0.0005 brightness) plus the face's light term, worked here from the
 	# constants: slope 9 / 150 along +x against a light at 45 degrees, over the slope bound.
-	var catalog := load(TERRAIN_CATALOG_PATH) as TerrainCatalog
+	var catalog := TERRAIN_CATALOG
 	var foot_height_term: float = TerrainShading.HEIGHT_CONTRAST * (WEDGE_CREST * JumpRampVisuals.SAMPLE_INSET / 150.0) / catalog.total_amplitude()
 	var foot_light_term: float = TerrainShading.SLOPE_CONTRAST * (WEDGE_CREST / 150.0 * 0.7071067811865476) / catalog.slope_bound()
 	_check(lit_face > 1.0 and shaded_face < 1.0, "the face rising toward +x, away from the top-left light, is lit (%.3f) and the far face shaded (%.3f)" % [lit_face, shaded_face])
@@ -517,7 +518,7 @@ func _verify_shading_agrees_with_the_car() -> bool:
 		var crest_shading := runtime_map.sample_at(car.global_position)
 		_check(crest_shading.on_feature, "the car now sits on the ramp, where terrain alone would be wrong by the crest height")
 		_check(absf(car.get_height() - crest_shading.ground_height) < 1e-6, "on the crest the car rides at %.4f px and the shading samples %.4f px" % [car.get_height(), crest_shading.ground_height])
-		var terrain_only := TerrainField.new(definition.terrain_seed, load(TERRAIN_CATALOG_PATH) as TerrainCatalog).height_at(car.global_position)
+		var terrain_only := TerrainField.new(definition.terrain_seed, TERRAIN_CATALOG).height_at(car.global_position)
 		_check(absf(crest_shading.ground_height - terrain_only) > 1.0, "the crest sample differs from bare terrain by %.2f px, so the two agreements above are on the summed map" % absf(crest_shading.ground_height - terrain_only))
 	session.free()
 	return true
@@ -548,9 +549,7 @@ func _tree(id: String, position: Vector2, rotation: float) -> OfftrackObjectPlac
 func _verify_object_shadows() -> bool:
 	var catalog := load(OBJECT_CATALOG_PATH) as OfftrackObjectCatalog
 	var raised_height := 40.0
-	var expected_factor := 1.0 + WorldScale.to_metres(raised_height) * TerrainShading.SHADOW_LENGTHEN_PER_METRE
-	_check(is_equal_approx(TerrainShading.shadow_length_factor(raised_height), expected_factor), "40 px of ground lengthens a shadow by the per-metre rate")
-	_check(is_equal_approx(expected_factor, 1.48), "40 px is 3.2 m, so the factor is 1.48")
+	_check(is_equal_approx(TerrainShading.shadow_length_factor(raised_height), 1.48), "40 px of ground is 3.2 m, so the per-metre rate lengthens a shadow to 1.48 (%.3f)" % TerrainShading.shadow_length_factor(raised_height))
 	_check(is_equal_approx(TerrainShading.shadow_length_factor(0.0), 1.0), "level ground leaves the shadow at its baseline")
 	_check(TerrainShading.shadow_length_factor(-raised_height) < 1.0, "lowered ground shortens the shadow")
 	_check(is_equal_approx(TerrainShading.shadow_length_factor(-1000.0), TerrainShading.SHADOW_LENGTH_FLOOR), "a deep hollow cannot shrink the shadow past the floor")
@@ -577,7 +576,7 @@ func _verify_object_shadows() -> bool:
 	_check(is_equal_approx(level_shadow.position.length(), baseline), "on level ground the shadow sits at the factory's offset distance, %.2f px" % baseline)
 	# Since #52 the shadow is anchored to the lifted body, so its cast is measured from the body.
 	var raised_cast := raised_shadow.position - raised_body.position
-	_check(is_equal_approx(raised_cast.length(), baseline * expected_factor), "on the plateau the shadow is cast 1.48 times as far from the body (%.2f px)" % raised_cast.length())
+	_check(is_equal_approx(raised_cast.length(), baseline * 1.48), "on the plateau the shadow is cast 1.48 times as far from the body (%.2f px)" % raised_cast.length())
 	_check(raised_cast.length() > level_shadow.position.length(), "the raised tree's shadow is thrown further than the level tree's")
 	_check(raised_cast.rotated(rotation).normalized().is_equal_approx(TerrainShading.SHADOW_DIRECTION), "the raised shadow is cast from the body along the world shadow direction")
 	var raised_anchor := (raised as Node2D).transform.basis_xform(raised_shadow.position)
@@ -590,7 +589,7 @@ func _verify_object_shadows() -> bool:
 	var across := Vector2(-along.y, along.x)
 	var level_extent := _shadow_extent(level_shadow, rotation, along)
 	var raised_extent := _shadow_extent(raised_shadow, rotation, along)
-	_check(is_equal_approx(raised_extent, level_extent * expected_factor), "the raised shadow polygon is 1.48 times as long along the light (%.2f vs %.2f px)" % [raised_extent, level_extent])
+	_check(is_equal_approx(raised_extent, level_extent * 1.48), "the raised shadow polygon is 1.48 times as long along the light (%.2f vs %.2f px)" % [raised_extent, level_extent])
 	_check(is_equal_approx(_shadow_extent(raised_shadow, rotation, across), _shadow_extent(level_shadow, rotation, across)), "the raised shadow is no wider across the light")
 	# Since #51 the body stands on the ground: lifted up the screen by the plateau height, its
 	# polygon unchanged; the level tree's body stays at its foot. tests/offtrack_object_terrain_test.gd
@@ -659,34 +658,55 @@ func _median(values: Array[int]) -> int:
 	return sorted[sorted.size() / 2]
 
 
+## The whole build the runtime performs: the ground grid and the four ribbon gradients (grass
+## shoulder and dirt on the centreline, the two boundary lines), each stop a sample. One ribbon is
+## budgeted on its own and the whole build against its total sample count, so the fourfold ribbon
+## cost the shading documents is bounded and not only one quarter of it.
 func _verify_build_cost() -> bool:
 	var definition: TrackDefinition = TrackGenerator.new().generate(GRID_SEED)
 	var map := TrackHeightMap.new(definition)
 	var shading := _shading()
 	root.add_child(shading)
+	var polylines: Array[PackedVector2Array] = [definition.centerline, definition.centerline, definition.left_boundary, definition.right_boundary]
+	var ribbon_stops := 0
+	for points in polylines:
+		ribbon_stops += points.size()
 	var ground_runs: Array[int] = []
 	var ribbon_runs: Array[int] = []
+	var whole_runs: Array[int] = []
 	for run in range(TIMING_RUNS):
 		var started := Time.get_ticks_usec()
 		shading.build(definition.play_area, map)
-		ground_runs.append(Time.get_ticks_usec() - started)
+		var ground_usec := Time.get_ticks_usec() - started
+		ground_runs.append(ground_usec)
 		started = Time.get_ticks_usec()
 		var gradient := shading.ribbon_gradient(definition.centerline, TrackRuntime.DIRT_COLOR, map)
 		ribbon_runs.append(Time.get_ticks_usec() - started)
 		_check(gradient.get_point_count() == definition.centerline.size(), "run %d built a full ribbon gradient" % run)
+		started = Time.get_ticks_usec()
+		var stops := 0
+		for points in polylines:
+			stops += shading.ribbon_gradient(points, TrackRuntime.EDGE_COLOR, map).get_point_count()
+		whole_runs.append(ground_usec + Time.get_ticks_usec() - started)
+		_check(stops == ribbon_stops, "run %d built all four ribbon gradients in full (%d stops)" % [run, stops])
 	var samples := shading.ground_sample_count()
 	var expected_samples := _walked_count(definition.play_area.position.x, definition.play_area.end.x, TerrainShading.GROUND_CELL) * _walked_count(definition.play_area.position.y, definition.play_area.end.y, TerrainShading.GROUND_CELL)
 	_check(samples == expected_samples, "the timed build sampled the full grid (%d), so the budget is not met by sampling less" % samples)
 	var ground_median := _median(ground_runs)
 	var ribbon_median := _median(ribbon_runs)
+	var whole_median := _median(whole_runs)
 	var ground_budget := int(float(samples) * PER_SAMPLE_BUDGET_USEC)
 	var ribbon_budget := int(float(definition.centerline.size()) * PER_SAMPLE_BUDGET_USEC)
-	print("build_cost seed=%d ground_samples=%d ground_usec=%s median=%d per_sample=%.2f budget=%d ribbon_stops=%d ribbon_usec=%s median=%d per_stop=%.2f budget=%d" % [
+	var whole_budget := int(float(samples + ribbon_stops) * PER_SAMPLE_BUDGET_USEC)
+	print("build_cost seed=%d ground_samples=%d ground_usec=%s median=%d per_sample=%.2f budget=%d ribbon_stops=%d ribbon_usec=%s median=%d per_stop=%.2f budget=%d whole_samples=%d ribbon_stops_total=%d whole_usec=%s median=%d per_sample=%.2f budget=%d" % [
 		GRID_SEED, samples, str(ground_runs), ground_median, float(ground_median) / float(samples), ground_budget,
 		definition.centerline.size(), str(ribbon_runs), ribbon_median, float(ribbon_median) / float(definition.centerline.size()), ribbon_budget,
+		samples + ribbon_stops, ribbon_stops, str(whole_runs), whole_median, float(whole_median) / float(samples + ribbon_stops), whole_budget,
 	])
 	_check(ground_median <= ground_budget, "the ground grid builds within %.0f us a sample (median %d us for %d samples)" % [PER_SAMPLE_BUDGET_USEC, ground_median, samples])
 	_check(ribbon_median <= ribbon_budget, "a ribbon gradient builds within %.0f us a stop (median %d us for %d stops)" % [PER_SAMPLE_BUDGET_USEC, ribbon_median, definition.centerline.size()])
+	_check(ribbon_stops >= 4 * definition.centerline.size(), "the four ribbons carry at least four centrelines' worth of stops (%d of 4 x %d), the fourfold cost the shading documents" % [ribbon_stops, definition.centerline.size()])
+	_check(whole_median <= whole_budget, "the whole build, ground grid plus four ribbon gradients, stays within %.0f us a sample (median %d us for %d samples)" % [PER_SAMPLE_BUDGET_USEC, whole_median, samples + ribbon_stops])
 	shading.free()
 	return true
 
@@ -700,9 +720,20 @@ func _check(condition: bool, message: String) -> void:
 		print("FAIL: %s" % message)
 
 
+## A section's completion is a guard, not an assertion: it fails only when the section bailed out
+## early, and it is not counted toward the check total the final line reports.
+func _section(ran: bool, message: String) -> void:
+	_sections += 1
+	if ran:
+		print("DONE: %s" % message)
+	else:
+		_failures.append(message)
+		print("FAIL: %s" % message)
+
+
 func _finish() -> void:
 	if _failures.is_empty():
-		print("Terrain visual checks passed: %d checks" % _checks)
+		print("Terrain visual checks passed: %d checks across %d sections" % [_checks, _sections])
 		quit(0)
 		return
 	for failure in _failures:

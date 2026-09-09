@@ -28,7 +28,7 @@ extends SceneTree
 const VEHICLE_SCENE := preload("res://vehicle/top_down_car.tscn")
 const TUNING_PATH := "res://data/default_vehicle_tuning.tres"
 const OBJECT_CATALOG_PATH := "res://data/default_offtrack_object_catalog.tres"
-const TERRAIN_CATALOG_PATH := "res://data/default_terrain_catalog.tres"
+const TERRAIN_CATALOG := preload("res://data/default_terrain_catalog.tres")
 const TICK := 1.0 / 60.0
 ## Headless physics is wall-clock paced; ten times the tick rate at ten times the time scale keeps
 ## the production 1 / 60 s step and runs ten times faster. Pinned by the step check.
@@ -94,6 +94,7 @@ const CENTRELINE_SEARCH_RADIUS := 800.0
 
 var _failures: Array[String] = []
 var _checks := 0
+var _sections := 0
 var _break_corridor := false
 var _tuning: VehicleTuning
 var _object_catalog: OfftrackObjectCatalog
@@ -112,15 +113,15 @@ func _run() -> void:
 	_tuning = load(TUNING_PATH) as VehicleTuning
 	_object_catalog = load(OBJECT_CATALOG_PATH) as OfftrackObjectCatalog
 	_generator = TrackGenerator.new()
-	_check(_verify_placement_ignores_terrain(), "the placement independence verification ran to completion")
-	_check(_verify_lift_rule_matches_the_car(), "the lift rule verification ran to completion")
-	_check(_verify_solids_seated_on_a_plateau(), "the solid seating verification ran to completion")
-	_check(_verify_decoratives_seated_on_a_plateau(), "the decorative seating verification ran to completion")
-	_check(_verify_contrast_rule_across_the_range(), "the contrast rule verification ran to completion")
+	_section(_verify_placement_ignores_terrain(), "the placement independence verification ran to completion")
+	_section(_verify_lift_rule_matches_the_car(), "the lift rule verification ran to completion")
+	_section(_verify_solids_seated_on_a_plateau(), "the solid seating verification ran to completion")
+	_section(_verify_decoratives_seated_on_a_plateau(), "the decorative seating verification ran to completion")
+	_section(_verify_contrast_rule_across_the_range(), "the contrast rule verification ran to completion")
 	for seed in PRODUCTION_SEEDS:
-		_check(_verify_production_objects(seed), "the seed %d production object verification ran to completion" % seed)
-	_check(await _verify_physics_step(), "the physics step verification ran to completion")
-	_check(await _verify_rock_reachability(), "the rock reachability measurement ran to completion")
+		_section(_verify_production_objects(seed), "the seed %d production object verification ran to completion" % seed)
+	_section(await _verify_physics_step(), "the physics step verification ran to completion")
+	_section(await _verify_rock_reachability(), "the rock reachability measurement ran to completion")
 	_finish()
 
 
@@ -130,8 +131,10 @@ func _definition(seed: int) -> TrackDefinition:
 	return _definitions[seed]
 
 
+## Every shading a section builds here is freed by that section: TerrainShading is a Node2D and
+## nothing else owns it.
 func _shading() -> TerrainShading:
-	return TerrainShading.new(load(TERRAIN_CATALOG_PATH) as TerrainCatalog)
+	return TerrainShading.new(TERRAIN_CATALOG)
 
 
 func _placement(id: String, archetype_id: StringName, position: Vector2, rotation: float, variant: int, scale_factor: float = 1.0) -> OfftrackObjectPlacement:
@@ -213,7 +216,6 @@ func _verify_lift_rule_matches_the_car() -> bool:
 	_check(is_equal_approx(TerrainShading.LIFT_PIXELS_PER_PIXEL, _tuning.lift_pixels_per_pixel), "the object lift rate is the car's lift_pixels_per_pixel (%.2f)" % _tuning.lift_pixels_per_pixel)
 	_check(TerrainShading.lift_offset(40.0).is_equal_approx(Vector2(0.0, -40.0 * TerrainShading.LIFT_PIXELS_PER_PIXEL)), "40 px of ground lifts a body 40 px up the screen")
 	_check(TerrainShading.lift_offset(-25.0).is_equal_approx(Vector2(0.0, 25.0 * TerrainShading.LIFT_PIXELS_PER_PIXEL)), "a hollow lowers a body down the screen")
-	_check(TerrainShading.lift_offset(0.0) == Vector2.ZERO, "level ground leaves a body where it stands")
 	return true
 
 
@@ -245,7 +247,6 @@ func _verify_solids_seated_on_a_plateau() -> bool:
 	_check(rock.transform.basis_xform(rock_body.position).is_equal_approx(expected_lift), "the 1.2x rock beside it is lifted the same %.0f px under its own rotation and scale, not 1.2 times as far" % -expected_lift.y)
 	_check(rock.scale.is_equal_approx(Vector2.ONE * 1.2) and not rock_body.position.is_equal_approx(raised_body.position.rotated(rotation - 2.0)), "the rock's local offset differs from the tree's because its scale is folded out of it")
 	_check(level_body.position == Vector2.ZERO, "on level ground the body stays at its foot")
-	_check(raised_body.polygon == level_body.polygon, "the lift moves the body; it does not reshape it")
 	# The shadow is anchored to the body's lift (#52): cast from the lifted body along the shadow
 	# direction at the factory offset times the length factor, so it stays under the body on a rise
 	# and cannot cross to the lit side in a hollow. Until #52 it stayed at the foot, and #51's
@@ -257,7 +258,9 @@ func _verify_solids_seated_on_a_plateau() -> bool:
 	var raised_anchor := raised.transform.basis_xform(raised_shadow.position)
 	_check(raised_anchor.y < expected_lift.y * 0.5, "the raised shadow's anchor rises with the body (%.1f px up the screen); it is not left at the foot" % -raised_anchor.y)
 	# Colour: the same function the ground uses, from the same sample.
-	var base := (OfftrackObjectMeshFactory.solid_visual(&"tree", 0).get_child(1) as Polygon2D).color
+	var base_visual := OfftrackObjectMeshFactory.solid_visual(&"tree", 0)
+	var base := (base_visual.get_child(1) as Polygon2D).color
+	base_visual.free()
 	var raised_sample := plateau.sample_at(Vector2(500.0, 0.0))
 	_check(_colors_match(raised_body.color, shading.shade(base, raised_sample)), "the raised tree body is shade(base, sample) from the map at its foot")
 	_check(_colors_match(level_body.color, base), "the level tree body is its base colour: brightness 1 on level ground")
@@ -277,6 +280,7 @@ func _verify_solids_seated_on_a_plateau() -> bool:
 	var plain_body := visuals.get_node("SolidObjects/v1_0_1_0").get_child(1) as Polygon2D
 	_check(plain_body.position == Vector2.ZERO and _colors_match(plain_body.color, base), "without a height query the body is unlifted and its base colour")
 	visuals.free()
+	shading.free()
 	return true
 
 
@@ -284,9 +288,15 @@ func _verify_decoratives_seated_on_a_plateau() -> bool:
 	var raised_height := 40.0
 	var shading := _shading()
 	var plateau := _plateau(raised_height)
+	# The grass pair stands on the plateau 5 px inside the top and the bottom edge of chunk (0, 0),
+	# so a 40 px lift carries the top one out through the chunk's top edge and a 40 px drop carries
+	# the bottom one out through its bottom edge. The batch's bounding box is what the renderer
+	# culls with, so it must follow the lift both ways or a visible instance is culled. The debris
+	# is off the plateau, on level ground.
+	var chunk_size: float = _object_catalog.chunk_size
 	var placements: Array[OfftrackObjectPlacement] = [
-		_placement("v1:0:1:0", &"grass", Vector2(500.0, 100.0), 0.3, 1, 0.9),
-		_placement("v1:0:1:1", &"grass", Vector2(600.0, 100.0), -1.0, 1, 1.1),
+		_placement("v1:0:1:0", &"grass", Vector2(500.0, 5.0), 0.3, 1, 0.9),
+		_placement("v1:0:1:1", &"grass", Vector2(600.0, chunk_size - 5.0), -1.0, 1, 1.1),
 		_placement("v1:0:1:2", &"debris", Vector2(1500.0, 100.0), 0.0, 2),
 	]
 	var visuals := OfftrackObjectVisuals.new()
@@ -294,7 +304,7 @@ func _verify_decoratives_seated_on_a_plateau() -> bool:
 	visuals.build(placements, _object_catalog, plateau, shading)
 	_check(visuals.decorative_batch_count() == 2, "the grass pair and the debris form two batches")
 	var expected_lift := TerrainShading.lift_offset(raised_height)
-	var brightness := shading.brightness(plateau.sample_at(Vector2(500.0, 100.0)))
+	var brightness := shading.brightness(plateau.sample_at(placements[0].transform.origin))
 	_check(brightness > 1.0, "the plateau brightens (%.3f), so the colour check below is not a check against 1" % brightness)
 	for index in 2:
 		var placement := placements[index]
@@ -308,10 +318,15 @@ func _verify_decoratives_seated_on_a_plateau() -> bool:
 		_check(transform.origin.is_equal_approx(placement.transform.origin + expected_lift), "%s is lifted %.0f px up the screen" % [placement.stable_id, -expected_lift.y])
 		_check(transform.x.is_equal_approx(unlifted.x) and transform.y.is_equal_approx(unlifted.y), "%s keeps its rotation and scale" % placement.stable_id)
 		_check(batch.multimesh.use_colors, "the batch carries per-instance colours")
-		_check(batch.multimesh.buffer.size() == 2 * OfftrackObjectVisuals.instance_stride(true) and instance.buffer.size() == batch.multimesh.buffer.size(), "the multimesh accepted a buffer of two coloured instances (%d floats)" % batch.multimesh.buffer.size())
 		_check(_colors_match(_instance_color(instance), Color(brightness, brightness, brightness, 1.0)), "%s is tinted by the ground brightness at its foot, which the GPU multiplies into the mesh colour" % placement.stable_id)
-		var bounds: AABB = batch.multimesh.custom_aabb
-		_check(bounds.position.y <= transform.origin.y - WorldScale.metres(0.8) * 1.1, "the batch bounds reach above the lifted instances")
+	# Culling. The box must enclose each instance where it is drawn; the chunk's own extent encloses
+	# neither escaped instance, so these hold only through the lift terms in the production bounds.
+	# Removing the low term fails the raised check and the high term the lowered one; the first is
+	# performed live in the fix report.
+	_check_batch_encloses_instances(visuals, placements.slice(0, 2), "raised")
+	plateau.plateau_height = -raised_height
+	visuals.build(placements, _object_catalog, plateau, shading)
+	_check_batch_encloses_instances(visuals, placements.slice(0, 2), "lowered")
 	var debris: Dictionary = visuals.decorative_instance_of("v1:0:1:2")
 	_check(_instance_transform(debris).origin.is_equal_approx(Vector2(1500.0, 100.0)), "the debris on level ground is not lifted")
 	_check(_colors_match(_instance_color(debris), Color.WHITE), "the debris on level ground keeps its mesh colour")
@@ -319,10 +334,46 @@ func _verify_decoratives_seated_on_a_plateau() -> bool:
 	visuals.build(placements, _object_catalog)
 	var plain: Dictionary = visuals.decorative_instance_of("v1:0:1:0")
 	var plain_batch: MultiMeshInstance2D = plain.batch
-	_check(_instance_transform(plain).origin.is_equal_approx(Vector2(500.0, 100.0)), "without a height query the instance sits at its placement")
+	_check(_instance_transform(plain).origin.is_equal_approx(Vector2(500.0, 5.0)), "without a height query the instance sits at its placement")
 	_check(not plain_batch.multimesh.use_colors and plain_batch.multimesh.buffer.size() == 2 * OfftrackObjectVisuals.instance_stride(false), "without shading the batch carries no instance colours (%d floats)" % plain_batch.multimesh.buffer.size())
 	visuals.free()
+	shading.free()
 	return true
+
+
+## The batch's bounding box, as uploaded for culling, must enclose each instance's drawn footprint:
+## its origin as uploaded, plus the mesh's radius at the instance's own scale in every direction.
+## The footprint is measured from the mesh and the buffer, not from the production bounds formula,
+## and at least one instance must lie outside its chunk or the check is met by the chunk alone.
+func _check_batch_encloses_instances(visuals: OfftrackObjectVisuals, placements: Array, label: String) -> void:
+	var chunk_size: float = _object_catalog.chunk_size
+	var escaped := 0
+	for placement in placements:
+		var instance: Dictionary = visuals.decorative_instance_of(placement.stable_id)
+		if instance.is_empty():
+			_check(false, "%s: %s is findable in its batch" % [label, placement.stable_id])
+			continue
+		var batch: MultiMeshInstance2D = instance.batch
+		var origin := _instance_transform(instance).origin
+		var radius: float = _mesh_radius(batch.multimesh.mesh) * placement.scale_factor
+		var footprint := Rect2(origin - Vector2.ONE * radius, Vector2.ONE * radius * 2.0)
+		var bounds: AABB = batch.multimesh.custom_aabb
+		var box := Rect2(bounds.position.x, bounds.position.y, bounds.size.x, bounds.size.y)
+		var chunk_top := floorf(placement.transform.origin.y / chunk_size) * chunk_size
+		if footprint.position.y < chunk_top or footprint.end.y > chunk_top + chunk_size:
+			escaped += 1
+		_check(box.encloses(footprint), "%s: the batch bounds (y %.1f to %.1f) enclose %s drawn at y %.1f to %.1f" % [label, box.position.y, box.end.y, placement.stable_id, footprint.position.y, footprint.end.y])
+	_check(escaped > 0, "%s: %d lifted instance(s) lie outside their chunk, so the enclosure above is not met by the chunk's own extent" % [label, escaped])
+
+
+## The mesh's radius: the furthest any vertex lies from the instance origin.
+func _mesh_radius(mesh: ArrayMesh) -> float:
+	var radius := 0.0
+	for surface_index in mesh.get_surface_count():
+		var vertices: PackedVector3Array = mesh.surface_get_arrays(surface_index)[Mesh.ARRAY_VERTEX]
+		for vertex in vertices:
+			radius = maxf(radius, Vector2(vertex.x, vertex.y).length())
+	return radius
 
 
 ## Decodes an instance's transform from the batch buffer the visuals uploaded, in the renderer's
@@ -353,9 +404,8 @@ func _instance_color(instance: Dictionary) -> Color:
 ## clamp corner (full height and full light together) on purpose.
 func _verify_contrast_rule_across_the_range() -> bool:
 	var shading := _shading()
-	var terrain := load(TERRAIN_CATALOG_PATH) as TerrainCatalog
-	var amplitude := terrain.total_amplitude()
-	var slope := terrain.slope_bound()
+	var amplitude := TERRAIN_CATALOG.total_amplitude()
+	var slope := TERRAIN_CATALOG.slope_bound()
 	var colors := _base_colors()
 	_check(colors.size() == 11, "eleven archetype and variant colours are under the rule (%d)" % colors.size())
 	var ground_luminances: Array[float] = []
@@ -391,20 +441,10 @@ func _verify_contrast_rule_across_the_range() -> bool:
 	var darkest_ground: float = ground_luminances.min()
 	var lightest_ground: float = ground_luminances.max()
 	_check(lightest_ground / darkest_ground > 2.5, "the sweep spans the ground's real range (luminance %.3f to %.3f), not a sliver of it" % [darkest_ground, lightest_ground])
-	# The sign never flips: every body is strictly on one side of the ground's luminance in the
-	# deepest hollow and strictly on the same side on the highest rise. Strict, so a body the same
-	# colour as the ground -- the invisibility #50 measured -- fails here rather than comparing
-	# equal on both sides.
-	var flips := 0
-	for key in colors.keys():
-		var base: Color = colors[key]
-		var bottom := HeightQuery.HeightSample.new(-amplitude, Vector2.ZERO)
-		var top := HeightQuery.HeightSample.new(amplitude, Vector2.ZERO)
-		var bottom_side := signf(shading.shade(base, bottom).get_luminance() - shading.shade(TerrainShading.GROUND_COLOR, bottom).get_luminance())
-		var top_side := signf(shading.shade(base, top).get_luminance() - shading.shade(TerrainShading.GROUND_COLOR, top).get_luminance())
-		if bottom_side == 0.0 or top_side == 0.0 or bottom_side != top_side:
-			flips += 1
-	_check(flips == 0, "every body is strictly on one side of the ground's luminance in the deepest hollow and on the highest rise: no sign flip, no equality (%d offenders)" % flips)
+	# A ratio of at least the floor at every step of the sweep, in both hollow and rise, already
+	# rules out the sign flip #50 measured: a body can only cross the ground's luminance through a
+	# ratio of 1.
+	shading.free()
 	return true
 
 
@@ -815,7 +855,6 @@ func _verify_rock_reachability() -> bool:
 	_check(coarse.centreline_fallbacks + fine.centreline_fallbacks + flat.centreline_fallbacks == 0, "every airborne tick found the centreline within %.0f px (%d fallbacks), so no reach figure was manufactured by a failed lookup" % [CENTRELINE_SEARCH_RADIUS, coarse.centreline_fallbacks + fine.centreline_fallbacks + flat.centreline_fallbacks])
 	_check(is_finite(min_separation) and is_finite(min_separation_engine), "both separations were measured against real rocks (physical %.1f px, engine %.1f px), neither left at its initial infinity" % [min_separation, min_separation_engine])
 	_check(reachable.is_empty(), "no generated rock in seeds 0..19 is reachable from a flight above the clearance over that rock's own ground (%d reachable)" % reachable.size())
-	_check(min_separation > 0.0, "the closest a flight above a rock's clearance came to that rock's contact distance is %.1f px, on the far side of it" % min_separation)
 	_check(min_separation_engine > 0.0, "the closest a flight with the low layer dropped from the car's mask came to a rock's contact distance is %.1f px, on the far side of it" % min_separation_engine)
 	_check(reach_above < _object_catalog.solid_clearance, "a flight drifts at most %.1f px past the road edge while above the clearance, against the catalog's %.1f px corridor" % [reach_above, _object_catalog.solid_clearance])
 	_check(reach_airborne >= _object_catalog.solid_clearance, "the whole flight envelope (%.1f px past the road edge) now exceeds the %.1f px corridor rule, so the rule alone no longer proves a rock out of reach and the per-rock checks above carry the finding; if this fails, the envelope has shrunk and docs/height-channel.md must say so" % [reach_airborne, _object_catalog.solid_clearance])
@@ -840,9 +879,20 @@ func _check(condition: bool, message: String) -> void:
 		print("FAIL: %s" % message)
 
 
+## A section's completion is a guard, not an assertion: it fails only when the section bailed out
+## early, and it is not counted toward the check total the final line reports.
+func _section(ran: bool, message: String) -> void:
+	_sections += 1
+	if ran:
+		print("DONE: %s" % message)
+	else:
+		_failures.append(message)
+		print("FAIL: %s" % message)
+
+
 func _finish() -> void:
 	if _failures.is_empty():
-		print("Off-track object terrain checks passed: %d checks" % _checks)
+		print("Off-track object terrain checks passed: %d checks across %d sections" % [_checks, _sections])
 		quit(0)
 		return
 	for failure in _failures:

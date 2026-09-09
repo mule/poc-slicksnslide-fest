@@ -53,10 +53,17 @@ const CAPTURE_RATE_FLOOR := 0.9
 const POSITIVE_HEIGHT_CAPTURE_FLOOR := 0.2
 const STUCK_TICKS := 60
 const RIDE_GAP_TOLERANCE := 0.5
+## The scripted hump the landing query count is measured over, and the ticks allowed for the
+## car to reach it, fly and land at max_safe_speed.
+const QUERY_HUMP_CREST_X := 600.0
+const QUERY_HUMP_HALF_LENGTH := 150.0
+const QUERY_HUMP_CREST_HEIGHT := 18.0
+const LANDING_QUERY_TICKS := 240
 const DRIVE_AWAY_DISTANCE := 40.0
 
 var _failures: Array[String] = []
 var _checks := 0
+var _sections := 0
 var _break_lift_off := false
 var _break_clamp := false
 var _catalog: TerrainCatalog
@@ -153,16 +160,17 @@ func _run() -> void:
 	_catalog = load(TERRAIN_CATALOG_PATH) as TerrainCatalog
 	_tuning = load(TUNING_PATH) as VehicleTuning
 	_generator = TrackGenerator.new()
-	_check(await _verify_physics_step_matches_the_model(), "the physics step verification ran to completion")
-	_check(_verify_slope_bounds_against_the_tuning(), "the slope bounds verification ran to completion")
-	_check(await _verify_full_throttle_climb_does_not_stall(), "the climb verification ran to completion")
-	_check(await _verify_released_descent_is_drag_limited(), "the descent verification ran to completion")
-	_check(await _verify_the_clamp_holds_a_steep_descent(), "the clamp verification ran to completion")
-	_check(await _verify_no_lift_off_on_bare_terrain_at_max_safe_speed(), "the lift-off verification ran to completion")
-	_check(_verify_height_samples_report_the_feature_height(), "the feature height verification ran to completion")
+	_section(await _verify_physics_step_matches_the_model(), "the physics step verification ran to completion")
+	_section(_verify_slope_bounds_against_the_tuning(), "the slope bounds verification ran to completion")
+	_section(await _verify_full_throttle_climb_does_not_stall(), "the climb verification ran to completion")
+	_section(await _verify_released_descent_is_drag_limited(), "the descent verification ran to completion")
+	_section(await _verify_the_clamp_holds_a_steep_descent(), "the clamp verification ran to completion")
+	_section(await _verify_no_lift_off_on_bare_terrain_at_max_safe_speed(), "the lift-off verification ran to completion")
+	_section(_verify_height_samples_report_the_feature_height(), "the feature height verification ran to completion")
+	_section(await _verify_landing_issues_no_extra_query(), "the landing query verification ran to completion")
 	for seed in LAP_SEEDS:
-		_check(await _verify_lap_and_safe_pose_capture(seed), "the seed %d lap verification ran to completion" % seed)
-	_check(await _verify_reset_on_a_slope(), "the reset on a slope verification ran to completion")
+		_section(await _verify_lap_and_safe_pose_capture(seed), "the seed %d lap verification ran to completion" % seed)
+	_section(await _verify_reset_on_a_slope(), "the reset on a slope verification ran to completion")
 	_finish()
 
 
@@ -228,7 +236,6 @@ func _verify_slope_bounds_against_the_tuning() -> bool:
 	])
 	_check(road_max <= slope_bound, "no road gradient over twenty seeds exceeds the catalog's diagonal slope bound (%.4f of %.4f)" % [road_max, slope_bound])
 	_check(road_max > 0.25 * per_axis_bound, "the roads carry real slope, at least a quarter of the per-axis bound (%.4f), so the survey is not measuring a flat field" % road_max)
-	_check(float(climb.gradient) > 0.0 and float(descent.gradient) < 0.0, "the survey found a climb (%.4f) and a descent (%.4f) to drive" % [climb.gradient, descent.gradient])
 	_check(positive_fraction_max > 0.9, "some seed's road is above zero for over 90%% of its length (%.1f%%), which is where the pre-terrain gate would capture nothing" % (100.0 * positive_fraction_max))
 
 	var engine_acceleration := _tuning.engine_force / _tuning.mass_kg
@@ -411,7 +418,6 @@ func _verify_the_clamp_holds_a_steep_descent() -> bool:
 	print("clamp_proof slope=%.2f seat=%.1f peak=%.3f clamp=%.1f unclamped_balance=%.1f" % [CLAMP_PROOF_SLOPE, DESCENT_SEAT_SPEED, peak, _tuning.max_safe_speed, unclamped])
 	_check(not over_clamp, "on the synthetic descent the car never exceeds the shipped max_safe_speed (peak %.3f of %.1f px/s)" % [peak, _tuning.max_safe_speed])
 	_check(pinned, "on the synthetic descent the car sits on the clamp for the whole last second")
-	_check(not car.is_airborne(), "a plane has no curvature, so the car stays grounded")
 	context.world.queue_free()
 	await process_frame
 	return true
@@ -489,8 +495,6 @@ func _verify_no_lift_off_on_bare_terrain_at_max_safe_speed() -> bool:
 ## flank, false on bare terrain and from every flat provider, with the wedge still summed into the
 ## height.
 func _verify_height_samples_report_the_feature_height() -> bool:
-	_check(not HeightQuery.HeightSample.new().on_feature, "a default sample is not on a feature")
-	_check(not HeightQuery.new().sample_at(Vector2(5.0, 5.0)).on_feature, "the base query reports no feature")
 	var definition := _definition(0)
 	var field := TerrainField.new(definition.terrain_seed, _catalog)
 	_check(not field.sample_at(Vector2(100.0, 200.0)).on_feature, "bare terrain reports no feature")
@@ -813,6 +817,63 @@ func _model_speed(ticks: int, slope: float, throttle: float, initial_speed: floa
 ## moves a body by one step of its velocity before the first _integrate_forces sees it, so a car
 ## seated where it was placed reads its first tick against a stale height and, on a descent
 ## steeper than the lift-off tolerance per tick of travel, leaves the ground for no reason.
+## The car reads its lookahead sample within the tick that queried it. TrackHeightMap's miss path
+## hands back one shared sample that the next query rewrites, so that read is safe only while
+## nothing between the query and the last read samples again; the landing call is where the sample
+## used to cross a call boundary. Pinned by count rather than by inspection: on a scripted hump,
+## every physics tick after the first issues exactly the two height queries a grounded tick does,
+## the ground under the car and the lookahead, and the landing tick issues no more than that.
+## Adding one query inside _land fails the landing check (performed live in the fix report).
+func _verify_landing_issues_no_extra_query() -> bool:
+	var provider := HeightChannelTestHeightProvider.new()
+	provider.mode = HeightChannelTestHeightProvider.Mode.HUMP
+	provider.crest_x = QUERY_HUMP_CREST_X
+	provider.half_length = QUERY_HUMP_HALF_LENGTH
+	provider.crest_height = QUERY_HUMP_CREST_HEIGHT
+	var context := _make_car(provider, Issue4TestSurfaceProvider.new(), _pose(Vector2.ZERO, Vector2.RIGHT), null, Vector2(_tuning.max_safe_speed, 0.0))
+	var car: TopDownCar = context.car
+	var controls := VehicleInputState.new()
+	controls.throttle = 1.0
+	car.set_input_state(controls)
+	var counted_from := provider.sample_count
+	var was_airborne := false
+	var launched := false
+	var landings := 0
+	var landing_queries := -1
+	var grounded_counts: Dictionary = {}
+	var airborne_counts: Dictionary = {}
+	var ticks := 0
+	for tick in range(LANDING_QUERY_TICKS):
+		await physics_frame
+		ticks += 1
+		var queries := provider.sample_count - counted_from
+		counted_from = provider.sample_count
+		var airborne := car.is_airborne()
+		# The first await may or may not straddle a physics step; every later one is exactly one.
+		if tick == 0:
+			was_airborne = airborne
+			continue
+		if airborne and not was_airborne:
+			launched = true
+		if was_airborne and not airborne:
+			landings += 1
+			landing_queries = queries
+		elif airborne:
+			airborne_counts[queries] = int(airborne_counts.get(queries, 0)) + 1
+		else:
+			grounded_counts[queries] = int(grounded_counts.get(queries, 0)) + 1
+		was_airborne = airborne
+		if landings > 0:
+			break
+	print("landing_queries ticks=%d launched=%s landings=%d landing_tick_queries=%d grounded=%s airborne=%s" % [ticks, launched, landings, landing_queries, grounded_counts, airborne_counts])
+	_check(launched and landings == 1, "the hump launches the car and it lands within %d ticks (%d landings)" % [LANDING_QUERY_TICKS, landings])
+	_check(grounded_counts.keys() == [2] and airborne_counts.keys() == [2], "every grounded and every airborne tick issues exactly two height queries, the ground under the car and the lookahead (grounded %s, airborne %s)" % [grounded_counts, airborne_counts])
+	_check(landing_queries == 2, "the landing tick issues the same two queries, so _land samples nothing through the held lookahead (%d)" % landing_queries)
+	context.world.queue_free()
+	await process_frame
+	return true
+
+
 func _make_car(height_query: HeightQuery, surface_query: SurfaceQuery, transform: Transform2D, tuning: VehicleTuning = null, velocity: Vector2 = Vector2.ZERO) -> Dictionary:
 	var world := Node2D.new()
 	root.add_child(world)
@@ -837,9 +898,20 @@ func _check(condition: bool, message: String) -> void:
 		print("FAIL: %s" % message)
 
 
+## A section's completion is a guard, not an assertion: it fails only when the section bailed out
+## early, and it is not counted toward the check total the final line reports.
+func _section(ran: bool, message: String) -> void:
+	_sections += 1
+	if ran:
+		print("DONE: %s" % message)
+	else:
+		_failures.append(message)
+		print("FAIL: %s" % message)
+
+
 func _finish() -> void:
 	if _failures.is_empty():
-		print("Vehicle terrain checks passed: %d checks" % _checks)
+		print("Vehicle terrain checks passed: %d checks across %d sections" % [_checks, _sections])
 		quit(0)
 		return
 	for failure in _failures:

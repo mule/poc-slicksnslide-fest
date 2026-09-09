@@ -17,9 +17,13 @@ extends HeightQuery
 ## rides the flank onto the wedge. A placement with a zero flank width is that hard cut.
 ##
 ## The miss path hands back one shared sample instead of allocating per query, rewritten with the
-## terrain sample on every return so a consumer's stray write self-heals on the next query: hold
-## and read the sample freely, but never write through it -- a mutation only corrupts what is read
-## before the next miss query rewrites it. A hit allocates its own sample, as before.
+## terrain sample on every return. The rule for a consumer is: read what you need from the sample
+## before issuing another query, and never write through it. A held sample is silently rewritten
+## by the next miss query, so holding one across a call that may sample is the hazard, not merely
+## writing to it; the rewrite also means a stray write self-heals on the next query. The car reads
+## its lookahead sample within the one tick that queried it, and vehicle_terrain_test pins that a
+## landing tick issues no query beyond the two a grounded tick does. A hit allocates its own
+## sample, as before.
 ##
 ## Terrain is built from the definition's `terrain_seed` and the same default catalog resource the
 ## generator preloads, so the map reproduces the field the fingerprint was taken from; a
