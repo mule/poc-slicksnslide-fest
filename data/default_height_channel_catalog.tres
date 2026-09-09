@@ -14,3 +14,4 @@ landing_clearance = 400.0
 spawn_exclusion = 1000.0
 checkpoint_exclusion = 500.0
 minimum_spacing = 1500.0
+flank_width = 250.0

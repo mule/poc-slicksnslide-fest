@@ -1,0 +1,26 @@
+# Terrain drive trace
+# renderer=graphical SubViewport=1280x720 overlay=off driver=pure-pursuit physics_ticks_per_second=300 time_scale=5.0 step_s=0.01667
+# a climb is a grounded tick with the ground rising more than 0.010 along the heading; a descent, falling more than that
+landing seed=0 tick=258 position=(-2520.5, 956.0) speed=375.7 ground=-8.44 on_dirt=true apex_over_ground=11.74
+landing seed=0 tick=2150 position=(3477.3, -2898.6) speed=377.9 ground=-37.33 on_dirt=true apex_over_ground=0.00
+landing seed=0 tick=3474 position=(672.5, 4497.2) speed=406.2 ground=15.98 on_dirt=true apex_over_ground=0.00
+lap seed=0 completed=true ticks=4111 lap_s=69.6 real_s=13.9 top_kph=161.5 min_after_start_kph=53.4 level_mean_kph=115.7 climb_ticks=748 climb_mean_kph=116.0 climb_min_kph=67.4 steepest_climb=0.0646 descent_ticks=747 descent_mean_kph=108.2 descent_max_kph=148.3 steepest_descent=0.0308 flights=3 from_ramp=3 from_bare_terrain=0 airborne_ticks=108 longest_air_s=0.77 highest_apex_over_ground_px=13.85 landings_on_dirt=3 landings_off_dirt=0 resets=0 longest_slow_streak_ticks=7 contact_ticks=0
+still=hill seed=0 file=seed-0-hill.png position=(-396.9, -3330.7) height=40.79 gradient=(0.0105, 0.0116) height_term=0.777 light_term=0.179 car_height=40.79
+still=slope seed=0 file=seed-0-slope.png position=(2017.5, -4010.0) height=-22.43 gradient=(-0.0308, -0.0121) height_term=-0.427 light_term=-0.347 car_height=-22.43
+still=ramp-on-terrain seed=0 file=seed-0-ramp-on-terrain.png ramp=h3:0:501:0 crest=(3211.7, -3066.9) terrain_at_foot_px=-38.00 terrain_at_crest_px=-37.97 terrain_at_landing_px=-37.82 crest_px=9.00 summed_crest_px=-28.97 car_ground_px=-38.02
+landing seed=4 tick=288 position=(-700.4, 3872.9) speed=389.4 ground=5.02 on_dirt=true apex_over_ground=12.24
+landing seed=4 tick=1730 position=(-3812.2, -1128.1) speed=398.2 ground=12.55 on_dirt=true apex_over_ground=0.00
+landing seed=4 tick=2168 position=(-2447.9, -4181.4) speed=367.3 ground=13.24 on_dirt=true apex_over_ground=0.00
+landing seed=4 tick=3065 position=(3127.9, -4400.2) speed=419.9 ground=-13.94 on_dirt=true apex_over_ground=0.00
+lap seed=4 completed=true ticks=5046 lap_s=85.2 real_s=17.0 top_kph=167.7 min_after_start_kph=53.3 level_mean_kph=117.2 climb_ticks=1238 climb_mean_kph=119.0 climb_min_kph=56.8 steepest_climb=0.0718 descent_ticks=884 descent_mean_kph=133.6 descent_max_kph=161.6 steepest_descent=0.0383 flights=4 from_ramp=4 from_bare_terrain=0 airborne_ticks=153 longest_air_s=0.75 highest_apex_over_ground_px=13.84 landings_on_dirt=4 landings_off_dirt=0 resets=0 longest_slow_streak_ticks=7 contact_ticks=0
+still=hill seed=4 file=seed-4-hill.png position=(-93.9, -5615.2) height=21.39 gradient=(0.0022, -0.0125) height_term=0.407 light_term=-0.083 car_height=21.39
+still=slope seed=4 file=seed-4-slope.png position=(-4175.6, 3821.1) height=-8.07 gradient=(0.0374, 0.0095) height_term=-0.154 light_term=0.378 car_height=-8.07
+still=ramp-on-terrain seed=4 file=seed-4-ramp-on-terrain.png ramp=h3:4:804:0 crest=(2784.4, -4589.2) terrain_at_foot_px=-20.73 terrain_at_crest_px=-19.17 terrain_at_landing_px=-17.19 crest_px=9.00 summed_crest_px=-10.17 car_ground_px=-21.75
+landing seed=9 tick=330 position=(3095.9, -4361.9) speed=397.4 ground=11.82 on_dirt=true apex_over_ground=12.83
+landing seed=9 tick=526 position=(4717.8, -3929.2) speed=401.2 ground=4.13 on_dirt=true apex_over_ground=0.00
+landing seed=9 tick=3201 position=(-3502.9, 2456.9) speed=381.6 ground=7.18 on_dirt=true apex_over_ground=0.00
+landing seed=9 tick=3401 position=(-4615.7, 1453.1) speed=376.3 ground=-10.86 on_dirt=true apex_over_ground=0.00
+lap seed=9 completed=true ticks=5148 lap_s=86.8 real_s=17.3 top_kph=164.3 min_after_start_kph=53.1 level_mean_kph=116.3 climb_ticks=1119 climb_mean_kph=132.4 climb_min_kph=91.4 steepest_climb=0.0674 descent_ticks=1056 descent_mean_kph=119.1 descent_max_kph=158.7 steepest_descent=0.0326 flights=4 from_ramp=4 from_bare_terrain=0 airborne_ticks=157 longest_air_s=0.73 highest_apex_over_ground_px=13.31 landings_on_dirt=4 landings_off_dirt=0 resets=0 longest_slow_streak_ticks=7 contact_ticks=0
+still=hill seed=9 file=seed-9-hill.png position=(7088.6, -75.0) height=34.43 gradient=(-0.0150, 0.0001) height_term=0.656 light_term=-0.121 car_height=34.43
+still=slope seed=9 file=seed-9-slope.png position=(4623.4, 4684.6) height=3.27 gradient=(0.0218, 0.0167) height_term=0.062 light_term=0.311 car_height=3.27
+still=ramp-on-terrain seed=9 file=seed-9-ramp-on-terrain.png ramp=h3:9:917:0 crest=(-3208.2, 2659.9) terrain_at_foot_px=15.82 terrain_at_crest_px=14.47 terrain_at_landing_px=11.99 crest_px=9.00 summed_crest_px=23.47 car_ground_px=16.39

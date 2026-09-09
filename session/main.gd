@@ -138,7 +138,9 @@ func restart_with_seed(seed: int) -> void:
 	_vehicle.global_transform = _track_definition.spawn_transform
 	install_vehicle(_vehicle)
 	_vehicle.set_surface_query(TrackSurfaceMap.new(_track_definition))
-	_vehicle.set_height_query(TrackHeightMap.new(_track_definition))
+	# The runtime's own map, so the car drives the field the ground is drawn from and the lattice
+	# is built once rather than twice.
+	_vehicle.set_height_query(runtime.height_query())
 	_vehicle.set_input_state(_controller_input.apply_raw_values(0.0, 0.0, 0.0, false))
 	_vehicle.set_safe_reset_pose(_track_definition.spawn_transform)
 	_vehicle.set_auto_reset_enabled(bool(session_settings.get("auto_reset_enabled")))

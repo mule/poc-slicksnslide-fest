@@ -204,17 +204,20 @@ func _verify_height_channel_is_wired(session: Node) -> bool:
 	# branch caps its rise at the rate the ground under it rises and that rate is zero at a
 	# standstill. `_apply_safe_reset` is the exception: it re-seats the ride height by sampling the
 	# pose it teleports to, through whatever query the car already holds. So a car reset onto a
-	# crest reports that crest's height only if the session installed a TrackHeightMap built from
-	# this definition; with no query installed it reads flat ground and stays at zero.
+	# crest reports that crest's height -- terrain under the crest plus the wedge, since #47 --
+	# only if the session installed a TrackHeightMap built from this definition; with no query
+	# installed it reads flat ground and stays at zero, and with terrain alone it misses the wedge.
 	var crest_ramp: JumpRampPlacement = second_definition.jump_ramps[0] if not second_definition.jump_ramps.is_empty() else null
 	_check(crest_ramp != null, "seed 4 places at least one ramp to reset the car onto")
 	if crest_ramp != null:
 		_check(car.set_safe_reset_pose(Transform2D(0.0, crest_ramp.transform.origin)), "the ramp crest is a collision-clear safe pose")
 		car.request_safe_reset()
 		await physics_frame
+		var terrain_under_crest := TerrainField.new(second_definition.terrain_seed, load("res://data/default_terrain_catalog.tres") as TerrainCatalog).height_at(crest_ramp.transform.origin)
+		_check(terrain_under_crest != 0.0, "the terrain under the crest is not flat (%.3f px), so the seat below is not the pre-terrain check" % terrain_under_crest)
 		_check(
-			absf(car.get_height() - crest_ramp.crest_height) < 0.001,
-			"the session's own height query seats the car on the crest (height %.3f px, crest %.3f px)" % [car.get_height(), crest_ramp.crest_height]
+			absf(car.get_height() - (terrain_under_crest + crest_ramp.crest_height)) < 0.001,
+			"the session's own height query seats the car on the crest (height %.3f px, terrain %.3f px plus crest %.3f px)" % [car.get_height(), terrain_under_crest, crest_ramp.crest_height]
 		)
 
 	# A scripted fall long enough for the notice proves the car is wired to the session's status.

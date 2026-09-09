@@ -1,6 +1,6 @@
 # Slicks 'n Slide Fest
 
-A Godot proof of concept for a single-viewport, top-down dirt-racing game. It now launches directly into a deterministic generated circuit with a force-based car, controller-first input, ordered lap timing, safe reset, pause, seed restart, and deterministic off-track scenery. Grass and debris make the shoulder readable while trees and rocks populate the deeper hazard field without blocking the 20 m solid recovery corridor; see [Off-track objects](docs/offtrack-objects.md). Deterministic jump ramps give the circuit its one vertical axis: the car crests, flies, and pays for the landing. While it is high enough it clears a rock but never a tree — a capability the current ramp and object placement never actually bring together, so it is not something you will see in play; see [The height channel](docs/height-channel.md) and its [limitations](docs/height-channel.md#limitations).
+A Godot proof of concept for a single-viewport, top-down dirt-racing game. It now launches directly into a deterministic generated circuit with a force-based car, controller-first input, ordered lap timing, safe reset, pause, seed restart, and deterministic off-track scenery. Grass and debris make the shoulder readable while trees and rocks populate the deeper hazard field without blocking the 20 m solid recovery corridor; see [Off-track objects](docs/offtrack-objects.md). The ground has shape: a deterministic terrain field covers the whole play area, so the road climbs and drops, the off-track world rolls, and the ground, the road, the objects and their shadows are all tinted and lit from the same field the car drives on; see [The terrain field](docs/terrain.md). Deterministic jump ramps are summed onto it and give the circuit its flights: the car crests, flies, and pays for the landing. While it is high enough it clears a rock but never a tree — a capability the current ramp and object placement never actually bring together, even on terrain, so it is not something you will see in play; see [The height channel](docs/height-channel.md) and its [limitations](docs/height-channel.md#limitations).
 
 ## Required Godot version
 
@@ -120,23 +120,53 @@ godot --headless --path . --script res://tests/jump_ramp_placement_test.gd
 godot --headless --path . --script res://tests/vehicle_height_channel_test.gd
 godot --headless --path . --script res://tests/airborne_obstacle_level_test.gd
 godot --headless --path . --script res://tests/jump_ramp_visuals_test.gd
+godot --headless --path . --script res://tests/terrain_field_contract_test.gd
+godot --headless --path . --script res://tests/terrain_height_map_test.gd
+godot --headless --path . --script res://tests/vehicle_terrain_test.gd
+godot --headless --path . --script res://tests/terrain_visuals_test.gd
+godot --headless --path . --script res://tests/offtrack_object_terrain_test.gd
 ```
 
 These pin the ramp catalog and its derivations, keep ramp placement deterministic and separated
 from the road and off-track seeds, hold the car's flight to its analytic arc and its ground-only
 rules, and check that a car above the clearance height clears a rock while still hitting a tree.
+The last two pin the terrain field's curvature bound and the height map that sums terrain under
+the ramps: all three earlier fingerprints held byte for byte for seeds 0-19, a car crossing a
+ramp's flank rides onto the wedge (`-- --break-side-wall` restores the old wall and fails it),
+and the flank's curvature stays under the lift-off threshold (`-- --break-flank-curvature`).
+The vehicle terrain suite drives the production car on the field: the steepest climb any seed
+produces cannot stall it, drag rather than the clamp holds every descent (the clamp is proven on a
+synthetic slope; `-- --break-speed-clamp` fails it), bare terrain never lifts it off at top speed
+in the real integrator (`-- --break-terrain-lift-off` fails it), whole laps complete on three
+seeds, and safe poses are captured at the rate the car's own rules predict on sloped ground. It
+takes about two minutes. The terrain visuals suite pins the elevation drawing: ground and road
+tinted by height and lit by slope from the same `TrackHeightMap` the car drives on, asserted to
+agree with the car's own ride height at the spawn and on a ramp crest, off-track shadows that
+lengthen with the ground under them, and a build cost under 15 µs a sample. The off-track object
+terrain suite seats the objects on that same map: bodies lifted and shaded from the car-path map
+on two production seeds with zero mismatches, every solid's shadow cast from its lifted body, every
+base colour holding a 1.4 luminance ratio against the ground at every height, the twenty
+pre-terrain object fingerprints byte for byte, and the rock-reachability measurement re-run over
+every ramp of seeds 0-19 with its verdict pinned (`-- --break-rock-corridor` fails it). It takes
+about four minutes.
 
 For the seeds 0-19 ramp ledger, the driven approach/apex/landing stills, the flight-reach
-measurement, and the rock-clearance still, use the graphical renderer (not `--headless`):
+measurement, the rock-clearance still, the seeds 0-19 terrain ledger with its three-seed drive, and
+the elevation and object stills, use the graphical renderer (not `--headless`):
 
 ```sh
 godot --path . --script res://tests/capture_height_channel_evidence.gd
+godot --path . --script res://tests/capture_terrain_evidence.gd
+godot --path . --script res://tests/capture_terrain_visuals.gd
+godot --path . --script res://tests/capture_offtrack_object_terrain.gd
 ```
 
-It writes the trace and the PNGs under
-[`docs/evidence/height-channel/`](docs/evidence/height-channel/); see
-[The height channel](docs/height-channel.md) for what each number means and for the seven mutation
-commands that keep these suites honest.
+The first writes the trace and the PNGs under
+[`docs/evidence/height-channel/`](docs/evidence/height-channel/); the other three write the terrain
+ledger, the drive trace and the stills under [`docs/evidence/terrain/`](docs/evidence/terrain/). See
+[The height channel](docs/height-channel.md) for what each height-channel number means and
+[The terrain field](docs/terrain.md) for the terrain ones and for the complete list of mutation
+commands, twenty-three across the project, that keep these suites honest.
 
 Run the harness contract check:
 

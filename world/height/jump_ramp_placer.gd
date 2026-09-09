@@ -93,6 +93,7 @@ func place(definition: TrackDefinition, catalog: HeightChannelCatalog) -> JumpRa
 			placement.half_length = catalog.half_length
 			placement.crest_height = catalog.crest_height()
 			placement.width = definition.track_width
+			placement.flank_width = catalog.flank_width
 			result.placements.append(placement)
 			crests.append(crest)
 
@@ -170,6 +171,9 @@ func _polyline_length(points: PackedVector2Array) -> float:
 	return length
 
 
+## `flank_width` is deliberately not hashed: adding it would move every pinned height fingerprint,
+## and the flank is a profile parameter of the height map's wedge, like the linear face, rather
+## than placement geometry. It is covered by the catalog version instead.
 func _fingerprint(version: int, placements: Array[JumpRampPlacement]) -> String:
 	var components := PackedStringArray(["version=%d" % version])
 	for placement in placements:

@@ -36,9 +36,12 @@ var _collision_count := 0
 var _visited_surfaces: Dictionary = {}
 var _safe_pose_elapsed := 0.0
 var _height_query: HeightQuery
-var _ground_height := 0.0
 var _ground_gradient := Vector2.ZERO
+var _on_feature := false
 var _height := 0.0
+## The ground under the car, from the same samples that drive _height: equal to _height while
+## grounded, and the ground the car is falling toward while airborne. Presentation only.
+var _ground_height := 0.0
 var _vertical_velocity := 0.0
 var _airborne := false
 var _air_time := 0.0
@@ -52,6 +55,7 @@ var _landed_this_tick := false
 @onready var _skid_feedback: Line2D = $SkidFeedback
 @onready var _lift: Node2D = $Lift
 @onready var _shadow: Polygon2D = $Shadow
+@onready var _shadow_base_position: Vector2 = $Shadow.position
 
 
 func _ready() -> void:
@@ -95,9 +99,17 @@ func _process(delta: float) -> void:
 	_dust.emitting = on_dirt and not _airborne and get_speed() > WorldScale.metres(4.0)
 	if consume_landing_event():
 		_landing_burst.restart()
-	var metres := WorldScale.to_metres(_height)
-	_lift.position = Vector2(0.0, -_height * tuning.lift_pixels_per_pixel)
+	# Two kinds of height, two kinds of cue (#52, the off-track objects' rule). The ground under the
+	# car lifts body and shadow together, straight up the screen whatever the heading, so a car on
+	# a rise draws level with a rock on the same rise and never ahead of its own shadow. Only the
+	# height above that ground opens a gap between body and shadow, grows the body and fades the
+	# shadow. The offsets are child positions in the car's frame, so the screen-up vector is
+	# turned back through the car's rotation.
+	var above_ground := maxf(_height - _ground_height, 0.0)
+	var metres := WorldScale.to_metres(above_ground)
+	_lift.position = Vector2(0.0, -_height * tuning.lift_pixels_per_pixel).rotated(-global_rotation)
 	_lift.scale = Vector2.ONE * (1.0 + metres * tuning.scale_per_metre)
+	_shadow.position = _shadow_base_position + Vector2(0.0, -_ground_height * tuning.lift_pixels_per_pixel).rotated(-global_rotation)
 	_shadow.modulate.a = clampf(1.0 - metres * SHADOW_FADE_PER_METRE, 0.25, 1.0)
 	z_index = 1 if _airborne else 0
 	_skid_feedback.visible = _slip_ratio >= tuning.feedback_slip_threshold or _input_state.handbrake > 0.25
@@ -199,6 +211,7 @@ func set_surface_query(surface_query: SurfaceQuery) -> void:
 func set_height_query(height_query: HeightQuery) -> void:
 	_height_query = height_query
 	_height = _sample_ground_at(global_position).ground_height
+	_ground_height = _height
 
 
 func is_airborne() -> bool:
@@ -207,6 +220,11 @@ func is_airborne() -> bool:
 
 func get_height() -> float:
 	return _height
+
+
+## The ground under the car: its own height while grounded, the ground below it while airborne.
+func get_ground_height() -> float:
+	return _ground_height
 
 
 func get_vertical_velocity() -> float:
@@ -342,8 +360,8 @@ func _sample_surface(world_position: Vector2) -> void:
 
 func _sample_ground(world_position: Vector2) -> void:
 	var sample := _sample_ground_at(world_position)
-	_ground_height = sample.ground_height
 	_ground_gradient = sample.gradient
+	_on_feature = sample.on_feature
 
 
 func _sample_ground_at(world_position: Vector2) -> HeightQuery.HeightSample:
@@ -361,8 +379,9 @@ func _update_height_channel(state: PhysicsDirectBodyState2D, delta: float) -> vo
 		_vertical_velocity -= tuning.gravity * delta
 		_height += _vertical_velocity * delta
 		_air_time += delta
+		_ground_height = ahead.ground_height
 		if _height <= ahead.ground_height:
-			_land(state, ahead)
+			_land(state, ahead.ground_height, ahead.gradient)
 		return
 	_landing_recovery_remaining = maxf(_landing_recovery_remaining - delta, 0.0)
 	_vertical_velocity = state.linear_velocity.dot(_ground_gradient)
@@ -374,16 +393,18 @@ func _update_height_channel(state: PhysicsDirectBodyState2D, delta: float) -> vo
 	# faster than one tick of gravity can pull the car onto it.
 	var ground_rate_ahead := state.linear_velocity.dot(ahead.gradient)
 	var clears_the_ground_ahead := predicted > ahead.ground_height + LIFT_OFF_TOLERANCE
-	# The second conjunct rejects a height map's vertical walls -- every generated ramp has one at
-	# its lateral boundary. Driving into one, the car is on flat ground (rate 0) while the face
-	# behind the wall reads as falling away, which would otherwise open a flight onto ground that
-	# is above the car. At a crest the margin bottoms out at -0.5 * g * delta^2, so the conjunct is
-	# always satisfied there.
+	# The second conjunct rejects a height map's vertical walls. Every generated ramp had one at
+	# its lateral boundary until #47 gave the wedge a smooth flank; the rule stays because the
+	# height query is a contract any provider may implement. Driving into a wall, the car is on
+	# flat ground (rate 0) while the face behind the wall reads as falling away, which would
+	# otherwise open a flight onto ground that is above the car. At a crest the margin bottoms out
+	# at -0.5 * g * delta^2, so the conjunct is always satisfied there.
 	var ground_falls_away := ground_rate_ahead < _vertical_velocity - tuning.gravity * delta and predicted > ahead.ground_height - LIFT_OFF_TOLERANCE
 	if clears_the_ground_ahead or ground_falls_away:
 		_airborne = true
 		_air_time = 0.0
 		_height = maxf(predicted, ahead.ground_height)
+		_ground_height = ahead.ground_height
 		return
 	# Riding the ground follows it down as far as it goes, but rises only as fast as the ground
 	# itself rises. On any continuous surface those are the same number, so a face is ridden
@@ -391,14 +412,19 @@ func _update_height_channel(state: PhysicsDirectBodyState2D, delta: float) -> vo
 	# conjunct above fixes for flight. Without it the car steps up the wall for free.
 	var rise_limit := maxf(maxf(_vertical_velocity, ground_rate_ahead) * delta, 0.0)
 	_height = minf(ahead.ground_height, _height + rise_limit)
+	_ground_height = _height
 
 
-func _land(state: PhysicsDirectBodyState2D, ground: HeightQuery.HeightSample) -> void:
-	var ground_rate := state.linear_velocity.dot(ground.gradient)
+## Takes the ground's height and gradient as scalars rather than the sample they came from: a
+## TrackHeightMap miss returns one shared sample that the next query rewrites, so no sample is
+## held across this call and nothing here may issue a query.
+func _land(state: PhysicsDirectBodyState2D, ground_height: float, ground_gradient: Vector2) -> void:
+	var ground_rate := state.linear_velocity.dot(ground_gradient)
 	var impact := maxf(ground_rate - _vertical_velocity, 0.0)
 	var kept := clampf(1.0 - tuning.landing_speed_loss * WorldScale.to_metres(impact), MIN_LANDING_SPEED_FRACTION, 1.0)
 	state.linear_velocity *= kept
-	_height = ground.ground_height
+	_height = ground_height
+	_ground_height = _height
 	_vertical_velocity = ground_rate
 	_airborne = false
 	_landed_this_tick = true
@@ -427,14 +453,22 @@ func _apply_safe_reset(state: PhysicsDirectBodyState2D) -> void:
 	_reverse_hold_time = 0.0
 	_safe_pose_elapsed = 0.0
 	_height = _sample_ground_at(_safe_reset_pose.origin).ground_height
+	_ground_height = _height
 	_vertical_velocity = 0.0
 	_airborne = false
 	_air_time = 0.0
 	_landing_recovery_remaining = 0.0
 
 
+## A pose is recorded only on ground that is not part of a placed feature. The gate reads the
+## sample's membership flag rather than the total height: the pre-terrain gate refused any ground above zero,
+## which meant "not on a ramp" while ramps were the only raised ground, but on a terrain field it
+## refuses between a quarter and the whole of a lap depending on the seed, and admits a ramp whose
+## wedge sits on ground below zero. Terrain itself never disqualifies a pose: the car can drive
+## away from any slope the catalog allows (tests/vehicle_terrain_test.gd derives the margin), and
+## low-speed stabilization holds a still car on any of them.
 func _update_safe_pose_checkpoint(state: PhysicsDirectBodyState2D, delta: float) -> void:
-	if _airborne or _ground_height > 0.0 or _landing_recovery_remaining > 0.0 or _surface_type != SurfaceQuery.SurfaceType.DIRT or _slip_ratio > tuning.safe_pose_max_slip or state.get_contact_count() > 0:
+	if _airborne or _on_feature or _landing_recovery_remaining > 0.0 or _surface_type != SurfaceQuery.SurfaceType.DIRT or _slip_ratio > tuning.safe_pose_max_slip or state.get_contact_count() > 0:
 		_safe_pose_elapsed = 0.0
 		return
 	_safe_pose_elapsed += delta

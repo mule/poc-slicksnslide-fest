@@ -4,8 +4,12 @@ extends HeightQuery
 ## Scripted ground for vehicle tests. HUMP is one symmetric ramp along +X centred at crest_x that
 ## spans every Y. PLATEAU is flat ground at plateau_height for x < plateau_end_x and zero beyond,
 ## so a car can be held at a height or driven off an edge without a generated track. WALL is the
-## shape a generated height map puts at a ramp's lateral boundary: flat ground up to crest_x, then
-## a vertical step of crest_height onto a face that descends over half_length.
+## shape a generated height map put at a ramp's lateral boundary before #47 replaced the hard cut
+## with a flank: flat ground up to crest_x, then a vertical step of crest_height onto a face that
+## descends over half_length. It stays because the car's rules must hold for any provider.
+## Every raised sample reports itself as on a feature: these shapes stand in for ramps, and the
+## car's safe-pose gate must keep treating them as ramps now that it reads the sample's membership
+## flag rather than the total height.
 
 enum Mode { HUMP, PLATEAU, WALL }
 
@@ -22,16 +26,16 @@ func sample_at(world_position: Vector2) -> HeightSample:
 	sample_count += 1
 	if mode == Mode.PLATEAU:
 		if world_position.x < plateau_end_x:
-			return HeightSample.new(plateau_height, Vector2.ZERO)
+			return HeightSample.new(plateau_height, Vector2.ZERO, true)
 		return HeightSample.new()
 	if mode == Mode.WALL:
 		var beyond := world_position.x - crest_x
 		if beyond < 0.0 or beyond > half_length:
 			return HeightSample.new()
 		var wall_slope := crest_height / half_length
-		return HeightSample.new(crest_height - wall_slope * beyond, Vector2(-wall_slope, 0.0))
+		return HeightSample.new(crest_height - wall_slope * beyond, Vector2(-wall_slope, 0.0), true)
 	var along := world_position.x - crest_x
 	if absf(along) > half_length:
 		return HeightSample.new()
 	var slope := crest_height / half_length
-	return HeightSample.new(crest_height * (1.0 - absf(along) / half_length), Vector2(-signf(along) * slope, 0.0))
+	return HeightSample.new(crest_height * (1.0 - absf(along) / half_length), Vector2(-signf(along) * slope, 0.0), true)

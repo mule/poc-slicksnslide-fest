@@ -20,17 +20,25 @@ var definition
 
 var _checkpoint_markers: Array[Line2D] = []
 var _next_checkpoint := 0
+## The field every elevation cue is drawn from. By default the production TrackHeightMap built
+## from the definition -- the same class, catalog and seed the session gives the car -- so the
+## ground tint under the car and the car's own ride height come from one field. A caller that
+## already holds the car's map may pass it in and share the instance outright.
+var _height_query: HeightQuery
+var _shading: TerrainShading
 
 
-func _init(initial_definition = null) -> void:
+func _init(initial_definition = null, initial_height_query: HeightQuery = null) -> void:
 	y_sort_enabled = true
 	definition = initial_definition
+	_height_query = initial_height_query if initial_height_query != null else TrackHeightMap.new(initial_definition)
 
 
 func _ready() -> void:
 	if definition == null:
 		push_error("TrackRuntime requires a TrackDefinition")
 		return
+	_build_terrain_shading()
 	_build_line("GrassShoulder", definition.track_width * 1.4, GRASS_COLOR, -3)
 	_build_line("Dirt", definition.track_width, DIRT_COLOR, -2)
 	_build_jump_ramps()
@@ -41,8 +49,27 @@ func _ready() -> void:
 	var object_runtime := OfftrackObjectRuntime.new(
 		definition.offtrack_objects,
 		preload("res://data/default_offtrack_object_catalog.tres"),
+		_height_query,
+		_shading,
 	)
 	add_child(object_runtime)
+
+
+## The height query the track's elevation cues sample. Shared with the off-track objects, which
+## stand on it and shade from it; the session may hand it to the car so both read one instance.
+func height_query() -> HeightQuery:
+	return _height_query
+
+
+## The ground grid goes under everything else the track draws; the ribbons, the boundary lines and
+## the ramp wedges above it take their colours from the same shading and the same map, so the road,
+## its edges, its ramps and the ground they cross agree on every hill.
+func _build_terrain_shading() -> void:
+	_shading = TerrainShading.new()
+	_shading.name = "TerrainShading"
+	_shading.z_index = -4
+	add_child(_shading)
+	_shading.build(definition.play_area, _height_query)
 
 
 func _build_jump_ramps() -> void:
@@ -50,7 +77,7 @@ func _build_jump_ramps() -> void:
 	visuals.name = "JumpRamps"
 	visuals.z_index = -1
 	add_child(visuals)
-	visuals.build(definition.jump_ramps)
+	visuals.build(definition.jump_ramps, _shading, _height_query)
 
 
 func _build_line(line_name: String, width: float, color: Color, z_layer: int) -> void:
@@ -59,6 +86,7 @@ func _build_line(line_name: String, width: float, color: Color, z_layer: int) ->
 	line.points = definition.centerline
 	line.width = width
 	line.default_color = color
+	line.gradient = _shading.ribbon_gradient(definition.centerline, color, _height_query)
 	line.joint_mode = Line2D.LINE_JOINT_ROUND
 	line.begin_cap_mode = Line2D.LINE_CAP_ROUND
 	line.end_cap_mode = Line2D.LINE_CAP_ROUND
@@ -73,6 +101,9 @@ func _build_boundary_line(line_name: String, points: PackedVector2Array) -> void
 	line.points = points
 	line.width = 6.0
 	line.default_color = EDGE_COLOR
+	# Shaded like the ribbons it edges, or it would stay a constant cream line and read as a
+	# bright rim wherever the dirt beside it is dark.
+	line.gradient = _shading.ribbon_gradient(points, EDGE_COLOR, _height_query)
 	line.antialiased = true
 	line.z_index = -1
 	add_child(line)

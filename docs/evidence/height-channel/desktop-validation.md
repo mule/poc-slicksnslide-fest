@@ -41,6 +41,12 @@
 
 Every seed places at least one ramp. Mean 2.40, maximum 4, total 48.
 
+The height fingerprint hashes each placement's pose and wedge (half length, crest height, width) at
+catalog version 3. Since #47 the wedge also has a lateral flank (`flank_width`, 250 px) beyond each
+road edge, which is deliberately not hashed: these fingerprints are unchanged by it, and so they no
+longer describe the whole shipped ramp profile. The guard on that parameter is the contract pin
+`flank width is 20 m` in `tests/height_channel_contract_test.gd`.
+
 | Seed | Ramps | Requested | Eligible runs | Placement (us) | Height fingerprint |
 | ---: | ---: | ---: | ---: | ---: | --- |
 | 0 | 3 | 4 | 3 | 1230 | `6831dab8217f2bd2a407a9d2caf3cb7946c1671b3b3947d6b98ebde1b8537571` |

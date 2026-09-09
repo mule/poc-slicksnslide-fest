@@ -10,4 +10,3 @@ base_wavelength = 3000.0
 octaves = 3
 persistence = 0.25
 lacunarity = 2.0
-road_flatten_width = 500.0

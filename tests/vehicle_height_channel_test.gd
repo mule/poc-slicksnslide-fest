@@ -186,9 +186,10 @@ func _verify_plateau_edge_launches() -> bool:
 	return true
 
 
-## A generated height map gives every ramp a vertical wall at its lateral boundary, and the surface
-## is open enough to drive into one. The ground behind the wall reads as falling away, but it is
-## above the car, so the car must neither lift off nor be carried up onto it.
+## A generated height map gave every ramp a vertical wall at its lateral boundary until #47, and
+## the height query is a contract any provider may implement, so the rule is kept: the ground
+## behind a wall reads as falling away, but it is above the car, so the car must neither lift
+## off nor be carried up onto it. tests/terrain_height_map_test.gd drives the production flank.
 func _verify_a_wall_does_not_lift_the_car() -> bool:
 	var context := _make_car()
 	var car: TopDownCar = context.car
