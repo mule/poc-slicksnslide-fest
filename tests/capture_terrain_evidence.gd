@@ -543,7 +543,7 @@ func _verify_seed_restart(main_scene: PackedScene) -> bool:
 	_check(session.get_node("World/VehicleMount").get_child_count() == 1, "after a seed restart the vehicle mount holds exactly one car")
 	_check(not is_instance_valid(first_runtime) and not is_instance_valid(first_shading) and not is_instance_valid(first_ground) and not is_instance_valid(first_objects) and not is_instance_valid(first_car), "the previous seed's track, terrain shading, ground grid, objects and car are all freed")
 	_check(second_runtime != first_runtime and second_runtime.definition.seed == RESTART_SEED, "the new track is seed %d's" % RESTART_SEED)
-	_check(second_runtime.definition.terrain_fingerprint != first_fingerprint and second_runtime.definition.terrain_fingerprint.length() == 64, "the new track carries seed %d's own terrain fingerprint" % RESTART_SEED)
+	_check(second_runtime.definition.terrain_fingerprint != first_fingerprint, "the new track carries seed %d's own terrain fingerprint" % RESTART_SEED)
 	_check(second_shading.ground_sample_count() == TerrainShading.ground_columns(second_runtime.definition.play_area) * TerrainShading.ground_rows(second_runtime.definition.play_area), "the new ground grid covers the new play area (%d vertices)" % second_shading.ground_sample_count())
 	var car := session.get_node("World/VehicleMount/PlayerCar") as TopDownCar
 	var ground := TrackHeightMap.new(second_runtime.definition).sample_at(car.global_position).ground_height

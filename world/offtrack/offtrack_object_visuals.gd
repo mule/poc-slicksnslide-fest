@@ -171,7 +171,7 @@ func _build_solids(placements: Array[OfftrackObjectPlacement], _catalog: Offtrac
 		visual.position = placement.transform.origin
 		visual.rotation = placement.transform.get_rotation()
 		visual.scale = Vector2.ONE * placement.scale_factor
-		var body := visual.get_child(1) as Polygon2D
+		var body := visual.get_node(OfftrackObjectMeshFactory.BODY_NODE) as Polygon2D
 		var ground_height := 0.0
 		var lift := Vector2.ZERO
 		if height_query != null:
@@ -185,7 +185,7 @@ func _build_solids(placements: Array[OfftrackObjectPlacement], _catalog: Offtrac
 			body.position = lift
 			if shading != null:
 				body.color = shading.shade(body.color, sample)
-		_cast_shadow(visual.get_child(0) as Polygon2D, lift, visual.rotation, TerrainShading.shadow_length_factor(ground_height))
+		_cast_shadow(visual.get_node(OfftrackObjectMeshFactory.SHADOW_NODE) as Polygon2D, lift, visual.rotation, TerrainShading.shadow_length_factor(ground_height))
 		parent.add_child(visual)
 		_solid_visual_count += 1
 		_visual_count += 1
