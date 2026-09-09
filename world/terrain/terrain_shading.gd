@@ -21,12 +21,16 @@ extends Node2D
 ## is 750 px wide and 2.5 px tall, so three vertices per finest cell resolve everything the eye
 ## can see, and the sample count is the fingerprint's: about 3,000 to 4,000 vertices for a play
 ## area of 12,000 to 17,000 px a side, at 4 to 5 us a query about 15 to 20 ms once per track
-## build. The road ribbons are Line2D nodes and take a Gradient with one stop per centreline
-## sample, a further 1,100 to 1,500 samples, placed by distance along the line because that is
-## how Line2D reads a gradient.
+## build. The road ribbons are Line2D nodes and take a Gradient with one stop per polyline point,
+## placed by distance along the line because that is how Line2D reads a gradient. Four polylines
+## are shaded this way, the grass shoulder and the dirt on the centreline and the two boundary
+## lines, at 1,100 to 1,500 points each: a further 4,400 to 6,000 samples a build, about the
+## ground grid's own count again. tests/terrain_visuals_test.gd budgets the whole build.
 ##
-## The same function colours the road ribbons, the boundary lines and the ramp wedges, so nothing
-## the track draws can disagree with the ground it sits on. Every base colour it multiplies is
+## The same function colours the ground grid, the road ribbons, the boundary lines, the ramp
+## wedges and the off-track object bodies, and nothing else: the ramp crest line and chevrons, the
+## checkpoint gates and start/finish line and the car are flat-coloured furniture drawn over the
+## shaded ground, reading no height at all. Every base colour it multiplies is
 ## chosen so that base times peak_brightness() stays inside the displayable range: the boundary
 ## line's cream is the one exception, and a 6 px line saturating toward white at plus the total
 ## amplitude on a slope at the bound facing the light is accepted and documented.

@@ -6,6 +6,12 @@ extends RefCounted
 ## against TerrainShading.GROUND_COLOR on its own: the ratio survives the shading unchanged. The
 ## trees and the debris were lifted in #51 to restore the ratios they had before #50 lightened
 ## the ground (the old #315b2f tree sat at 1.2 against the new ground and vanished on a rise).
+##
+## A solid visual is a root with two named children, the shadow under the body, so consumers reach
+## them by name rather than by the order they were added in.
+
+const SHADOW_NODE := "Shadow"
+const BODY_NODE := "Body"
 
 
 static func decorative_mesh(archetype_id: StringName, variant: int) -> ArrayMesh:
@@ -48,9 +54,11 @@ static func decorative_mesh(archetype_id: StringName, variant: int) -> ArrayMesh
 static func solid_visual(archetype_id: StringName, variant: int) -> Node2D:
 	var root_node := Node2D.new()
 	var shadow := Polygon2D.new()
+	shadow.name = SHADOW_NODE
 	shadow.position = Vector2(WorldScale.metres(0.32), WorldScale.metres(0.48))
 	shadow.color = Color(0.02, 0.03, 0.02, 0.35)
 	var body := Polygon2D.new()
+	body.name = BODY_NODE
 	if archetype_id == &"tree":
 		shadow.polygon = PackedVector2Array([
 			Vector2(WorldScale.metres(-1.6), WorldScale.metres(0.0)),

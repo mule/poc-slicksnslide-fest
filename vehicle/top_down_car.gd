@@ -381,7 +381,7 @@ func _update_height_channel(state: PhysicsDirectBodyState2D, delta: float) -> vo
 		_air_time += delta
 		_ground_height = ahead.ground_height
 		if _height <= ahead.ground_height:
-			_land(state, ahead)
+			_land(state, ahead.ground_height, ahead.gradient)
 		return
 	_landing_recovery_remaining = maxf(_landing_recovery_remaining - delta, 0.0)
 	_vertical_velocity = state.linear_velocity.dot(_ground_gradient)
@@ -415,12 +415,15 @@ func _update_height_channel(state: PhysicsDirectBodyState2D, delta: float) -> vo
 	_ground_height = _height
 
 
-func _land(state: PhysicsDirectBodyState2D, ground: HeightQuery.HeightSample) -> void:
-	var ground_rate := state.linear_velocity.dot(ground.gradient)
+## Takes the ground's height and gradient as scalars rather than the sample they came from: a
+## TrackHeightMap miss returns one shared sample that the next query rewrites, so no sample is
+## held across this call and nothing here may issue a query.
+func _land(state: PhysicsDirectBodyState2D, ground_height: float, ground_gradient: Vector2) -> void:
+	var ground_rate := state.linear_velocity.dot(ground_gradient)
 	var impact := maxf(ground_rate - _vertical_velocity, 0.0)
 	var kept := clampf(1.0 - tuning.landing_speed_loss * WorldScale.to_metres(impact), MIN_LANDING_SPEED_FRACTION, 1.0)
 	state.linear_velocity *= kept
-	_height = ground.ground_height
+	_height = ground_height
 	_ground_height = _height
 	_vertical_velocity = ground_rate
 	_airborne = false
