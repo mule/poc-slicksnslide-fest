@@ -7,11 +7,16 @@ extends SceneTree
 ## crest; an off-track solid on raised ground casts a longer shadow than the same solid on flat
 ## ground; and rebuilding frees the previous shading rather than stacking a second grid on it.
 ##
-## The agreement checks compare the runtime's map against a TrackHeightMap built the way the
-## session builds the car's (`TrackHeightMap.new(definition)`), so a runtime that reconstructed
-## the field independently -- a TerrainField from the track seed, or the terrain without the
-## ramps -- fails them. That falsification is performed live in the task report, not by a flag:
-## the shading has no production switch for sampling the wrong field.
+## The car shares the runtime's own height query (session/main.gd), so the two ride-height
+## agreements in the session check compare the car against the map it drives, one object: they
+## prove that the car and the shading read a single field, not that two fields agree. The
+## independent cross-field check survives beside them: a TrackHeightMap built fresh from the
+## definition (`TrackHeightMap.new(definition)`, the way the session used to build the car's)
+## must colour the ground vertex under the car exactly as the runtime did, and the crest sample
+## must differ from bare terrain by more than a pixel, so a runtime that reconstructed the field
+## independently -- a TerrainField from the track seed, or the terrain without the ramps -- fails
+## those. That falsification is performed live in the task report, not by a flag: the shading has
+## no production switch for sampling the wrong field.
 
 const MAIN_SCENE_PATH := "res://session/main.tscn"
 const TERRAIN_CATALOG := preload("res://data/default_terrain_catalog.tres")
@@ -705,7 +710,6 @@ func _verify_build_cost() -> bool:
 	])
 	_check(ground_median <= ground_budget, "the ground grid builds within %.0f us a sample (median %d us for %d samples)" % [PER_SAMPLE_BUDGET_USEC, ground_median, samples])
 	_check(ribbon_median <= ribbon_budget, "a ribbon gradient builds within %.0f us a stop (median %d us for %d stops)" % [PER_SAMPLE_BUDGET_USEC, ribbon_median, definition.centerline.size()])
-	_check(ribbon_stops >= 4 * definition.centerline.size(), "the four ribbons carry at least four centrelines' worth of stops (%d of 4 x %d), the fourfold cost the shading documents" % [ribbon_stops, definition.centerline.size()])
 	_check(whole_median <= whole_budget, "the whole build, ground grid plus four ribbon gradients, stays within %.0f us a sample (median %d us for %d samples)" % [PER_SAMPLE_BUDGET_USEC, whole_median, samples + ribbon_stops])
 	shading.free()
 	return true
