@@ -16,6 +16,13 @@ const LIFT_OFF_TOLERANCE := 0.05
 const MIN_LANDING_SPEED_FRACTION := 0.3
 
 @export var tuning: VehicleTuning
+## The player alone. Rivals never compete for the viewport, so a car is camera-less until something
+## asks otherwise. The setter writes through to the camera, so this works before or after _ready().
+@export var camera_enabled: bool = false:
+	set(value):
+		camera_enabled = value
+		if is_instance_valid(_follow_camera):
+			_follow_camera.enabled = value
 
 var _input_state := VehicleInputState.new()
 var _surface_query: SurfaceQuery
@@ -59,6 +66,11 @@ var _landed_this_tick := false
 
 
 func _ready() -> void:
+	# The camera gate runs before the tuning guard on purpose. A car that early-returns below must
+	# still not take the viewport, and until this line moved up, the scene's baked enabled = false
+	# was the only thing stopping it — a rival added before its tuning is assigned would have taken
+	# the view with the suite still green. The scene property is kept as well; both are cheap.
+	_follow_camera.enabled = camera_enabled
 	if tuning == null:
 		push_error("TopDownCar requires a VehicleTuning resource")
 		set_physics_process(false)

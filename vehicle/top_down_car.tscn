@@ -96,6 +96,7 @@ local_coords = false
 process_material = SubResource("ParticleProcess_landing_burst")
 
 [node name="FollowCamera" type="Camera2D" parent="."]
+enabled = false
 top_level = true
 position_smoothing_enabled = true
 position_smoothing_speed = 7.0
