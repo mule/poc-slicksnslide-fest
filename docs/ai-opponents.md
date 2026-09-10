@@ -168,6 +168,18 @@ under it. Negative means it is about to launch.
 The three `road_found` / `has_rival_ahead` / `has_obstacle_ahead` booleans gate the fields around
 them. When one is false its fields are zero and mean nothing; the flags are the contract.
 
+**What the two-placement check does not cover, which matters to whoever adds the next field.** It
+builds both placements from one local layout and carries them out through a placement transform, so
+every sampled point has identical *local* coordinates in both. Any sense that is a function of the
+local pose alone therefore agrees in both placements **whatever the pass does with it** — the check
+walks every declared field, but for such a field it is comparing two copies of one number. Today
+that is the height channel, which is why `height_change_ahead` is pinned against a number, at a
+fixture deliberately offset from the origin, in
+`driver_senses_test.gd::_verify_ground_ahead_survives_a_shared_sample`. A later absolute altitude or
+lap-progress field would inherit a green test for free. Read "every declared field is walked" as
+catching every field whose value depends on *where in the world* the car is, and pin anything else
+against a number of its own.
+
 ### Look-ahead is the one tunable
 
 How far ahead a driver senses is a parameter of `sense()`, not a constant inside it, because it is
@@ -199,12 +211,14 @@ would read a flat world if the order changed.
 ### Cost
 
 Measured on seed 0 with the track's real trees and rocks in the space, twenty cars spread around the
-lap and across the road's width, a 400 px look-ahead:
+lap and across the road's width, a 400 px look-ahead. **These are wall-clock numbers and they move
+with machine load — read them as a band, not a constant.** The low end of each range was measured on
+an idle machine (load 1.3), the high end under a concurrent build (load 2.2–3.2):
 
 | Case | Per car | Twenty cars | Of a 16.6 ms frame |
 | --- | --- | --- | --- |
-| On the racing line (ray runs full length, hits nothing) | ~150 µs | ~3.0 ms | ~18% |
-| Parked in front of a solid (ray hits) | ~110 µs | ~2.2 ms | ~13% |
+| On the racing line (ray runs full length, hits nothing) | 112–150 µs | 2.2–3.0 ms | 14–18% |
+| Parked in front of a solid (ray hits) | 74–110 µs | 1.5–2.2 ms | 9–13% |
 
 The racing-line figure is the one to quote: a ray that hits stops early, so the miss is the worst
 case. It is also the normal case, because the nearest solid on a generated circuit stands 375 px
@@ -212,15 +226,16 @@ from the centerline — further than a look-ahead — so a car **on** the road n
 earns its place on the recovery path, where a car that has run wide is among the trees.
 
 Roughly half the pass is the two surface queries, which walk the segment grid over the same point
-twice. The look-ahead curve, printed by the suite:
+twice. The look-ahead curve, printed by the suite, across the same band:
 
 | Look-ahead | Per car | Twenty cars |
 | --- | --- | --- |
-| 200 px | ~117 µs | ~2.3 ms |
-| 400 px | ~147 µs | ~2.9 ms |
-| 600 px | ~201 µs | ~4.0 ms |
+| 200 px | 92–117 µs | 1.8–2.3 ms |
+| 400 px | 98–147 µs | 2.0–2.9 ms |
+| 600 px | 112–201 µs | 2.2–4.0 ms |
 
-These are load-sensitive to roughly ±10% between runs on the same machine.
+The conclusion does not depend on where in the band a machine lands: even the loaded end leaves five
+times the headroom the ×20 assertion needs. Plan with the upper figure.
 
 ## Verification
 
