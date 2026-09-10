@@ -52,6 +52,14 @@ const OWN_VELOCITY_IN_CAR_FRAME := Vector2(-5.0, -300.0)
 ## Straight ahead and on the obstacle ray. Its capsule sits across the ray at 180 px, in front of
 ## the obstacle at 280 px, so the obstacle check below only reads 240 px if every car in the field
 ## really is excluded from the ray.
+##
+## Three rivals are ahead, and the nearest of them is neither the first nor the last in the field
+## list. That ordering is the whole point: with the nearest one also first, "take the nearest" and
+## "take the first you find" return the same car and no assertion can tell them apart -- verified by
+## falsification, which is how the first version of this fixture was caught passing a pass that took
+## the first. Mid is far enough to the left to clear both the obstacle ray and the near obstacle.
+const RIVAL_MID_IN_CAR_FRAME := Vector2(-90.0, -240.0)
+const RIVAL_MID_VELOCITY_IN_CAR_FRAME := Vector2(-10.0, -280.0)
 const RIVAL_NEAR_IN_CAR_FRAME := Vector2(0.0, -180.0)
 const RIVAL_NEAR_VELOCITY_IN_CAR_FRAME := Vector2(20.0, -240.0)
 const RIVAL_FAR_IN_CAR_FRAME := Vector2(-45.0, -330.0)
@@ -416,30 +424,49 @@ func _verify_ground_ahead_survives_a_shared_sample() -> bool:
 	return true
 
 
-## Three cars, not two, so "nearest" is exercised rather than assumed; one of them behind, so
-## "ahead" is exercised too; one beyond the horizon, so look-ahead is exercised as a parameter.
+## Three rivals ahead in an order that makes "nearest" mean something (see RIVAL_MID_IN_CAR_FRAME);
+## one behind, so "ahead" is exercised; one past the horizon, so look-ahead is exercised as a
+## parameter of the call.
+##
+## The ladder below removes the nearest rival twice and demands the answer walk outward each time.
+## A single "the near one was found" would be satisfied by a pass that took the first car in the
+## list, or the last, or the only one it happened to look at.
 func _verify_rivals_come_from_the_field_list() -> bool:
 	var world := _build_fixture_world(Transform2D.IDENTITY)
 	var field: Array[TopDownCar] = world["field"]
-	_check(field.size() == 5, "the fixture field holds the car under test and four rivals (%d)" % field.size())
+	_check(field.size() == 6, "the fixture field holds the car under test and five rivals (%d)" % field.size())
+	# The ordering the ladder rests on. If the nearest rival were also the first ahead in the list,
+	# every check below would pass against a pass that never compared distances at all.
+	_check(
+		RIVAL_NEAR_IN_CAR_FRAME.length() < RIVAL_MID_IN_CAR_FRAME.length() and RIVAL_MID_IN_CAR_FRAME.length() < RIVAL_FAR_IN_CAR_FRAME.length(),
+		"the three rivals ahead are at %.0f, %.0f and %.0f px" % [RIVAL_NEAR_IN_CAR_FRAME.length(), RIVAL_MID_IN_CAR_FRAME.length(), RIVAL_FAR_IN_CAR_FRAME.length()],
+	)
+	_check(field[1].global_position.distance_to(field[0].global_position) > field[2].global_position.distance_to(field[0].global_position), "and the nearest of them is not the first one in the field list")
+	_check(field[3].global_position.distance_to(field[0].global_position) > field[2].global_position.distance_to(field[0].global_position), "nor the last one ahead in it")
+
 	var senses := _sense_fixture_car(world, LOOK_AHEAD)
 	_check(senses.has_rival_ahead, "a rival ahead is found")
-	_check(_close(senses.rival_offset, RIVAL_NEAR_IN_CAR_FRAME), "the rival found is the near one at %s, not the far one at %s (read %s)" % [RIVAL_NEAR_IN_CAR_FRAME, RIVAL_FAR_IN_CAR_FRAME, senses.rival_offset])
+	_check(_close(senses.rival_offset, RIVAL_NEAR_IN_CAR_FRAME), "the rival found is the near one at %s, not the mid one at %s or the far one at %s (read %s)" % [RIVAL_NEAR_IN_CAR_FRAME, RIVAL_MID_IN_CAR_FRAME, RIVAL_FAR_IN_CAR_FRAME, senses.rival_offset])
 	_check(absf(senses.rival_distance - RIVAL_NEAR_IN_CAR_FRAME.length()) < POSITION_TOLERANCE, "its distance is %.4f px" % senses.rival_distance)
 	_check(senses.rival_offset.y < 0.0, "the rival found is in front of the nose, not behind it")
 	var expected_relative := RIVAL_NEAR_VELOCITY_IN_CAR_FRAME - OWN_VELOCITY_IN_CAR_FRAME
 	_check(_close(senses.rival_relative_velocity, expected_relative), "its velocity relative to this car is %s (expected %s)" % [senses.rival_relative_velocity, expected_relative])
 	_check(_close(senses.local_velocity, OWN_VELOCITY_IN_CAR_FRAME), "this car's own velocity in its own frame is %s" % senses.local_velocity)
 
-	# Remove the near rival and the far one must be found in its place. Without this the "nearest"
-	# claim above is only "found one of them", which two cars could not tell apart either.
-	var without_near: Array[TopDownCar] = [field[0], field[2], field[3], field[4]]
-	var far_senses := _make_pass(world).sense(without_near, 0, LOOK_AHEAD)
-	_check(far_senses.has_rival_ahead, "with the near rival gone, the far one is found")
+	# Take the near one away and the answer must step out to mid, not jump to far and not stay put.
+	var without_near: Array[TopDownCar] = [field[0], field[1], field[3], field[4], field[5]]
+	var mid_senses := _make_pass(world).sense(without_near, 0, LOOK_AHEAD)
+	_check(mid_senses.has_rival_ahead, "with the near rival gone, another is found")
+	_check(_close(mid_senses.rival_offset, RIVAL_MID_IN_CAR_FRAME), "and it is the mid one at %s, not the far one at %s (read %s)" % [RIVAL_MID_IN_CAR_FRAME, RIVAL_FAR_IN_CAR_FRAME, mid_senses.rival_offset])
+
+	# Take mid away too and only far is left ahead.
+	var only_far: Array[TopDownCar] = [field[0], field[3], field[4], field[5]]
+	var far_senses := _make_pass(world).sense(only_far, 0, LOOK_AHEAD)
+	_check(far_senses.has_rival_ahead, "with the mid rival gone as well, the far one is found")
 	_check(_close(far_senses.rival_offset, RIVAL_FAR_IN_CAR_FRAME), "and it is the far one at %s (read %s)" % [RIVAL_FAR_IN_CAR_FRAME, far_senses.rival_offset])
 
 	# Only the car behind and the car past the horizon are left.
-	var nothing_ahead: Array[TopDownCar] = [field[0], field[3], field[4]]
+	var nothing_ahead: Array[TopDownCar] = [field[0], field[4], field[5]]
 	var empty_senses := _make_pass(world).sense(nothing_ahead, 0, LOOK_AHEAD)
 	_check(not empty_senses.has_rival_ahead, "a rival behind and a rival past the horizon are both ignored")
 	_check(empty_senses.rival_offset == Vector2.ZERO and empty_senses.rival_distance == 0.0, "and the rival fields are left at zero")
@@ -800,8 +827,10 @@ func _build_fixture_world(placement: Transform2D, lateral: float = CAR_LOCAL_LAT
 	var local_pose := Transform2D(atan2(local_forward.x, -local_forward.y), Vector2(0.0, lateral))
 	var car_pose := placement * local_pose
 
+	# Mid, near, far -- in that order on purpose. See RIVAL_MID_IN_CAR_FRAME.
 	var field: Array[TopDownCar] = []
 	field.append(_add_car(holder, car_pose, car_pose.basis_xform(OWN_VELOCITY_IN_CAR_FRAME)))
+	field.append(_add_car(holder, Transform2D(car_pose.get_rotation(), car_pose * RIVAL_MID_IN_CAR_FRAME), car_pose.basis_xform(RIVAL_MID_VELOCITY_IN_CAR_FRAME)))
 	field.append(_add_car(holder, Transform2D(car_pose.get_rotation(), car_pose * RIVAL_NEAR_IN_CAR_FRAME), car_pose.basis_xform(RIVAL_NEAR_VELOCITY_IN_CAR_FRAME)))
 	field.append(_add_car(holder, Transform2D(car_pose.get_rotation(), car_pose * RIVAL_FAR_IN_CAR_FRAME), car_pose.basis_xform(RIVAL_FAR_VELOCITY_IN_CAR_FRAME)))
 	field.append(_add_car(holder, Transform2D(car_pose.get_rotation(), car_pose * RIVAL_BEHIND_IN_CAR_FRAME), Vector2.ZERO))
