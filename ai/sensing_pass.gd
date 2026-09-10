@@ -194,6 +194,19 @@ func _sense_obstacle(
 ) -> void:
 	if not car.is_inside_tree():
 		return
+	# A car with no tuning has no collision level to ask for -- TopDownCar reads its clearance out of
+	# the tuning -- and reaching for one anyway aborts this function on a null access, which leaves
+	# the rest of the senses looking complete while the obstacle block stays quietly empty, once per
+	# car per tick. Task #56's review found the same hole in the camera gate and task #60 spawns the
+	# field, so a rival reaching a sensing pass before its tuning is assigned is a path that ships.
+	#
+	# It falls back to BOTH layers, which is exactly what a grounded car's mask is, rather than to
+	# no obstacle sense: missing tuning is a reason to see everything the car could hit, not a reason
+	# to go blind. Falling back to "no obstacle" would also have been indistinguishable from the
+	# crash it replaces, and an unprovable guard is not a guard.
+	var mask := TopDownCar.TALL_LAYER | TopDownCar.LOW_LAYER
+	if car.tuning != null:
+		mask = car.get_collision_level_mask()
 	var excluded: Array[RID] = []
 	for other in field:
 		if other != null:
@@ -201,7 +214,7 @@ func _sense_obstacle(
 	var query := PhysicsRayQueryParameters2D.create(
 		position,
 		look_ahead_point,
-		car.get_collision_level_mask(),
+		mask,
 		excluded,
 	)
 	var hit := _cast_obstacle_ray(car.get_world_2d().direct_space_state, query)

@@ -273,6 +273,7 @@ func _run() -> void:
 	_check(await _verify_the_query_budget_is_fixed(), "the query budget verification ran to completion")
 	_check(_verify_the_pass_changes_nothing(), "the purity verification ran to completion")
 	_check(_verify_the_instrumented_pass_matches_production(), "the instrumentation verification ran to completion")
+	_check(_verify_a_tuningless_car_does_not_abort_a_pass(), "the tuningless-car verification ran to completion")
 	_check(_verify_senses_carry_no_handles(), "the handle verification ran to completion")
 	_check(await _verify_a_field_of_twenty_fits_the_frame(), "the cost verification ran to completion")
 	print("Driver senses: %d checks, %d failures" % [_checks, _failures.size()])
@@ -673,6 +674,36 @@ func _verify_the_instrumented_pass_matches_production() -> bool:
 	_check(compared >= 18, "the production comparison saw every field of DriverSenses (%d)" % compared)
 	_check(expected.road_found and expected.has_rival_ahead and expected.has_obstacle_ahead, "the production pass sensed the whole world")
 	_check(identical == compared, "the instrumented pass this suite uses senses exactly what a production SensingPass does")
+	_tear_down(world)
+	return true
+
+
+## Task #60 spawns the field, and task #56's review found a rival reaching _ready() before its tuning
+## was assigned. Such a car has no collision level, so the obstacle ray has no mask to use. The pass
+## must come back with the rest of its senses intact instead of aborting the function on a null
+## access, which would leave a complete-looking DriverSenses whose obstacle block was quietly empty.
+##
+## The tuning is cleared after the car is in the tree, so TopDownCar._ready()'s own guard has already
+## run and this prints no ERROR of its own. Any error line during this section is a real one.
+func _verify_a_tuningless_car_does_not_abort_a_pass() -> bool:
+	var world := _build_fixture_world(Transform2D.IDENTITY)
+	var field: Array[TopDownCar] = world["field"]
+	var healthy := _sense_fixture_car(world, LOOK_AHEAD)
+	_check(healthy.has_obstacle_ahead, "the same fixture senses an obstacle while the car has tuning")
+
+	field[0].tuning = null
+	var senses := _sense_fixture_car(world, LOOK_AHEAD)
+	_check(field[0].tuning == null, "the fixture car really has no tuning")
+	# The whole point: everything that does not need a collision level still answers.
+	_check(senses.road_found and absf(senses.lateral_offset - CAR_LOCAL_LATERAL) < POSITION_TOLERANCE, "a tuningless car still reads the road (offset %+.4f)" % senses.lateral_offset)
+	_check(senses.has_rival_ahead and _close(senses.rival_offset, RIVAL_NEAR_IN_CAR_FRAME), "and still reads its rivals (%s)" % senses.rival_offset)
+	_check(senses.height_change_ahead == healthy.height_change_ahead, "and still reads the ground ahead")
+	# The assertion the guard has to earn. Falling back to "no obstacle" would have been the same
+	# answer the crash produces, and no check could have told the two apart -- verified by removing
+	# the guard, which left this file green while printing a SCRIPT ERROR that GDScript gives no way
+	# to count. Sensing both layers is a different answer, so this fails when the guard goes.
+	_check(senses.has_obstacle_ahead, "and still sees the obstacle in front of it, on both collision layers")
+	_check(senses.obstacle_distance == healthy.obstacle_distance and senses.obstacle_offset == healthy.obstacle_offset, "reading it exactly where the tuned car did (%.4f px)" % senses.obstacle_distance)
 	_tear_down(world)
 	return true
 
