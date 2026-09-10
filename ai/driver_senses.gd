@@ -38,10 +38,19 @@ extends RefCounted
 ## if it were on the centerline with a clear road ahead. Nothing in this class enforces that -- the
 ## flags are the contract.
 
-## False when no centerline segment lay within the sensing pass's search radius: far off-track,
+## False when the road query found no centerline segment near this position at all: far off-track,
 ## or on a fixture with no road. `lateral_offset`, `heading_error` and both edge distances are then
 ## zero and carry no information. The car's own automatic reset owns this state; a driver's job is
 ## to not steer confidently through it.
+##
+## "Near" is the search REGION, which is a little larger than the search radius. `SegmentGrid` is a
+## broadphase over square cells and answers with every segment in the bounding box of cells the
+## radius touches, and neither road query clamps the result afterwards, so a segment up to roughly
+## one cell -- one track width -- beyond the radius still sets this true. The `lateral_offset` that
+## comes back with it is accurate; it is simply further away than the horizon that asked. Treating
+## the flag as an exact range test would be reading it more tightly than the grid can deliver, and
+## `SurfaceQuery.distance_to_centerline` states the same looseness ("an implementation MAY return
+## INF beyond search_radius"). A driver that needs an exact horizon should compare a distance itself.
 var road_found: bool = false
 ## Signed distance from the centerline in pixels. Positive: the car is to the road's right.
 var lateral_offset: float = 0.0

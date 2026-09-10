@@ -77,6 +77,17 @@ const FAR_OBSTACLE_RADIUS := 30.0
 ## else. Computed from the two placements above and never from the pass.
 const EXPECTED_OBSTACLE_DISTANCE := 280.0 - NEAR_OBSTACLE_RADIUS
 
+## A LOW_LAYER obstacle, added only by the tuningless check, nearer than either standing obstacle and
+## clear of both the car's own capsule and the near rival's. It is what makes "both collision layers"
+## a measurable difference rather than a phrase: 90 px against the tall obstacle's 240 px.
+const LOW_OBSTACLE_IN_CAR_FRAME := Vector2(0.0, -120.0)
+const LOW_OBSTACLE_RADIUS := 30.0
+
+## Where the shared-sample ground fixture is placed. Anywhere but x = 0: the ground under the car is
+## the gap between "the change over the horizon" and "the absolute height ahead", so a car at the
+## origin collapses the two and nothing in the suite can tell a difference from a level.
+const GROUND_FIXTURE_ORIGIN := Vector2(1000.0, 0.0)
+
 ## The second placement of the same layout. Neither a whole number of right angles nor a round
 ## translation, so a leak cannot cancel by symmetry.
 const SECOND_PLACEMENT_DEGREES := 137.0
@@ -89,6 +100,11 @@ const SECOND_PLACEMENT_ORIGIN := Vector2(12000.0, -9000.0)
 const POSITION_TOLERANCE := 0.05
 const ANGLE_TOLERANCE := 1e-4
 const HEIGHT_TOLERANCE := 0.05
+## A gradient is a dimensionless slope of order 0.1, so the pixel tolerance above is meaningless for
+## it -- and worse than meaningless: the ground under the car and the ground ahead differ by about
+## 0.034, so POSITION_TOLERANCE would have admitted a pass that reported the wrong one of the two.
+## These values are analytic on both sides and agree to float precision.
+const GRADIENT_TOLERANCE := 1e-4
 
 ## The pass's fixed query budget, per car per tick.
 const EXPECTED_ROAD_FRAME_QUERIES := 1
@@ -105,6 +121,11 @@ const COST_BATCHES := 5
 const COST_PASSES_PER_BATCH := 200
 ## Horizons the cost curve is printed at, spanning the range a skill spread plausibly covers.
 const COST_HORIZONS := [200.0, 400.0, 600.0]
+
+## What DriverSenses declares today. Every walk over its fields is floored at this, so a field that
+## stops being reported -- or is quietly dropped from the walk -- fails rather than shrinking a
+## number nobody reads.
+const DECLARED_SENSE_FIELDS := 19
 
 const AGREEMENT_SEEDS := [0, 7, 13]
 const AGREEMENT_VERTEX_STRIDE := 37
@@ -267,6 +288,7 @@ func _run() -> void:
 	_check(_verify_heading_error_reads_the_yaw(), "the heading error verification ran to completion")
 	_check(_verify_the_road_can_be_out_of_range(), "the lost-road verification ran to completion")
 	_check(_verify_ground_ahead_survives_a_shared_sample(), "the shared-sample verification ran to completion")
+	_check(_verify_the_ground_is_sampled_ahead_of_the_car(), "the ground-ahead verification ran to completion")
 	_check(_verify_rivals_come_from_the_field_list(), "the rival verification ran to completion")
 	_check(_verify_obstacles_come_from_one_repeatable_ray(), "the obstacle verification ran to completion")
 	_check(_verify_senses_are_in_the_car_frame(), "the car-frame verification ran to completion")
@@ -315,6 +337,14 @@ func _verify_road_frame_agrees_with_the_distance_query() -> bool:
 					_check(false, "seed %d vertex %d lateral %.0f: |offset| %.9f is not the distance %.9f" % [seed, index, lateral, absf(frame.lateral_offset), frame.distance])
 				# A probe placed on the line has no side to be on, and asking signf() which one it is
 				# would be asserting the tie-break of a value that is legitimately zero.
+				#
+				# Note what this side check is and is not. The probe was PLACED with the same
+				# right_normal() helper the production code signs with, so flipping that helper moves
+				# the probe and the expectation together and this sweep stays green. It pins that the
+				# frame agrees with itself across a whole lap, which is worth having; the CONVENTION
+				# -- that positive is the road's right -- is pinned by
+				# _verify_lateral_offset_carries_its_sign, which places its car at a literal local +y
+				# and is where a flipped helper actually fails.
 				if lateral != 0.0 and signf(frame.lateral_offset) != signf(lateral):
 					_check(false, "seed %d vertex %d lateral %.0f: offset %.3f fell on the wrong side" % [seed, index, lateral, frame.lateral_offset])
 				if lateral == 0.0 and frame.distance > 1e-3:
@@ -349,6 +379,11 @@ func _verify_lateral_offset_carries_its_sign() -> bool:
 	_check(absf(senses.distance_to_left_edge - (FIXTURE_HALF_WIDTH + CAR_LOCAL_LATERAL)) < POSITION_TOLERANCE, "the left edge is %.4f px away" % senses.distance_to_left_edge)
 	_check(senses.distance_to_left_edge > senses.distance_to_right_edge, "a car on the right is further from the left edge than the right")
 	_check(senses.surface_type == SurfaceQuery.SurfaceType.DIRT, "the surface under a car inside the road reads dirt")
+	# The grip and drag the sample carries, not just its type. Written as literals rather than as
+	# TrackSurfaceMap's own constants on purpose: the constants ARE the values under test, so an
+	# expectation spelled from them would move with any change to them and pin nothing. On dirt both
+	# are 1.0, which is why the off-track pair below is the half that can catch a swap.
+	_check(senses.surface_grip == 1.0 and senses.surface_drag == 1.0, "with dirt's grip and drag (%.4f, %.4f)" % [senses.surface_grip, senses.surface_drag])
 	_tear_down(world)
 
 	# The mirror image. Same fixture, same everything, the car moved to the other side of the line.
@@ -371,6 +406,12 @@ func _verify_lateral_offset_carries_its_sign() -> bool:
 	var wide_senses := _sense_fixture_car(wide, LOOK_AHEAD)
 	_check(absf(wide_senses.distance_to_right_edge + 40.0) < POSITION_TOLERANCE, "a car 40 px past the right edge reads %.4f px to it" % wide_senses.distance_to_right_edge)
 	_check(wide_senses.surface_type == SurfaceQuery.SurfaceType.OFF_TRACK, "the surface under a car past the edge reads off-track")
+	# Grass, where grip and drag differ from each other and from dirt's, so a pass that swapped the
+	# two or pinned either to 1.0 fails here. Nowhere else in the suite reads these two fields
+	# against a number; the frame walk only ever compares them to themselves.
+	_check(wide_senses.surface_grip == 0.55, "with grass's grip (%.4f)" % wide_senses.surface_grip)
+	_check(wide_senses.surface_drag == 2.2, "and grass's drag (%.4f)" % wide_senses.surface_drag)
+	_check(wide_senses.surface_grip != wide_senses.surface_drag, "which are two different numbers, so a swap is visible")
 	_tear_down(wide)
 	return true
 
@@ -405,24 +446,100 @@ func _verify_the_road_can_be_out_of_range() -> bool:
 	return true
 
 
-## The brief's trap, made into an assertion. A provider that hands back one shared instance is the
-## production TrackHeightMap's miss path; a pass that holds the first sample across the second query
-## reports a flat world here and nowhere else.
+## The only place `height_change_ahead` is compared to a number, so it carries two duties: the
+## brief's shared-sample trap, and the proof that the quantity is a DIFFERENCE and not a level.
+##
+## **The fixture is deliberately not at the origin.** This is the whole of the second duty. With the
+## car at x = 0 the ground beneath it is 0.0, so `ahead - here` and `ahead` are the same number, and
+## a pass emitting the absolute world ground height -- a world-frame value wearing a scalar's
+## clothes, and the exact leak this task exists to prevent -- reads correct. Nothing else in the
+## suite can tell those two apart either: `_verify_senses_are_in_the_car_frame` builds both
+## placements from ONE local layout and `LocalGroundHeight` inverts the placement before evaluating,
+## so every sampled point has identical LOCAL coordinates in both and any sense that is a function
+## of the local pose alone agrees in both whatever the pass does with it. That blind spot is
+## structural and general; this offset is what makes the distinction visible anywhere at all.
 func _verify_ground_ahead_survives_a_shared_sample() -> bool:
 	var slope := 0.08
-	var world := _build_fixture_world(Transform2D.IDENTITY)
+	var world := _build_fixture_world(Transform2D(0.0, GROUND_FIXTURE_ORIGIN))
 	var pass_under_test := InstrumentedPass.new(world["surface"], SharedSampleHeight.new(slope), _break_frame)
 	var car: TopDownCar = world["field"][0]
 	var senses := pass_under_test.sense(world["field"], 0, LOOK_AHEAD)
 	var travelled := (-car.global_transform.y.normalized() * LOOK_AHEAD).x
 	var expected := slope * travelled
-	print("shared sample: change=%.6f expected=%.6f travelled_x=%.4f" % [senses.height_change_ahead, expected, travelled])
+	# What the two readings would be, computed from the fixture's own field and the car's own pose.
+	var ground_here := slope * car.global_position.x
+	var ground_ahead := ground_here + expected
+	print("shared sample: change=%.6f expected=%.6f here=%.6f ahead=%.6f travelled_x=%.4f" % [
+		senses.height_change_ahead, expected, ground_here, ground_ahead, travelled,
+	])
 	# Guards the check below against a fixture that made the answer zero either way: a horizon that
 	# moved the probe nowhere along x would let a held sample pass unnoticed.
 	_check(absf(expected) > 1.0, "the fixture ground really does change over the horizon (%.4f px)" % expected)
+	# And against the fixture drifting back to the origin. The gap between the two readings IS the
+	# ground under the car, so a car at x = 0 collapses them and disarms the second assertion below
+	# without touching it.
+	_check(absf(ground_here) > 1.0, "the ground under the car is not zero (%.4f px), so the change and the absolute height are different numbers" % ground_here)
 	_check(absf(senses.height_change_ahead - expected) < HEIGHT_TOLERANCE, "the ground ahead reads its own height and not the car's, through a shared sample")
+	_check(absf(senses.height_change_ahead - ground_ahead) > 1.0, "and it is the CHANGE (%.4f px), not the absolute ground height ahead (%.4f px)" % [senses.height_change_ahead, ground_ahead])
 	_tear_down(world)
 	return true
+
+
+## The ground senses are probed AHEAD of the car, not underneath it, and the numbers are compared to
+## the fixture's own analytic field rather than to themselves.
+##
+## Both values are checked against `LocalGroundHeight`'s formula evaluated at the look-ahead point
+## the FIXTURE computes -- its stated local pose and its stated horizon -- so nothing here is read
+## back out of the pass. The placement cancels out of the expectation: the fixture's gradient is
+## mapped to the world by the placement and the pass maps it back by the car's pose, and the car's
+## pose is the placement times the local pose, so what remains is the local pose alone. That is why
+## this check is placement-independent while `--break-sense-frame` still covers the rotation.
+##
+## The two guards are the point. Without them a pass that sampled the ground UNDER the car would
+## satisfy both assertions wherever the field happens to be locally flat, and the ripple exists
+## precisely so it is not.
+func _verify_the_ground_is_sampled_ahead_of_the_car() -> bool:
+	var placement := Transform2D(deg_to_rad(SECOND_PLACEMENT_DEGREES), SECOND_PLACEMENT_ORIGIN)
+	var world := _build_fixture_world(placement)
+	var senses := _sense_fixture_car(world, LOOK_AHEAD)
+
+	var local_forward := Vector2.RIGHT.rotated(deg_to_rad(CAR_YAW_DEGREES))
+	var local_pose := Transform2D(atan2(local_forward.x, -local_forward.y), Vector2(0.0, CAR_LOCAL_LATERAL))
+	var local_here := local_pose.origin
+	var local_ahead := local_here + local_forward * LOOK_AHEAD
+	var expected_change := _fixture_ground_height(local_ahead) - _fixture_ground_height(local_here)
+	var expected_gradient := local_pose.basis_xform_inv(_fixture_ground_gradient(local_ahead))
+	var gradient_under_the_car := local_pose.basis_xform_inv(_fixture_ground_gradient(local_here))
+	print("ground ahead: change=%.6f expected=%.6f gradient=%s expected=%s under_car=%s" % [
+		senses.height_change_ahead, expected_change, senses.gradient_ahead, expected_gradient, gradient_under_the_car,
+	])
+
+	# A locally flat patch would make "ahead" and "under the car" the same answer and both checks
+	# below vacuous. The ripple in LocalGroundHeight exists to keep them apart; these say so.
+	_check(expected_gradient.distance_to(gradient_under_the_car) > 100.0 * GRADIENT_TOLERANCE, "the ground ahead really does slope differently from the ground under the car by %.5f, far outside the %.5f the check below allows" % [expected_gradient.distance_to(gradient_under_the_car), GRADIENT_TOLERANCE])
+	_check(absf(expected_change) > 1.0, "and really does change height over the horizon (%.4f px)" % expected_change)
+	_check(senses.gradient_ahead.distance_to(expected_gradient) < GRADIENT_TOLERANCE, "the gradient reported is the one at the look-ahead point, in the car's frame")
+	_check(absf(senses.height_change_ahead - expected_change) < HEIGHT_TOLERANCE, "and the height change is the one across that horizon")
+	_tear_down(world)
+	return true
+
+
+## LocalGroundHeight's field and its analytic derivative, in the fixture's LOCAL frame, restated here
+## from the same constants. Restated rather than shared so the expectation and the provider are two
+## statements of one formula that have to agree, instead of one statement compared to itself.
+func _fixture_ground_height(local_position: Vector2) -> float:
+	return (
+		LocalGroundHeight.SLOPE_ALONG * local_position.x
+		+ LocalGroundHeight.SLOPE_ACROSS * local_position.y
+		+ LocalGroundHeight.RIPPLE_HEIGHT * sin(local_position.x * LocalGroundHeight.RIPPLE_RATE)
+	)
+
+
+func _fixture_ground_gradient(local_position: Vector2) -> Vector2:
+	return Vector2(
+		LocalGroundHeight.SLOPE_ALONG + LocalGroundHeight.RIPPLE_HEIGHT * LocalGroundHeight.RIPPLE_RATE * cos(local_position.x * LocalGroundHeight.RIPPLE_RATE),
+		LocalGroundHeight.SLOPE_ACROSS,
+	)
 
 
 ## Three rivals ahead in an order that makes "nearest" mean something (see RIVAL_MID_IN_CAR_FRAME);
@@ -484,8 +601,11 @@ func _verify_obstacles_come_from_one_repeatable_ray() -> bool:
 	var world := _build_fixture_world(Transform2D.IDENTITY)
 	var senses := _sense_fixture_car(world, LOOK_AHEAD)
 	_check(senses.has_obstacle_ahead, "the ray finds the obstacle in front of the car")
-	# The rival's capsule crosses this ray 40 px nearer than the obstacle's surface. Reading 220
-	# rather than something around 180 is what says every car in the field was excluded.
+	# The near rival's capsule crosses this ray well in front of the obstacle: its body centre is at
+	# 180 px and the capsule reaches roughly 41 px further forward (a 52 px body plus a 15 px radius),
+	# so it first blocks the ray at about 139 px -- around 100 px nearer than the obstacle's surface
+	# at 240 px. Reading 240 rather than something near 139 is what says every car in the field was
+	# excluded from the ray.
 	_check(absf(senses.obstacle_distance - EXPECTED_OBSTACLE_DISTANCE) < 0.05, "it is the %.0f px obstacle and not the rival's body at %.0f px (read %.4f)" % [EXPECTED_OBSTACLE_DISTANCE, RIVAL_NEAR_IN_CAR_FRAME.length(), senses.obstacle_distance])
 	_check(absf(senses.obstacle_offset.x) < 0.05 and senses.obstacle_offset.y < 0.0, "the hit is straight ahead in the car's frame (%s)" % senses.obstacle_offset)
 	_check(absf(senses.obstacle_offset.length() - senses.obstacle_distance) < 0.001, "the offset and the distance describe one hit")
@@ -563,9 +683,10 @@ func _verify_senses_are_in_the_car_frame() -> bool:
 	for difference in differences:
 		print("frame difference: %s" % difference)
 	print("frame: %d fields compared, %d agreed" % [compared, matched])
-	# Eighteen is what DriverSenses declares today; the bound is there so a walk that stopped seeing
-	# properties cannot report "all zero fields agreed" and pass.
-	_check(compared >= 18, "the walk saw every field of DriverSenses (%d)" % compared)
+	# Nineteen is what DriverSenses declares today; the bound is there so a walk that stopped seeing
+	# properties cannot report "all zero fields agreed" and pass, and so that dropping a field from
+	# the walk is a failure rather than a smaller number nobody reads.
+	_check(compared >= DECLARED_SENSE_FIELDS, "the walk saw every field of DriverSenses (%d)" % compared)
 	_check(matched == compared, "the same car in the same road-relative pose at two different world positions and rotations reads identical senses")
 	_tear_down(first)
 	_tear_down(second)
@@ -646,7 +767,7 @@ func _verify_the_pass_changes_nothing() -> bool:
 			continue
 		compared += 1
 		identical += int(first.get(property["name"]) == second.get(property["name"]))
-	_check(compared >= 18, "the repeat walk saw every field of DriverSenses (%d)" % compared)
+	_check(compared >= DECLARED_SENSE_FIELDS, "the repeat walk saw every field of DriverSenses (%d)" % compared)
 	_check(identical == compared, "two passes over an unchanged world return bit-identical senses")
 	_check(first != second, "and they are two distinct values, not one instance handed out twice")
 	_tear_down(world)
@@ -671,7 +792,7 @@ func _verify_the_instrumented_pass_matches_production() -> bool:
 			continue
 		compared += 1
 		identical += int(expected.get(property["name"]) == actual.get(property["name"]))
-	_check(compared >= 18, "the production comparison saw every field of DriverSenses (%d)" % compared)
+	_check(compared >= DECLARED_SENSE_FIELDS, "the production comparison saw every field of DriverSenses (%d)" % compared)
 	_check(expected.road_found and expected.has_rival_ahead and expected.has_obstacle_ahead, "the production pass sensed the whole world")
 	_check(identical == compared, "the instrumented pass this suite uses senses exactly what a production SensingPass does")
 	_tear_down(world)
@@ -688,8 +809,22 @@ func _verify_the_instrumented_pass_matches_production() -> bool:
 func _verify_a_tuningless_car_does_not_abort_a_pass() -> bool:
 	var world := _build_fixture_world(Transform2D.IDENTITY)
 	var field: Array[TopDownCar] = world["field"]
+	# The fixture's two standing obstacles are both on the TALL layer, so nothing in it could tell a
+	# both-layers fallback from a tall-only one -- the claim the guard's comment argues hardest for
+	# would have lived in this assertion's message and nowhere in the world. A LOW obstacle nearer
+	# than either of them is what makes the two answers different numbers: a grounded car's own mask
+	# is TALL|LOW and reads it, and a fallback that dropped the low layer reads straight past it to
+	# the tall one at %d px instead.
+	var low_obstacle := _add_obstacle(world["holder"], field[0].global_transform * LOW_OBSTACLE_IN_CAR_FRAME, LOW_OBSTACLE_RADIUS, OfftrackObjectCollisions.LOW_LAYER)
+	var expected_low := absf(LOW_OBSTACLE_IN_CAR_FRAME.y) - LOW_OBSTACLE_RADIUS
 	var healthy := _sense_fixture_car(world, LOOK_AHEAD)
+	print("tuningless: low obstacle at %.0f px, tall at %.0f px, tuned car reads %.4f" % [expected_low, EXPECTED_OBSTACLE_DISTANCE, healthy.obstacle_distance])
 	_check(healthy.has_obstacle_ahead, "the same fixture senses an obstacle while the car has tuning")
+	_check(low_obstacle.collision_layer == OfftrackObjectCollisions.LOW_LAYER, "the added obstacle really is on the low layer alone")
+	_check(absf(healthy.obstacle_distance - expected_low) < 0.05, "and a tuned car, whose mask is both layers, reads the low one at %.4f px" % healthy.obstacle_distance)
+	# Without this the check below could not distinguish the two masks either: the two obstacles have
+	# to be at genuinely different distances for reading the wrong one to be visible.
+	_check(absf(expected_low - EXPECTED_OBSTACLE_DISTANCE) > 1.0, "the low obstacle (%.0f px) and the tall one (%.0f px) are at different distances" % [expected_low, EXPECTED_OBSTACLE_DISTANCE])
 
 	field[0].tuning = null
 	var senses := _sense_fixture_car(world, LOOK_AHEAD)
@@ -698,12 +833,21 @@ func _verify_a_tuningless_car_does_not_abort_a_pass() -> bool:
 	_check(senses.road_found and absf(senses.lateral_offset - CAR_LOCAL_LATERAL) < POSITION_TOLERANCE, "a tuningless car still reads the road (offset %+.4f)" % senses.lateral_offset)
 	_check(senses.has_rival_ahead and _close(senses.rival_offset, RIVAL_NEAR_IN_CAR_FRAME), "and still reads its rivals (%s)" % senses.rival_offset)
 	_check(senses.height_change_ahead == healthy.height_change_ahead, "and still reads the ground ahead")
-	# The assertion the guard has to earn. Falling back to "no obstacle" would have been the same
-	# answer the crash produces, and no check could have told the two apart -- verified by removing
-	# the guard, which left this file green while printing a SCRIPT ERROR that GDScript gives no way
-	# to count. Sensing both layers is a different answer, so this fails when the guard goes.
-	_check(senses.has_obstacle_ahead, "and still sees the obstacle in front of it, on both collision layers")
-	_check(senses.obstacle_distance == healthy.obstacle_distance and senses.obstacle_offset == healthy.obstacle_offset, "reading it exactly where the tuned car did (%.4f px)" % senses.obstacle_distance)
+	# The two assertions the guard has to earn, and each fails on a different way of getting it wrong.
+	#
+	# Falling back to "no obstacle" produces the identical DriverSenses the crash produces -- the
+	# aborted function simply returns, leaving the same false flag and the same zeroes -- so only a
+	# SCRIPT ERROR distinguished them, and GDScript gives no way to count one. The first check below
+	# is what fails when the guard goes.
+	#
+	# Falling back to the TALL layer alone reads past the low obstacle to the tall one, 100 px
+	# further out. The second check is what fails then; naming the distance is what makes "both
+	# collision layers" a fact about the world rather than a phrase in a message.
+	_check(senses.has_obstacle_ahead, "and still sees the obstacle in front of it")
+	_check(absf(senses.obstacle_distance - expected_low) < 0.05, "at %.4f px -- the LOW obstacle, so the fallback really is both layers and not the tall one at %.0f px" % [senses.obstacle_distance, EXPECTED_OBSTACLE_DISTANCE])
+	_check(senses.obstacle_distance == healthy.obstacle_distance and senses.obstacle_offset == healthy.obstacle_offset, "and exactly where the tuned car read it")
+	low_obstacle.get_parent().remove_child(low_obstacle)
+	low_obstacle.free()
 	_tear_down(world)
 	return true
 
@@ -722,7 +866,7 @@ func _verify_senses_carry_no_handles() -> bool:
 			int(property["type"]) not in [TYPE_NIL, TYPE_OBJECT, TYPE_NODE_PATH, TYPE_RID, TYPE_CALLABLE, TYPE_SIGNAL],
 			"DriverSenses.%s is plain data, not a handle (type %d)" % [property["name"], property["type"]],
 		)
-	_check(declared >= 18, "DriverSenses declares the fields the check above walked (%d)" % declared)
+	_check(declared >= DECLARED_SENSE_FIELDS, "DriverSenses declares the fields the check above walked (%d)" % declared)
 	return true
 
 
@@ -947,9 +1091,9 @@ func _add_car(holder: Node2D, pose: Transform2D, velocity: Vector2) -> TopDownCa
 	return car
 
 
-func _add_obstacle(holder: Node2D, position: Vector2, radius: float) -> StaticBody2D:
+func _add_obstacle(holder: Node2D, position: Vector2, radius: float, layer: int = OfftrackObjectCollisions.TALL_LAYER) -> StaticBody2D:
 	var body := StaticBody2D.new()
-	body.collision_layer = OfftrackObjectCollisions.TALL_LAYER
+	body.collision_layer = layer
 	body.collision_mask = 0
 	body.position = position
 	var shape := CollisionShape2D.new()
@@ -988,7 +1132,10 @@ func _fields_agree(field_name: String, left, right) -> bool:
 		return false
 	match typeof(left):
 		TYPE_VECTOR2:
-			return (left as Vector2).distance_to(right as Vector2) < POSITION_TOLERANCE
+			# gradient_ahead is a slope, not a length: the pixel tolerance is three orders too loose
+			# for it and would admit the ground under the car in place of the ground ahead.
+			var vector_tolerance := GRADIENT_TOLERANCE if field_name == "gradient_ahead" else POSITION_TOLERANCE
+			return (left as Vector2).distance_to(right as Vector2) < vector_tolerance
 		TYPE_FLOAT:
 			var tolerance := ANGLE_TOLERANCE if field_name == "heading_error" else POSITION_TOLERANCE
 			return absf((left as float) - (right as float)) < tolerance

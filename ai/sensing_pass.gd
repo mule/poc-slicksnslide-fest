@@ -192,7 +192,14 @@ func _sense_obstacle(
 	position: Vector2,
 	look_ahead_point: Vector2,
 ) -> void:
+	# A car outside the tree has no World2D and therefore no space to cast into, so there is nothing
+	# to sense and no way to say so in the senses: the result is the same has_obstacle_ahead = false
+	# that a genuinely clear road produces, and no assertion could tell those apart. It is reported
+	# rather than left silent for the same reason sense() reports a bad index — task #60 spawns the
+	# field, and "the rivals never see anything" is a great deal easier to diagnose from one error
+	# line than from a driver that calmly drives through trees.
 	if not car.is_inside_tree():
+		push_error("SensingPass cannot sense obstacles for car %s: it is not in the scene tree" % car.name)
 		return
 	# A car with no tuning has no collision level to ask for -- TopDownCar reads its clearance out of
 	# the tuning -- and reaching for one anyway aborts this function on a null access, which leaves
