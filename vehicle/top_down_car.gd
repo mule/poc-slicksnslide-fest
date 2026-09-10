@@ -16,6 +16,8 @@ const LIFT_OFF_TOLERANCE := 0.05
 const MIN_LANDING_SPEED_FRACTION := 0.3
 
 @export var tuning: VehicleTuning
+## Set before entering the tree, on the player alone. Rivals never compete for the viewport.
+@export var camera_enabled: bool = false
 
 var _input_state := VehicleInputState.new()
 var _surface_query: SurfaceQuery
@@ -66,6 +68,7 @@ func _ready() -> void:
 	mass = tuning.mass_kg
 	_safe_reset_pose = global_transform
 	_has_safe_reset_pose = true
+	_follow_camera.enabled = camera_enabled
 	_follow_camera.top_level = true
 	_follow_camera.zoom = Vector2.ONE * tuning.camera_zoom
 	_follow_camera.global_position = global_position

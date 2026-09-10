@@ -13,6 +13,7 @@ var _track_definition: TrackDefinition
 var _vehicle: TopDownCar
 var _track_runtime: TrackRuntime
 var _current_seed := 0
+var _opponent_count := 0
 var _status_hide_at_msec := 0
 
 @onready var _diagnostics_overlay: CanvasLayer = %DiagnosticsOverlay
@@ -126,6 +127,7 @@ func restart_with_seed(seed: int) -> void:
 	if get_tree().paused:
 		set_session_paused(false)
 	_current_seed = seed
+	_opponent_count = int(session_settings.get("opponent_count"))
 	_track_definition = TrackGenerator.new().generate(seed)
 	var runtime := TrackRuntime.new(_track_definition)
 	runtime.name = "GeneratedTrack"
@@ -134,6 +136,7 @@ func restart_with_seed(seed: int) -> void:
 
 	_vehicle = VEHICLE_SCENE.instantiate() as TopDownCar
 	_vehicle.name = "PlayerCar"
+	_vehicle.camera_enabled = true
 	_vehicle.tuning = vehicle_tuning
 	_vehicle.global_transform = _track_definition.spawn_transform
 	install_vehicle(_vehicle)
@@ -172,6 +175,7 @@ func get_session_snapshot() -> Dictionary:
 		return {}
 	return {
 		"seed": _current_seed,
+		"opponent_count": _opponent_count,
 		"lap_count": _trial.lap_count,
 		"next_checkpoint": _trial.next_checkpoint,
 		"current_lap_time": _trial.current_lap_time,
