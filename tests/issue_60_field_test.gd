@@ -7,6 +7,9 @@ extends SceneTree
 ## are read through get_race_order(). No car steers itself — the drivers are #56's idle ones, which
 ## is exactly what this task was sized to run on.
 ##
+## Focused proof runs: -- --proof-seed-only limits the grid sweep to seed 7; all other cases
+## still run. Normal invocations sweep seeds 0–19.
+##
 ## Mutation flag:
 ##   -- --break-standings-order  re-ranks the session's own entries with a lap-blind comparator
 ##      (checkpoints passed, then distance, then index) and asserts production agrees, so the run

@@ -113,9 +113,8 @@ func _physics_process(delta: float) -> void:
 		if completed:
 			_show_status("Lap %d  ·  %s" % [_trial.lap_count, _format_time(_trial.last_lap_time)], 4.0)
 		_track_runtime.set_next_checkpoint(_trial.next_checkpoint)
-	# Every rival drives and gets its own crossing sampled through the same detector contract as
-	# the player's. A player reset returns early above and skips this tick's rival sampling too,
-	# mirroring for the field the resume-next-tick rule the player's detector already follows.
+	# A player reset returns early above and skips this loop. A rival's own reset must also
+	# reseed and skip its pending-teleport tick, before stale positions can reach the detector.
 	for rival in _rivals:
 		if not is_instance_valid(rival["car"]):
 			continue
