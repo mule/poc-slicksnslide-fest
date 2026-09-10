@@ -59,10 +59,16 @@ func _verify_camera() -> bool:
 	var current_count := int(camera.is_current()) + int(rival_camera.is_current())
 	var enabled_count := int(camera.enabled) + int(rival_camera.enabled)
 	print("two cars: current=%d enabled=%d player_current=%s rival_current=%s" % [current_count, enabled_count, camera.is_current(), rival_camera.is_current()])
-	_check(current_count == 1, "two cars have exactly one current camera")
-	# Godot already enforces one current camera per viewport. Count alone is tautological under
-	# the original bug; the rival must also be disabled and the viewport must belong to player.
-	_check(enabled_count == 1 and camera.enabled and not rival_camera.enabled, "only the player's camera is eligible to own the viewport")
+	# A Viewport holds at most one current Camera2D whatever the cars do, so summing is_current()
+	# can never report "too many" — on its own that count is a one-sided guard that catches a field
+	# with no camera and never a field with twenty. The quantity that does run away under the bug
+	# this task exists to prevent is how many cameras are ELIGIBLE for the viewport, which is what
+	# the gate controls: twenty cars, twenty enabled cameras, and whichever entered last wins. Both
+	# counts are asserted together so the claim in the name is the claim that is checked. Verified
+	# by falsification: defaulting camera_enabled to true fails this on enabled_count == 2, and
+	# deleting the gate line fails it on current_count == 0.
+	_check(current_count == 1 and enabled_count == 1, "two cars yield exactly one current camera and exactly one eligible for it")
+	_check(camera.enabled and camera.is_current() and not rival_camera.enabled, "the eligible camera is the player's and the rival has none")
 	_check(root.get_camera_2d() == camera and not rival_camera.is_current(), "rival insertion preserves the player's current camera")
 	_check(camera.top_level and camera.ignore_rotation, "camera retains screen-frame position and rotation")
 	_check(camera.position_smoothing_enabled and camera.position_smoothing_speed == 7.0, "camera retains engine smoothing at 7")
