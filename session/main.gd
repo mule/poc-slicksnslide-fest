@@ -117,8 +117,11 @@ func _physics_process(delta: float) -> void:
 	# the player's. A player reset returns early above and skips this tick's rival sampling too,
 	# mirroring for the field the resume-next-tick rule the player's detector already follows.
 	for rival in _rivals:
+		if not is_instance_valid(rival["car"]):
+			continue
 		var rival_car := rival["car"] as TopDownCar
-		if not is_instance_valid(rival_car):
+		if rival_car.consume_auto_reset_notice():
+			(rival["detector"] as CheckpointCrossingDetector).reset(rival_car.get_safe_reset_pose().origin)
 			continue
 		rival_car.set_input_state((rival["driver"] as AiDriver).drive(delta))
 		var rival_crossing: Dictionary = (rival["detector"] as CheckpointCrossingDetector).sample(rival_car.global_position)
@@ -168,7 +171,8 @@ func restart_with_seed(seed: int) -> void:
 	_vehicle.tuning = vehicle_tuning
 	_vehicle.global_transform = _track_definition.spawn_transform
 	install_vehicle(_vehicle)
-	_vehicle.set_surface_query(TrackSurfaceMap.new(_track_definition))
+	_field_surface_map = TrackSurfaceMap.new(_track_definition)
+	_vehicle.set_surface_query(_field_surface_map)
 	# The runtime's own map, so the car drives the field the ground is drawn from and the lattice
 	# is built once rather than twice.
 	_vehicle.set_height_query(runtime.height_query())
@@ -181,9 +185,6 @@ func restart_with_seed(seed: int) -> void:
 	_checkpoint_detector.reset(_vehicle.global_position)
 	_track_runtime.set_next_checkpoint(_trial.next_checkpoint)
 	if _opponent_count > 0:
-		# One shared, stateless surface map for the field: sample_at only reads, so every rival
-		# can query the same instance. The player keeps its own, exactly as before the field.
-		_field_surface_map = TrackSurfaceMap.new(_track_definition)
 		for index in range(1, _opponent_count + 1):
 			_spawn_rival(index)
 	_controller_input.suppress_until_controls_released()
@@ -231,10 +232,9 @@ func _centerline_pose_behind(arc_length: float) -> Transform2D:
 func _spawn_rival(index: int) -> void:
 	var car := VEHICLE_SCENE.instantiate() as TopDownCar
 	car.name = "RivalCar%d" % index
-	# Tuning and transform before the car enters the tree: a rival instantiated without tuning is
-	# the exact shape the camera work in #56 guarded against, and the guards are not load-bearing
-	# here by design. The camera stays disabled — the scene default — so the player keeps the
-	# viewport.
+	# _ready() reads the session tuning for mass and captures the grid pose for safe resets.
+	# The scene has default tuning, but it must not override a session's custom tuning.
+	# The camera stays disabled through the scene default.
 	car.tuning = vehicle_tuning
 	car.global_transform = _grid_slot_transform(index)
 	%VehicleMount.add_child(car)
@@ -290,7 +290,7 @@ func get_session_snapshot() -> Dictionary:
 
 
 func get_field_size() -> int:
-	return 1 + _rivals.size()
+	return get_race_entries().size()
 
 
 ## Per-car progress as rankable data: laps completed, the next checkpoint, how many checkpoints
@@ -302,9 +302,9 @@ func get_race_entries() -> Array[Dictionary]:
 	var checkpoint_count := _track_definition.checkpoints.size()
 	entries.append(_race_entry(0, _trial.lap_count, _trial.next_checkpoint, _vehicle.global_position, checkpoint_count))
 	for rival in _rivals:
-		var car := rival["car"] as TopDownCar
-		if not is_instance_valid(car):
+		if not is_instance_valid(rival["car"]):
 			continue
+		var car := rival["car"] as TopDownCar
 		var progress := rival["progress"] as LapProgressTracker
 		entries.append(_race_entry(int(rival["index"]), progress.lap_count, progress.next_checkpoint, car.global_position, checkpoint_count))
 	return entries
@@ -327,8 +327,8 @@ func get_race_order() -> Array[int]:
 
 ## Rank by laps completed, then checkpoints passed this lap, then progress toward the next gate,
 ## then car index. The index term is the tie-break: it depends on identity, never on the order
-## the entries happen to be listed in, so the first tick — where a whole row of the grid is
-## exactly equidistant from gate 1 — resolves identically on every run.
+## the entries happen to be listed in, so exact progress ties
+## resolve identically on every run.
 func _rank_entries(entries: Array[Dictionary]) -> Array[int]:
 	var sorted_entries := entries.duplicate()
 	sorted_entries.sort_custom(_is_ahead_of)

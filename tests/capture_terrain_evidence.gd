@@ -528,6 +528,15 @@ func _on_ramp(definition: TrackDefinition, position: Vector2) -> bool:
 func _verify_seed_restart(main_scene: PackedScene) -> bool:
 	var context := await _open_session(main_scene, CAPTURE_SEEDS[0])
 	var session: MainSession = context["session"]
+	var default_runtime := session.get_node("World/TrackMount/GeneratedTrack")
+	var default_shading := default_runtime.get_node("TerrainShading")
+	var default_ground := default_shading.get_node("Ground")
+	var default_objects := default_runtime.get_node("OfftrackObjects")
+	var default_car := session.get_node("World/VehicleMount/PlayerCar")
+	_check(session.get_field_size() == 1, "default restart fixture starts with the shipped single-car field")
+	session.restart_with_seed(RESTART_SEED)
+	_check(not is_instance_valid(default_car) and not is_instance_valid(default_runtime) and not is_instance_valid(default_shading) and not is_instance_valid(default_ground) and not is_instance_valid(default_objects), "default count-zero restart frees car, track, shading, ground and objects")
+	_check(session.get_node("World/VehicleMount").get_child_count() == 1, "default restart mounts one fresh player")
 	var field_settings := SessionSettings.new()
 	field_settings.opponent_count = 20
 	session.session_settings = field_settings

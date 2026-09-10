@@ -15,8 +15,7 @@ extends SceneTree
 ##      can never pass vacuously.
 ##
 ## Deferred to #61 (they need #59's real drivers): two runs at the same seed and count producing
-## identical final standings, a full-field race, and car-to-car contact not desyncing a run. The
-## contact physics themselves are confirmed here; only the full-race determinism waits.
+## identical final standings and a full-field race. Idle-field contact determinism is checked here.
 
 const MAIN_SCENE_PATH := "res://session/main.tscn"
 const SEED := 7
@@ -43,6 +42,7 @@ func _run() -> void:
 	_check(await _verify_grid_layout(), "grid layout verification ran to completion")
 	_check(await _verify_car_to_car_collision(), "car-to-car collision verification ran to completion")
 	_check(await _verify_standings(), "standings verification ran to completion")
+	_check(await _verify_rival_reset(), "rival reset verification ran to completion")
 	_finish()
 
 
@@ -61,10 +61,10 @@ func _verify_counts_build_playable_sessions() -> bool:
 		for child in mount.get_children():
 			var car := child as TopDownCar
 			all_cars = all_cars and car != null
-			all_tuned = all_tuned and car != null and car.tuning != null
+			all_tuned = all_tuned and car != null and car.tuning == session.vehicle_tuning
 			camera_enabled_count += int(car != null and car.camera_enabled)
 		_check(all_cars, "every mounted node at count %d is a TopDownCar" % count)
-		_check(all_tuned, "every car at count %d carries tuning before it enters the tree" % count)
+		_check(all_tuned, "every car at count %d uses the session tuning resource" % count)
 		_check(camera_enabled_count == 1, "exactly one car at count %d has its camera enabled" % count)
 		_check(root.get_camera_2d() == session.get_node("World/VehicleMount/PlayerCar/FollowCamera"), "the player owns the viewport at count %d" % count)
 		var snapshot := session.get_session_snapshot()
@@ -120,14 +120,34 @@ func _verify_zero_opponents_is_today() -> bool:
 ## The grid at a full field: deterministic slots, every car on the road facing forward, no two of
 ## the twenty-one cars overlapping — checked for all of them, not a sample.
 func _verify_grid_layout() -> bool:
-	var session := await _open_session(FULL_FIELD, SEED)
+	for seed in ([SEED] if OS.get_cmdline_user_args().has("--proof-seed-only") else range(20)):
+		_check(await _verify_grid_seed(seed), "grid seed %d verification ran to completion" % seed)
+	return true
+
+
+func _verify_grid_seed(seed: int) -> bool:
+	var session := await _open_session(FULL_FIELD, seed)
 	var definition: TrackDefinition = session.get_node("World/TrackMount/GeneratedTrack").definition
 	var surface := TrackSurfaceMap.new(definition)
 	var cars := _field_cars(session)
+	for rival in session.get("_rivals"):
+		var detector: CheckpointCrossingDetector = rival["detector"]
+		_check(detector.get("_has_previous_position") and detector.get("_previous_position") == rival["car"].global_position, "seed %d rival %d detector is seeded at spawn before its first sample" % [seed, rival["index"]])
 	_check(cars.size() == FULL_FIELD + 1, "the grid fixture holds twenty-one cars")
 	for index in range(cars.size()):
 		var car := cars[index]
 		_check(surface.sample_at(car.global_position).surface_type == SurfaceQuery.SurfaceType.DIRT, "car %d starts on the road" % index)
+		_check(car.mass == session.vehicle_tuning.mass_kg and car.is_physics_processing(), "seed %d car %d ready uses session mass and enables physics" % [seed, index])
+		_check(car.get_safe_reset_pose() == car.global_transform, "seed %d car %d ready captures its grid reset pose" % [seed, index])
+		car.call("_sample_surface", car.global_position)
+		_check(car.get("_surface_type") == SurfaceQuery.SurfaceType.DIRT, "seed %d car %d samples road through its own surface query" % [seed, index])
+		var ground: HeightQuery.HeightSample = car.call("_sample_ground_at", car.global_position)
+		var expected_ground := TrackHeightMap.new(definition).sample_at(car.global_position)
+		_check(ground.ground_height == expected_ground.ground_height and ground.gradient == expected_ground.gradient, "seed %d car %d samples terrain through its own height query" % [seed, index])
+		_check(car.get("_surface_query") == cars[0].get("_surface_query"), "seed %d car %d shares the player surface map" % [seed, index])
+		var shape := (car.get_node("CollisionShape2D") as CollisionShape2D).shape as CapsuleShape2D
+		for side in [-1.0, 1.0]:
+			_check(surface.sample_at(car.global_position + car.global_transform.x * shape.radius * side).surface_type == SurfaceQuery.SurfaceType.DIRT, "seed %d car %d body edge %d is on road" % [seed, index, int(side)])
 		var tangent := _nearest_tangent(definition, car.global_position)
 		var car_forward := -car.global_transform.y
 		_check(car_forward.dot(tangent) > 0.995, "car %d faces along the direction of travel (dot %.4f)" % [index, car_forward.dot(tangent)])
@@ -139,6 +159,15 @@ func _verify_grid_layout() -> bool:
 		session.free()
 		await process_frame
 		return true
+	var saved_a := cars[0].global_transform
+	var saved_b := cars[1].global_transform
+	cars[0].global_transform = Transform2D(0.0, Vector2.ZERO)
+	cars[1].global_transform = Transform2D(PI * 0.5, Vector2.ZERO)
+	_check(is_zero_approx(_capsule_clearance(cars[0], cars[1])), "crossed capsule medial segments have zero separation")
+	cars[1].global_transform = Transform2D(0.0, Vector2(0.0, WorldScale.metres(8.0)))
+	_check(is_equal_approx(_capsule_clearance(cars[0], cars[1]), WorldScale.metres(8.0) - capsule.height + 2.0 * capsule.radius), "capsule medial length excludes the rounded end radii")
+	cars[0].global_transform = saved_a
+	cars[1].global_transform = saved_b
 	var pairs := 0
 	var closest := INF
 	for a in range(cars.size()):
@@ -147,14 +176,14 @@ func _verify_grid_layout() -> bool:
 			closest = minf(closest, _capsule_clearance(cars[a], cars[b]))
 	_check(pairs == 210, "all 210 pairs of the twenty-one cars were checked (%d)" % pairs)
 	_check(closest >= capsule.radius * 2.0, "no two cars overlap at spawn (closest capsules %.1f px apart, need %.1f)" % [closest, capsule.radius * 2.0])
-	# Determinism: the same seed and count place the same cars in the same slots.
 	var first_poses: Array[Transform2D] = []
 	for car in cars:
 		first_poses.append(car.global_transform)
-	session.restart_with_seed(SEED)
+	session.session_settings.opponent_count = 5
+	session.restart_with_seed(seed)
 	var cars_again := _field_cars(session)
-	for index in range(first_poses.size()):
-		_check(cars_again[index].global_transform == first_poses[index], "restart places car %d in the same slot" % index)
+	for index in range(cars_again.size()):
+		_check(cars_again[index].global_transform == first_poses[index], "seed %d slot %d is independent of field count (20 versus 5)" % [seed, index])
 	session.free()
 	await process_frame
 	return true
@@ -163,18 +192,35 @@ func _verify_grid_layout() -> bool:
 ## Cars share layer 1 with mask 3, so car-to-car contact should already work; this confirms it
 ## through the physics server rather than assuming it.
 func _verify_car_to_car_collision() -> bool:
-	var session := await _open_session(2, SEED)
-	var player := session.get_node("World/VehicleMount/PlayerCar") as TopDownCar
-	var rival := session.get_node("World/VehicleMount/RivalCar1") as TopDownCar
-	var player_forward := -player.global_transform.y
-	# Deep overlap along the player's axis: two capsules radius 15 cannot miss at half a metre.
-	rival.global_transform = Transform2D(player.global_rotation, player.global_position + player_forward * WorldScale.metres(0.5))
-	for frame in range(20):
+	var traces: Array[Array] = []
+	for run in range(2):
+		var session := await _open_session(2, SEED)
+		# Align both restarts to the same physics boundary, independent of render scheduling.
 		await physics_frame
-	_check(player.get_collision_count() > 0, "the player's body registered contact with the rival (%d collisions)" % player.get_collision_count())
-	_check(rival.get_collision_count() > 0, "the rival's body registered contact with the player (%d collisions)" % rival.get_collision_count())
-	session.free()
-	await process_frame
+		session.restart_with_seed(SEED)
+		var player := session.get_node("World/VehicleMount/PlayerCar") as TopDownCar
+		var rival := session.get_node("World/VehicleMount/RivalCar1") as TopDownCar
+		var player_hits: Array[Node] = []
+		var rival_hits: Array[Node] = []
+		player.body_entered.connect(func(body: Node): player_hits.append(body))
+		rival.body_entered.connect(func(body: Node): rival_hits.append(body))
+		var player_forward := -player.global_transform.y
+		rival.global_transform = Transform2D(player.global_rotation, player.global_position + player_forward * WorldScale.metres(0.5))
+		var trace: Array = []
+		for frame in range(20):
+			await physics_frame
+			trace.append([player.global_transform, player.linear_velocity, rival.global_transform, rival.linear_velocity, session.get_race_order()])
+		_check(player_hits.has(rival), "run %d player's contact identifies the rival body" % run)
+		_check(rival_hits.has(player), "run %d rival's contact identifies the player body" % run)
+		traces.append(trace)
+		session.free()
+		await process_frame
+	if traces[0] != traces[1]:
+		for tick in range(20):
+			if traces[0][tick] != traces[1][tick]:
+				print("CONTACT_DIFF tick=%d first=%s second=%s" % [tick, traces[0][tick], traces[1][tick]])
+				break
+	_check(traces[0] == traces[1], "two idle-field contact runs reproduce every sampled pose, velocity and standing")
 	return true
 
 
@@ -194,10 +240,10 @@ func _verify_standings() -> bool:
 	# Rival 3 drives a whole lap: crossings credited through the session's own sampling.
 	_drive_full_lap(session, rival3, definition)
 	_drive_to(session, rival3, definition, checkpoints[1].origin - gate1_forward * WorldScale.metres(FAR_GATE_OFFSET_M))
-	# Player and rival 1 pass gate 1 and stop NEAR and FAR from gate 2: same checkpoint, different
+	# Player and rival 1 pass gate 1 and stop FAR and NEAR from gate 2: same checkpoint, different
 	# progress.
-	_drive_to(session, player, definition, checkpoints[2].origin - gate2_forward * WorldScale.metres(NEAR_GATE_OFFSET_M))
-	_drive_to(session, rival1, definition, checkpoints[2].origin - gate2_forward * WorldScale.metres(FAR_GATE_OFFSET_M))
+	_drive_to(session, player, definition, checkpoints[2].origin - gate2_forward * WorldScale.metres(FAR_GATE_OFFSET_M))
+	_drive_to(session, rival1, definition, checkpoints[2].origin - gate2_forward * WorldScale.metres(NEAR_GATE_OFFSET_M))
 	# Rival 2 passes no gate: same lap as the player, an earlier checkpoint.
 	_drive_to(session, rival2, definition, checkpoints[1].origin - gate1_forward * WorldScale.metres(FAR_GATE_OFFSET_M))
 
@@ -207,15 +253,15 @@ func _verify_standings() -> bool:
 	_check(by_index.size() == 4, "the scenario ranks four cars")
 	_check(int(by_index[3]["laps"]) == 1 and int(by_index[3]["next_checkpoint"]) == 1, "rival 3 completed a lap and is back working on gate 1")
 	_check(int(by_index[0]["next_checkpoint"]) == 2 and int(by_index[1]["next_checkpoint"]) == 2, "the player and rival 1 both passed gate 1")
-	_check(float(by_index[0]["next_checkpoint_distance"]) < float(by_index[1]["next_checkpoint_distance"]), "the player stands nearer gate 2 than rival 1 (%.1f vs %.1f px)" % [float(by_index[0]["next_checkpoint_distance"]), float(by_index[1]["next_checkpoint_distance"])])
+	_check(float(by_index[0]["next_checkpoint_distance"]) > float(by_index[1]["next_checkpoint_distance"]), "the player stands farther gate 2 than rival 1 (%.1f vs %.1f px)" % [float(by_index[0]["next_checkpoint_distance"]), float(by_index[1]["next_checkpoint_distance"])])
 	_check(int(by_index[2]["next_checkpoint"]) == 1 and int(by_index[2]["laps"]) == 0, "rival 2 has passed no gate on the opening lap")
 
-	var expected: Array[int] = [3, 0, 1, 2]
+	var expected: Array[int] = [3, 1, 0, 2]
 	_check(session.get_race_order() == expected, "standings rank lap count, then checkpoints passed, then progress: %s" % str(session.get_race_order()))
-	_check(session.get_player_position() == 2, "the player is second of four")
-	_check(int(session.get_session_snapshot().get("player_position", -1)) == 2, "the snapshot publishes the player's position")
+	_check(session.get_player_position() == 3, "the player is third of four")
+	_check(int(session.get_session_snapshot().get("player_position", -1)) == 3, "the snapshot publishes the player's position")
 	session.call("_refresh_hud")
-	_check((session.get_node("%PosLabel") as Label).text == "POS  2/4", "the HUD shows the mid-race position")
+	_check((session.get_node("%PosLabel") as Label).text == "POS  3/4", "the HUD shows the mid-race position")
 
 	if _break_standings:
 		var naive := _rank_without_laps(session.get_race_entries())
@@ -236,7 +282,10 @@ func _verify_standings() -> bool:
 	rival2_car.global_position = rival1_car.global_position
 	var tied_entries := session.get_race_entries()
 	_check(float(tied_entries[1]["next_checkpoint_distance"]) == float(tied_entries[2]["next_checkpoint_distance"]), "the two rivals now stand at identical progress — a real first-tick tie")
-	var tied_order := session.get_race_order()
+	tied_entries.reverse()
+	var tied_order: Array[int] = session.call("_rank_entries", tied_entries)
+	print("TIE_ORDER seed=7 count=3: %s" % str(tied_order))
+	_check(tied_order == [0, 1, 2, 3], "exact tie matches the checked-in cross-process order [0, 1, 2, 3]")
 	_check(tied_order.find(1) < tied_order.find(2), "an exact progress tie between two rivals breaks by car index, not by list order")
 	# Order-independence: the same production ranking fed permuted entry lists must return the
 	# same order. The expectation is the control ranking above rather than an independent
@@ -256,6 +305,46 @@ func _verify_standings() -> bool:
 	return true
 
 
+## Exercise the session's half of the reset protocol at the pending-teleport boundary.
+func _verify_rival_reset() -> bool:
+	var session := await _open_session(2, SEED)
+	var definition: TrackDefinition = session.get_node("World/TrackMount/GeneratedTrack").definition
+	var rivals: Array = session.get("_rivals")
+	var rival: TopDownCar = rivals[0]["car"]
+	var detector: CheckpointCrossingDetector = rivals[0]["detector"]
+	var progress: LapProgressTracker = rivals[0]["progress"]
+	var gate := definition.checkpoints[1]
+	var before := gate.origin - gate.x.normalized() * WorldScale.metres(2.0)
+	var after := gate.origin + gate.x.normalized() * WorldScale.metres(2.0)
+	var control := CheckpointCrossingDetector.new(definition)
+	control.reset(before)
+	_check(control.sample(after).get("checkpoint", -1) == 1, "reset fixture chord really crosses the next gate")
+	detector.reset(before)
+	rival.global_position = before
+	# Set only the producer's notice and destination; invoke the real session consumer below.
+	rival.set("_safe_reset_pose", Transform2D(rival.global_rotation, after))
+	rival.set("_auto_reset_notice", true)
+	session.call("_physics_process", TICK)
+	_check(not rival.consume_auto_reset_notice(), "rival reset notice is drained by the session")
+	_check(detector.get("_previous_position") == after, "rival detector is reseeded to destination without sampling stale pose")
+	rival.global_position = after
+	session.call("_physics_process", TICK)
+	_check(progress.next_checkpoint == 1 and progress.lap_count == 0, "rival reset teleport earns no phantom checkpoint or lap")
+	# A later legitimate crossing must still count.
+	rival.global_position = before
+	session.call("_physics_process", TICK)
+	rival.global_position = after
+	session.call("_physics_process", TICK)
+	_check(progress.next_checkpoint == 2, "rival sampling resumes and credits a later real crossing")
+	rival.free()
+	_check(session.get_field_size() == 2 and session.get_race_entries().size() == 2, "field size excludes a freed rival just like the ranked entries")
+	session.call("_refresh_hud")
+	_check((session.get_node("%PosLabel") as Label).text.ends_with("/2"), "HUD size excludes the freed rival")
+	session.free()
+	await process_frame
+	return true
+
+
 # --- helpers -----------------------------------------------------------------
 
 
@@ -265,6 +354,8 @@ func _open_session(count: int, seed: int) -> MainSession:
 	var settings := SessionSettings.new()
 	settings.opponent_count = count
 	session.session_settings = settings
+	session.vehicle_tuning = session.vehicle_tuning.duplicate()
+	session.vehicle_tuning.mass_kg = 1234.0
 	root.add_child(session)
 	await process_frame
 	# No frame is awaited after the restart on purpose: one physics tick round-trips the car's
@@ -367,18 +458,13 @@ func _capsule_clearance(a: TopDownCar, b: TopDownCar) -> float:
 		return -1.0
 	var forward_a := -a.global_transform.y
 	var forward_b := -b.global_transform.y
-	var a1 := a.global_position + forward_a * shape_a.height * 0.5
-	var a2 := a.global_position - forward_a * shape_a.height * 0.5
-	var b1 := b.global_position + forward_b * shape_b.height * 0.5
-	var b2 := b.global_position - forward_b * shape_b.height * 0.5
-	return minf(
-		minf(_point_segment_distance(b1, a1, a2), _point_segment_distance(b2, a1, a2)),
-		minf(_point_segment_distance(a1, b1, b2), _point_segment_distance(a2, b1, b2))
-	)
+	var a1 := a.global_position + forward_a * (shape_a.height * 0.5 - shape_a.radius)
+	var a2 := a.global_position - forward_a * (shape_a.height * 0.5 - shape_a.radius)
+	var b1 := b.global_position + forward_b * (shape_b.height * 0.5 - shape_b.radius)
+	var b2 := b.global_position - forward_b * (shape_b.height * 0.5 - shape_b.radius)
+	var closest := Geometry2D.get_closest_points_between_segments(a1, a2, b1, b2)
+	return closest[0].distance_to(closest[1])
 
-
-func _point_segment_distance(point: Vector2, segment_a: Vector2, segment_b: Vector2) -> float:
-	return Geometry2D.get_closest_point_to_segment(point, segment_a, segment_b).distance_to(point)
 
 
 func _check(condition: bool, message: String) -> void:
