@@ -631,7 +631,8 @@ func _verify_obstacles_come_from_one_repeatable_ray() -> bool:
 	near_body.get_parent().remove_child(near_body)
 	var far_senses := _sense_fixture_car(world, LOOK_AHEAD)
 	_check(far_senses.has_obstacle_ahead, "with the near obstacle gone the far one is found")
-	_check(absf(far_senses.obstacle_distance - (absf(FAR_OBSTACLE_IN_CAR_FRAME.y) - FAR_OBSTACLE_RADIUS)) < 0.05, "and it reads %.4f px, the far obstacle's near edge" % far_senses.obstacle_distance)
+	var far_edge := absf(FAR_OBSTACLE_IN_CAR_FRAME.y) - FAR_OBSTACLE_RADIUS
+	_check(absf(far_senses.obstacle_distance - far_edge) < 0.05, "and it reads the far obstacle's near edge at %.0f px (read %.4f)" % [far_edge, far_senses.obstacle_distance])
 	near_body.free()
 
 	var short_senses := _sense_fixture_car(world, SHORT_LOOK_AHEAD)
