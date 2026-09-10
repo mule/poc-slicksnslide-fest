@@ -601,11 +601,17 @@ func _verify_obstacles_come_from_one_repeatable_ray() -> bool:
 	var world := _build_fixture_world(Transform2D.IDENTITY)
 	var senses := _sense_fixture_car(world, LOOK_AHEAD)
 	_check(senses.has_obstacle_ahead, "the ray finds the obstacle in front of the car")
-	# The near rival's capsule crosses this ray well in front of the obstacle: its body centre is at
-	# 180 px and the capsule reaches roughly 41 px further forward (a 52 px body plus a 15 px radius),
-	# so it first blocks the ray at about 139 px -- around 100 px nearer than the obstacle's surface
-	# at 240 px. Reading 240 rather than something near 139 is what says every car in the field was
-	# excluded from the ray.
+	# The near rival's capsule crosses this ray in front of the obstacle, so reading the obstacle's
+	# 240 px is what says every car in the field was excluded from the ray.
+	#
+	# Where the rival blocks it is measured, not estimated: removing the exclusion from
+	# SensingPass._sense_obstacle makes this very assertion report `read 154.0000`, so the rival is
+	# 86.0 px nearer than the obstacle's surface. That agrees exactly with the scene's capsule -- a
+	# centre at 180 px and `CapsuleShape2D.height = 52`, which in Godot 4 spans the WHOLE shape
+	# including both hemispherical caps, so the forward extremity is 180 - 26 = 154 and the 15 px
+	# radius is inside that half-height rather than added to it. Two earlier versions of this comment
+	# added the radius and got 139 px; the number in a comment is worth no more than the way it was
+	# obtained, and this one came from the suite.
 	_check(absf(senses.obstacle_distance - EXPECTED_OBSTACLE_DISTANCE) < 0.05, "it is the %.0f px obstacle and not the rival's body at %.0f px (read %.4f)" % [EXPECTED_OBSTACLE_DISTANCE, RIVAL_NEAR_IN_CAR_FRAME.length(), senses.obstacle_distance])
 	_check(absf(senses.obstacle_offset.x) < 0.05 and senses.obstacle_offset.y < 0.0, "the hit is straight ahead in the car's frame (%s)" % senses.obstacle_offset)
 	_check(absf(senses.obstacle_offset.length() - senses.obstacle_distance) < 0.001, "the offset and the distance describe one hit")
@@ -1084,6 +1090,15 @@ func _add_car(holder: Node2D, pose: Transform2D, velocity: Vector2) -> TopDownCa
 	# physics step is taken in this file, so nothing integrates them either way; freezing means a
 	# stray one could not.
 	car.freeze = true
+	# The pose goes on BEFORE the car enters the tree, and that ordering is load-bearing. A body
+	# added first and moved afterwards enters the physics space at the position it had on entry --
+	# the origin -- and only a physics step reconciles the two. This file deliberately takes no step,
+	# so every fixture car used to sit at the origin as far as a ray was concerned. The obstacle ray
+	# therefore could not have hit a rival whether or not the field was excluded from it, which left
+	# the exclusion rule asserted in a message with no world behind it: removing the exclusion
+	# entirely kept the suite green. The holders are all at identity, so the local pose set here is
+	# the global one; it is re-applied below so this stays correct if a holder is ever moved.
+	car.transform = pose
 	holder.add_child(car)
 	car.set_process(false)
 	car.global_transform = pose
