@@ -50,7 +50,13 @@ func _verify_seam_isolation() -> bool:
 			if int(property["usage"]) & PROPERTY_USAGE_SCRIPT_VARIABLE == 0:
 				continue
 			declared += 1
-			_check(int(property["type"]) not in [TYPE_OBJECT, TYPE_NODE_PATH, TYPE_RID, TYPE_CALLABLE, TYPE_SIGNAL], "%s.%s is not a handle to anything (type %d)" % [class_name_text, property["name"], property["type"]])
+			# TYPE_NIL closes the hole the rest of this list leaves open. A DECLARED type is always
+			# reported, so `var _car: Node2D` comes back as TYPE_OBJECT even while it is null and the
+			# list below already refuses it. What comes back as TYPE_NIL is an UNTYPED `var _car`,
+			# which the engine cannot describe and which may hold a RigidBody2D the moment anything
+			# assigns one. Refusing TYPE_NIL therefore says: every field a driver declares must state
+			# a type, and that type must not be a handle.
+			_check(int(property["type"]) not in [TYPE_NIL, TYPE_OBJECT, TYPE_NODE_PATH, TYPE_RID, TYPE_CALLABLE, TYPE_SIGNAL], "%s.%s is not a handle to anything (type %d)" % [class_name_text, property["name"], property["type"]])
 		# Without this the loop above would pass vacuously the day the properties stop being
 		# reported: AiDriver declares car_index, driver_seed and their two backing fields.
 		_check(declared >= 4, "%s declares its four identity properties for the check above to see" % class_name_text)
