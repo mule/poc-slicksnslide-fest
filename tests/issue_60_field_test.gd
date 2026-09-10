@@ -208,7 +208,8 @@ func _verify_car_to_car_collision() -> bool:
 		player.body_entered.connect(func(body: Node): player_hits.append(body))
 		rival.body_entered.connect(func(body: Node): rival_hits.append(body))
 		var player_forward := -player.global_transform.y
-		rival.global_transform = Transform2D(player.global_rotation, player.global_position + player_forward * WorldScale.metres(0.5))
+		# Offset nose contact avoids the ambiguous normal of deeply overlapping parallel capsules.
+		rival.global_transform = Transform2D(player.global_rotation, player.global_position + player_forward * WorldScale.metres(3.5) + player.global_transform.x * WorldScale.metres(0.5))
 		var trace: Array = []
 		for frame in range(20):
 			await physics_frame
