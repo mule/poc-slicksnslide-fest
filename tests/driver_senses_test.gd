@@ -844,7 +844,7 @@ func _verify_a_tuningless_car_does_not_abort_a_pass() -> bool:
 	# further out. The second check is what fails then; naming the distance is what makes "both
 	# collision layers" a fact about the world rather than a phrase in a message.
 	_check(senses.has_obstacle_ahead, "and still sees the obstacle in front of it")
-	_check(absf(senses.obstacle_distance - expected_low) < 0.05, "at %.4f px -- the LOW obstacle, so the fallback really is both layers and not the tall one at %.0f px" % [senses.obstacle_distance, EXPECTED_OBSTACLE_DISTANCE])
+	_check(absf(senses.obstacle_distance - expected_low) < 0.05, "and it is the LOW obstacle at %.0f px, not the tall one at %.0f px, so the fallback really is both layers (read %.4f)" % [expected_low, EXPECTED_OBSTACLE_DISTANCE, senses.obstacle_distance])
 	_check(senses.obstacle_distance == healthy.obstacle_distance and senses.obstacle_offset == healthy.obstacle_offset, "and exactly where the tuned car read it")
 	low_obstacle.get_parent().remove_child(low_obstacle)
 	low_obstacle.free()
