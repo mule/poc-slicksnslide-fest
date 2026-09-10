@@ -3,6 +3,12 @@ extends Node
 
 const VEHICLE_SCENE := preload("res://vehicle/top_down_car.tscn")
 
+## Grid geometry, in metres through the scale contract. Rows run backwards from the start line
+## along the centreline; the two columns sit at a quarter of the track's width either side of it,
+## so every slot stays on the road by construction however narrow the generated track is.
+const GRID_ROW_SPACING_M := 8.8
+const GRID_COLUMN_FRACTION := 0.25
+
 @export var session_settings: Resource
 @export var vehicle_tuning: Resource
 
@@ -15,10 +21,16 @@ var _track_runtime: TrackRuntime
 var _current_seed := 0
 var _opponent_count := 0
 var _status_hide_at_msec := 0
+## The field beside the player's car. Each entry: index (1..opponent_count), car, driver,
+## detector, progress. The player's own progress stays in _trial, whose TimeTrialState owns a
+## LapProgressTracker exactly like each rival's entry does.
+var _rivals: Array[Dictionary] = []
+var _field_surface_map: TrackSurfaceMap
 
 @onready var _diagnostics_overlay: CanvasLayer = %DiagnosticsOverlay
 @onready var _seed_label: Label = %SeedLabel
 @onready var _lap_label: Label = %LapLabel
+@onready var _position_label: Label = %PosLabel
 @onready var _time_label: Label = %TimeLabel
 @onready var _status_panel: Control = %StatusPanel
 @onready var _status_label: Label = %StatusLabel
@@ -101,6 +113,20 @@ func _physics_process(delta: float) -> void:
 		if completed:
 			_show_status("Lap %d  ·  %s" % [_trial.lap_count, _format_time(_trial.last_lap_time)], 4.0)
 		_track_runtime.set_next_checkpoint(_trial.next_checkpoint)
+	# Every rival drives and gets its own crossing sampled through the same detector contract as
+	# the player's. A player reset returns early above and skips this tick's rival sampling too,
+	# mirroring for the field the resume-next-tick rule the player's detector already follows.
+	for rival in _rivals:
+		var rival_car := rival["car"] as TopDownCar
+		if not is_instance_valid(rival_car):
+			continue
+		rival_car.set_input_state((rival["driver"] as AiDriver).drive(delta))
+		var rival_crossing: Dictionary = (rival["detector"] as CheckpointCrossingDetector).sample(rival_car.global_position)
+		if not rival_crossing.is_empty():
+			(rival["progress"] as LapProgressTracker).cross_checkpoint(
+				int(rival_crossing.get("checkpoint", -1)),
+				float(rival_crossing.get("forward_dot", 0.0)),
+			)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -128,6 +154,8 @@ func restart_with_seed(seed: int) -> void:
 		set_session_paused(false)
 	_current_seed = seed
 	_opponent_count = int(session_settings.get("opponent_count"))
+	_rivals.clear()
+	_field_surface_map = null
 	_track_definition = TrackGenerator.new().generate(seed)
 	var runtime := TrackRuntime.new(_track_definition)
 	runtime.name = "GeneratedTrack"
@@ -152,9 +180,79 @@ func restart_with_seed(seed: int) -> void:
 	_checkpoint_detector = CheckpointCrossingDetector.new(_track_definition)
 	_checkpoint_detector.reset(_vehicle.global_position)
 	_track_runtime.set_next_checkpoint(_trial.next_checkpoint)
+	if _opponent_count > 0:
+		# One shared, stateless surface map for the field: sample_at only reads, so every rival
+		# can query the same instance. The player keeps its own, exactly as before the field.
+		_field_surface_map = TrackSurfaceMap.new(_track_definition)
+		for index in range(1, _opponent_count + 1):
+			_spawn_rival(index)
 	_controller_input.suppress_until_controls_released()
 	_refresh_hud()
 	_show_status("Seed %d ready" % _current_seed)
+
+
+## Slot 0 is the player's and is the definition's spawn transform itself, so the player's pose
+## never moves with the opponent count and every lap time this repo has recorded stays
+## comparable. Rivals take slots 1..opponent_count in rows behind the start line: slot s sits in
+## row (s + 1) / 2, odd slots on one side of the centreline, even slots on the other. The layout
+## is a pure function of the definition and the slot number, so the same seed and count always
+## place the same cars in the same slots, and no slot depends on the count.
+func _grid_slot_transform(slot: int) -> Transform2D:
+	if slot <= 0:
+		return _track_definition.spawn_transform
+	var row := (slot + 1) / 2
+	var side := -1.0 if slot % 2 == 1 else 1.0
+	var pose := _centerline_pose_behind(row * WorldScale.metres(GRID_ROW_SPACING_M))
+	# pose's rotation is the local direction of travel, so its y basis is already the lateral
+	# normal to lay the columns along.
+	var lateral := pose.y * (side * _track_definition.track_width * GRID_COLUMN_FRACTION)
+	return Transform2D(pose.get_rotation() + PI * 0.5, pose.origin + lateral)
+
+
+## The centreline pose (origin plus direction of travel) a given arc length behind the start,
+## walking the generated polyline backwards around the loop.
+func _centerline_pose_behind(arc_length: float) -> Transform2D:
+	var points := _track_definition.centerline
+	var unique := points.size() - 1
+	var index := 0
+	var remaining := arc_length
+	while remaining > 0.0 and unique > 0:
+		var previous := points[(index - 1 + unique) % unique]
+		var segment := points[index].distance_to(previous)
+		if segment >= remaining:
+			var origin := points[index].lerp(previous, remaining / maxf(segment, 0.000001))
+			return Transform2D((points[index] - previous).angle(), origin)
+		remaining -= segment
+		index = (index - 1 + unique) % unique
+	var forward := (_track_definition.centerline[1] - _track_definition.centerline[0]).normalized()
+	return Transform2D(forward.angle(), points[0])
+
+
+func _spawn_rival(index: int) -> void:
+	var car := VEHICLE_SCENE.instantiate() as TopDownCar
+	car.name = "RivalCar%d" % index
+	# Tuning and transform before the car enters the tree: a rival instantiated without tuning is
+	# the exact shape the camera work in #56 guarded against, and the guards are not load-bearing
+	# here by design. The camera stays disabled — the scene default — so the player keeps the
+	# viewport.
+	car.tuning = vehicle_tuning
+	car.global_transform = _grid_slot_transform(index)
+	%VehicleMount.add_child(car)
+	car.set_surface_query(_field_surface_map)
+	car.set_height_query(_track_runtime.height_query())
+	var driver := IdleDriver.new(_current_seed, index)
+	car.set_input_state(driver.drive(0.0))
+	car.set_auto_reset_enabled(bool(session_settings.get("auto_reset_enabled")))
+	var detector := CheckpointCrossingDetector.new(_track_definition)
+	detector.reset(car.global_position)
+	var progress := LapProgressTracker.new(_track_definition.checkpoints.size())
+	_rivals.append({
+		"index": index,
+		"car": car,
+		"driver": driver,
+		"detector": detector,
+		"progress": progress,
+	})
 
 
 func set_session_paused(is_paused: bool) -> void:
@@ -176,6 +274,8 @@ func get_session_snapshot() -> Dictionary:
 	return {
 		"seed": _current_seed,
 		"opponent_count": _opponent_count,
+		"field_size": get_field_size(),
+		"player_position": get_player_position(),
 		"lap_count": _trial.lap_count,
 		"next_checkpoint": _trial.next_checkpoint,
 		"current_lap_time": _trial.current_lap_time,
@@ -189,6 +289,69 @@ func get_session_snapshot() -> Dictionary:
 	}
 
 
+func get_field_size() -> int:
+	return 1 + _rivals.size()
+
+
+## Per-car progress as rankable data: laps completed, the next checkpoint, how many checkpoints
+## of the current lap are behind the car, and how far the car stands from its next gate.
+func get_race_entries() -> Array[Dictionary]:
+	var entries: Array[Dictionary] = []
+	if _trial == null or not is_instance_valid(_vehicle) or _track_definition == null:
+		return entries
+	var checkpoint_count := _track_definition.checkpoints.size()
+	entries.append(_race_entry(0, _trial.lap_count, _trial.next_checkpoint, _vehicle.global_position, checkpoint_count))
+	for rival in _rivals:
+		var car := rival["car"] as TopDownCar
+		if not is_instance_valid(car):
+			continue
+		var progress := rival["progress"] as LapProgressTracker
+		entries.append(_race_entry(int(rival["index"]), progress.lap_count, progress.next_checkpoint, car.global_position, checkpoint_count))
+	return entries
+
+
+func _race_entry(index: int, laps: int, next_checkpoint: int, position: Vector2, checkpoint_count: int) -> Dictionary:
+	var gate: Transform2D = _track_definition.checkpoints[next_checkpoint]
+	return {
+		"index": index,
+		"laps": laps,
+		"next_checkpoint": next_checkpoint,
+		"checkpoints_passed": posmod(next_checkpoint - 1, checkpoint_count),
+		"next_checkpoint_distance": position.distance_to(gate.origin),
+	}
+
+
+func get_race_order() -> Array[int]:
+	return _rank_entries(get_race_entries())
+
+
+## Rank by laps completed, then checkpoints passed this lap, then progress toward the next gate,
+## then car index. The index term is the tie-break: it depends on identity, never on the order
+## the entries happen to be listed in, so the first tick — where a whole row of the grid is
+## exactly equidistant from gate 1 — resolves identically on every run.
+func _rank_entries(entries: Array[Dictionary]) -> Array[int]:
+	var sorted_entries := entries.duplicate()
+	sorted_entries.sort_custom(_is_ahead_of)
+	var order: Array[int] = []
+	for entry in sorted_entries:
+		order.append(int(entry["index"]))
+	return order
+
+
+func _is_ahead_of(a: Dictionary, b: Dictionary) -> bool:
+	if int(a["laps"]) != int(b["laps"]):
+		return int(a["laps"]) > int(b["laps"])
+	if int(a["checkpoints_passed"]) != int(b["checkpoints_passed"]):
+		return int(a["checkpoints_passed"]) > int(b["checkpoints_passed"])
+	if float(a["next_checkpoint_distance"]) != float(b["next_checkpoint_distance"]):
+		return float(a["next_checkpoint_distance"]) < float(b["next_checkpoint_distance"])
+	return int(a["index"]) < int(b["index"])
+
+
+func get_player_position() -> int:
+	return get_race_order().find(0) + 1
+
+
 func _install_scene(mount: Node2D, scene_root: Node2D) -> void:
 	for child in mount.get_children():
 		child.free()
@@ -200,6 +363,7 @@ func _refresh_hud() -> void:
 		return
 	_seed_label.text = "SEED  %d" % _current_seed
 	_lap_label.text = "LAP  %d" % (_trial.lap_count + 1)
+	_position_label.text = "POS  %d/%d" % [get_player_position(), get_field_size()]
 	_time_label.text = "TIME  %s" % _format_time(_trial.current_lap_time)
 
 

@@ -89,6 +89,13 @@ theme_override_colors/font_color = Color(0.968627, 0.929412, 0.803922, 1)
 theme_override_font_sizes/font_size = 20
 text = "LAP  1"
 
+[node name="PosLabel" type="Label" parent="SessionUI/SessionHud/HudMargin/HudRow"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_override_colors/font_color = Color(0.968627, 0.929412, 0.803922, 1)
+theme_override_font_sizes/font_size = 20
+text = "POS  1/1"
+
 [node name="TimeLabel" type="Label" parent="SessionUI/SessionHud/HudMargin/HudRow"]
 unique_name_in_owner = true
 layout_mode = 2
