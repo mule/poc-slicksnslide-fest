@@ -212,13 +212,14 @@ would read a flat world if the order changed.
 
 Measured on seed 0 with the track's real trees and rocks in the space, twenty cars spread around the
 lap and across the road's width, a 400 px look-ahead. **These are wall-clock numbers and they move
-with machine load — read them as a band, not a constant.** The low end of each range was measured on
-an idle machine (load 1.3), the high end under a concurrent build (load 2.2–3.2):
+with machine load — read them as a band, not a constant.** Each range spans the extremes actually
+observed across every measured run, from an idle machine (load 1.3) to one under a concurrent build
+(load 3.2):
 
 | Case | Per car | Twenty cars | Of a 16.6 ms frame |
 | --- | --- | --- | --- |
-| On the racing line (ray runs full length, hits nothing) | 112–150 µs | 2.2–3.0 ms | 14–18% |
-| Parked in front of a solid (ray hits) | 74–110 µs | 1.5–2.2 ms | 9–13% |
+| On the racing line (ray runs full length, hits nothing) | 104–161 µs | 2.1–3.2 ms | 12–19% |
+| Parked in front of a solid (ray hits) | 74–113 µs | 1.5–2.3 ms | 9–14% |
 
 The racing-line figure is the one to quote: a ray that hits stops early, so the miss is the worst
 case. It is also the normal case, because the nearest solid on a generated circuit stands 375 px
@@ -230,7 +231,7 @@ twice. The look-ahead curve, printed by the suite, across the same band:
 
 | Look-ahead | Per car | Twenty cars |
 | --- | --- | --- |
-| 200 px | 92–117 µs | 1.8–2.3 ms |
+| 200 px | 92–124 µs | 1.8–2.5 ms |
 | 400 px | 98–147 µs | 2.0–2.9 ms |
 | 600 px | 112–201 µs | 2.2–4.0 ms |
 
