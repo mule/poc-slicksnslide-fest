@@ -523,15 +523,25 @@ func _on_ramp(definition: TrackDefinition, position: Vector2) -> bool:
 
 
 ## A seed restart must replace the track, its terrain shading and its objects, retaining no node
-## of the previous seed, and the new shading must be the new seed's.
+## of the previous seed, and the new shading must be the new seed's. Task #60 runs the same
+## teardown against a full field: twenty-one cars must all go with the restart.
 func _verify_seed_restart(main_scene: PackedScene) -> bool:
 	var context := await _open_session(main_scene, CAPTURE_SEEDS[0])
 	var session: MainSession = context["session"]
-	var first_runtime: TrackRuntime = context["runtime"]
+	var field_settings := SessionSettings.new()
+	field_settings.opponent_count = 20
+	session.session_settings = field_settings
+	session.restart_with_seed(CAPTURE_SEEDS[0])
+	for frame in range(WARMUP_FRAMES):
+		await process_frame
+	var first_runtime: TrackRuntime = session.get_node("World/TrackMount/GeneratedTrack")
 	var first_shading := first_runtime.get_node("TerrainShading") as TerrainShading
 	var first_ground := first_shading.get_node("Ground")
 	var first_objects := first_runtime.get_node("OfftrackObjects")
-	var first_car: TopDownCar = context["car"]
+	var first_cars: Array = []
+	for child in session.get_node("World/VehicleMount").get_children():
+		first_cars.append(child)
+	_check(first_cars.size() == 21, "the twenty-opponent field restart mounts twenty-one cars (%d)" % first_cars.size())
 	var mount := session.get_node("World/TrackMount")
 	var first_fingerprint: String = first_runtime.definition.terrain_fingerprint
 	session.restart_with_seed(RESTART_SEED)
@@ -539,9 +549,13 @@ func _verify_seed_restart(main_scene: PackedScene) -> bool:
 		await process_frame
 	var second_runtime := session.get_node("World/TrackMount/GeneratedTrack") as TrackRuntime
 	var second_shading := second_runtime.get_node("TerrainShading") as TerrainShading
+	var freed_cars := 0
+	for first_car in first_cars:
+		freed_cars += int(not is_instance_valid(first_car))
 	_check(mount.get_child_count() == 1, "after a seed restart the track mount holds exactly one track (%d)" % mount.get_child_count())
-	_check(session.get_node("World/VehicleMount").get_child_count() == 1, "after a seed restart the vehicle mount holds exactly one car")
-	_check(not is_instance_valid(first_runtime) and not is_instance_valid(first_shading) and not is_instance_valid(first_ground) and not is_instance_valid(first_objects) and not is_instance_valid(first_car), "the previous seed's track, terrain shading, ground grid, objects and car are all freed")
+	_check(session.get_node("World/VehicleMount").get_child_count() == 21, "after a seed restart the vehicle mount holds the fresh field of twenty-one cars")
+	_check(freed_cars == first_cars.size(), "every one of the previous field's twenty-one cars is freed (%d of %d)" % [freed_cars, first_cars.size()])
+	_check(not is_instance_valid(first_runtime) and not is_instance_valid(first_shading) and not is_instance_valid(first_ground) and not is_instance_valid(first_objects), "the previous seed's track, terrain shading, ground grid and objects are all freed")
 	_check(second_runtime != first_runtime and second_runtime.definition.seed == RESTART_SEED, "the new track is seed %d's" % RESTART_SEED)
 	_check(second_runtime.definition.terrain_fingerprint != first_fingerprint, "the new track carries seed %d's own terrain fingerprint" % RESTART_SEED)
 	_check(second_shading.ground_sample_count() == TerrainShading.ground_columns(second_runtime.definition.play_area) * TerrainShading.ground_rows(second_runtime.definition.play_area), "the new ground grid covers the new play area (%d vertices)" % second_shading.ground_sample_count())

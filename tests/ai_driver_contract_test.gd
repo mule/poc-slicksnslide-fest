@@ -194,10 +194,18 @@ func _verify_session() -> bool:
 	session.session_settings.opponent_count = 3
 	root.add_child(session)
 	_check(session.get_session_snapshot().get("opponent_count", -1) == 3, "the session's first restart reads the count and publishes it in the snapshot")
+	_check(session.get_node("World/VehicleMount").get_child_count() == 4, "the first restart spawns the player plus three rivals")
 	session.session_settings.opponent_count = 20
 	session.restart_with_seed(7)
 	_check(session.get_session_snapshot().get("opponent_count", -1) == 20, "restart reads updated opponent count")
-	_check(session.get_node("World/VehicleMount").get_child_count() == 1, "count is stored only until task 60 spawns the field")
+	_check(session.get_node("World/VehicleMount").get_child_count() == 21, "count 20 spawns the player plus twenty rivals")
+	# The camera rule through the session's own spawn path now, not the hand-built fixture above:
+	# the player's is the only eligible camera in a full field.
+	var rival_cameras_off := 0
+	for child in session.get_node("World/VehicleMount").get_children():
+		var car := child as TopDownCar
+		rival_cameras_off += int(car != null and child.name != "PlayerCar" and not car.camera_enabled)
+	_check(rival_cameras_off == 20, "none of the twenty rivals the session spawns takes a camera")
 	_check(root.get_camera_2d() == session.get_node("World/VehicleMount/PlayerCar/FollowCamera"), "session explicitly grants the player its camera")
 	session.free()
 	return true

@@ -1,10 +1,11 @@
 # AI opponents
 
-Epic #55. This document covers what task #56 landed: the seam an AI drives through, the identity
-that makes each driver reproducible, and the camera rule that lets more than one car exist. Sensing
-(#57), judgement (#58), mistakes (#59), the field (#60) and scaling (#61) extend it.
+Epic #55. This document covers what tasks #56 and #60 landed: the seam an AI drives through, the
+identity that makes each driver reproducible, the camera rule that lets more than one car exist,
+the field of up to twenty rivals, per-car lap progress, and the standings. Sensing (#57),
+judgement (#58) and mistakes (#59) extend it.
 
-Nothing here makes a car drive itself. It makes a field of cars possible.
+Nothing here makes a car drive itself. It makes a field of cars possible — and ranks it.
 
 ## The seam
 
@@ -91,3 +92,64 @@ bit-for-bit what they were before the flag existed, pinned at three ticks of a 6
 in its setter. `MainSession.restart_with_seed()` reads it into `_opponent_count` and republishes it
 through `get_session_snapshot()`. As of task #56 it is **stored and observable, not wired** — no car
 is spawned from it. Task #60 spawns the field.
+
+## The field (#60)
+
+`MainSession` owns the player's car plus a list of rivals. Each rival is the same
+`top_down_car.tscn` with the same `VehicleTuning` as the player, differing only in its input
+source: an `IdleDriver` until #58's reactive driving replaces it. Tuning and the grid transform
+are assigned **before** the car enters the tree — a rival without tuning is the exact shape the
+camera work above guards against, and the guards are deliberately not load-bearing here. Rivals
+never touch `camera_enabled`; the scene default of false holds. All cars share the runtime's one
+height query; the field shares one stateless `TrackSurfaceMap` (`sample_at` only reads), while the
+player keeps its own instance exactly as before the field existed. At `opponent_count == 0` no
+rival code runs at all — the session is byte-for-byte the single-car session it was.
+
+Every car gets its own `CheckpointCrossingDetector` and its own `LapProgressTracker`. The player's
+tracker lives inside its `TimeTrialState` as before; the singularity that had to go was the
+session owning one of each, not the classes. A player reset skips one tick of rival sampling too,
+mirroring for the field the resume-next-tick rule the player's detector already follows.
+
+### The grid
+
+Slot 0 is the player's and is `TrackDefinition.spawn_transform` itself, so the player's pose never
+moves with the opponent count and every lap time this repo has recorded stays comparable. Rivals
+take slots 1..opponent_count in two columns behind the start line: slot *s* sits in row
+`(s + 1) / 2` at `WorldScale.metres(8.8)` row spacing, odd slots one side of the centreline, even
+slots the other, each at a quarter of the track's width out — on the road by construction however
+narrow the generated track. Rows are anchored to the centreline arc behind the start, so the grid
+follows the final curve of the lap rather than ploughing a straight line through it, and each car
+faces its local direction of travel. The layout is a pure function of the definition and the slot
+number: no slot depends on the count, and the same seed always places the same cars in the same
+slots. A car starting behind the line crosses the start/finish gate forward on launch; the
+checkpoint rules already ignore it (it is not the next gate), which is exactly the standing start.
+
+Cars keep collision layer 1 and mask 3, shared with trees and the world boundary, so car-to-car
+contact works without a layer change — confirmed against the physics server in
+`tests/issue_60_field_test.gd`, not assumed. No layer change was needed.
+
+### Standings
+
+Position is derived, never stored: `get_race_order()` ranks by **laps completed**, then
+**checkpoints passed this lap**, then **progress toward the next gate** (distance to it), and
+finally by **car index**. The index term is the tie-break, and it is the one decision in the
+ranking that had to be invented: on the first tick rows of the grid sit at identical progress, and
+an order-dependent tie-break would silently differ between runs. Identity cannot be reordered, so
+ties resolve identically everywhere; the player, as index 0, wins them — pole keeps pole. The HUD
+shows `POS n/size` and the snapshot publishes `player_position` and `field_size`; a full timing
+table was considered for this epic and deliberately left out.
+
+`tests/issue_60_field_test.gd` drives a scripted scenario through the session's own crossing
+sampling and asserts the exact order, including a car a lap ahead sitting at an earlier checkpoint.
+`-- --break-standings-order` re-ranks the session's entries without the lap term and must fail on
+exactly that case; deleting the lap comparison from `MainSession._is_ahead_of` fails the same
+assertion in a normal run.
+
+### What waits for #61
+
+Deterministic final standings over a race and a full-field race need #59's real drivers, as does
+the assertion that car-to-car contact does not desync a deterministic run. The idle field cannot
+race; it can only be spawned, laid out, torn down and ranked. One known property of that idle
+field, not a defect: an undriven car creeps downhill, because the integrator applies gravity along
+the ground gradient with no throttle. The moment drivers steer (#58), this is their problem, and
+the standings code does not care either way.

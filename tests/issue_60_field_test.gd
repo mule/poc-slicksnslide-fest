@@ -26,7 +26,6 @@ const TICK := 1.0 / 60.0
 ## Parking offsets for the standings scenario, in metres through the scale contract.
 const NEAR_GATE_OFFSET_M := 8.0
 const FAR_GATE_OFFSET_M := 48.0
-const JUST_PAST_GATE_OFFSET_M := 0.5
 
 var _failures: Array[String] = []
 var _checks := 0
