@@ -27,15 +27,20 @@ extends SceneTree
 ##   carries a guard that the start really was what it claims to be.
 ## - **Determinism.** Two cars started from the same pose on the same seed produce identical control
 ##   streams, compared tick for tick over a whole lap. A third start 1 px to the side must produce a
-##   different stream, which is what shows the comparison can see a difference at all.
-## - **Stopping from speed.** A rival parked on the start straight: the car closes on it at racing
-##   speed and comes to rest behind it without touching it. ADDED AFTER the lap test was found not to
-##   fail under --break-brake-distance (see the report and _verify_it_stops_for_a_parked_rival).
+##   different stream, which is what shows the comparison can see a difference at all. The streams
+##   are kept as 64-bit floats, the width VehicleInputState holds them at, so "identical" is literal.
+## - **Stopping for a parked rival.** A rival parked on a ramp-free run: the car closes on it at
+##   racing speed and comes to rest behind it without touching it. A test of the rival rule, added
+##   after the lap test was found not to fail under --break-brake-distance; it is not a guard for
+##   speed-dependent braking (see _verify_it_stops_for_a_parked_rival).
+## - **Speed-dependent braking** is guarded by one thing in this file: the unit pair in
+##   _verify_braking_distance_grows_with_speed, which fails for any constant braking distance. No lap,
+##   recovery, stop or field check can tell the production term from a well-chosen constant.
 ## - **A field of twenty**, every car a ReactiveDriver on the session's own grid, on FIELD_SEED: every
 ##   car completes a lap, none meets the stuck rule or leaves the play area, and none is in contact
 ##   with another car for more than MAX_CAR_CONTACT_FRACTION of its lap. A baseline for #61, which
 ##   owns the field. The contact bound was set after an exploratory field showed 20-40% contact
-##   before the rival rule held its following gap and at most 3.2% after; see the report.
+##   before the rival rule held its following gap and at most 3.3% after; see the report.
 ## - **Senses only.** Structurally: every field the driver declares is plain data, and the only
 ##   object any of its methods accepts is the DriverSenses handed to perceive().
 ##
@@ -384,6 +389,13 @@ func _verify_steering_has_two_terms() -> bool:
 ## with nothing in the way (the tightest corner it expects may start just past its 600 px horizon), so
 ## a faster "fast" case would pass with the obstacle rule deleted. The straight-road case at the same
 ## speed is what shows the obstacle, and nothing else, is the reason.
+##
+## This pair is the suite's only guard for speed-dependent braking, and it fails for EVERY constant:
+## 250 px of room separates its two speeds, so a constant of 250 px or more brakes the slow case and
+## one under 250 px lets the fast case drive on. Nothing that drives -- laps, recoveries, the parked
+## rival, the field -- tells the production term from a well-chosen constant on this generator's
+## circuits, because the driver's beliefs are pessimistic: it believes a stop from 437 px/s takes
+## 702 px, and the car, with drag, needs about 380-390.
 func _verify_braking_distance_grows_with_speed() -> bool:
 	var obstacle_at := 300.0
 	var clear_road := _one_tick(_straight_road_senses(400.0))
@@ -603,7 +615,7 @@ func _drive(definition: TrackDefinition, driver: ReactiveDriver, pose: Transform
 	detector.reset(car.global_position)
 	var tracker := LapProgressTracker.new(definition.checkpoints.size())
 	var record := {
-		"completed": false, "ticks": 0, "controls": PackedFloat32Array(), "checkpoints": 0,
+		"completed": false, "ticks": 0, "controls": PackedFloat64Array(), "checkpoints": 0,
 		"off_road_ticks": 0, "outside_ticks": 0, "max_from_centre": 0.0, "longest_slow": 0,
 		"top_speed": 0.0, "contact_ticks": 0, "flights": 0, "flights_lifted": 0, "landings_off_road": 0,
 		"forward_crossings": 0, "last_crossing": -1, "first_obstacle_distance": INF,
@@ -618,7 +630,7 @@ func _drive(definition: TrackDefinition, driver: ReactiveDriver, pose: Transform
 			record.first_obstacle_distance = senses.obstacle_distance
 		driver.perceive(senses)
 		var controls := driver.drive(TICK)
-		record.controls.append_array(PackedFloat32Array([controls.steer, controls.throttle, controls.brake, controls.handbrake]))
+		record.controls.append_array(PackedFloat64Array([controls.steer, controls.throttle, controls.brake, controls.handbrake]))
 		car.set_input_state(controls)
 		throttle_before_step = controls.throttle
 		if _trace:
@@ -697,13 +709,18 @@ func _verify_recovery(seed: int) -> bool:
 
 	var wrong_way := await _drive(definition, _make_driver(seed), _pose(here, -along), SCENARIO_TICK_BUDGET, "scenario")
 	_report_scenario(seed, "wrong way", wrong_way)
-	_check(wrong_way.turn_arounds >= 1, "seed %d wrong way: the start really faced back down the road, and the driver turned round (%d)" % [seed, wrong_way.turn_arounds])
+	# Guards on the START, not the recovery: both counters increment on entering their state, and these
+	# poses enter it on tick 0. _check_recovered is what proves the car got out.
+	_check(wrong_way.turn_arounds >= 1, "seed %d wrong way: the start really faced back down the road (turn-arounds counted: %d)" % [seed, wrong_way.turn_arounds])
 	_check_recovered(seed, "wrong way", wrong_way)
 
 	var beyond: float = definition.track_width * 0.5 + WorldScale.metres(OFF_ROAD_START_BEYOND_EDGE_M)
 	var off_road := await _drive(definition, _make_driver(seed), _pose(here + right * beyond, right), SCENARIO_TICK_BUDGET, "scenario")
 	_report_scenario(seed, "off road", off_road)
-	_check(off_road.road_returns >= 1, "seed %d off road: the start really was off the road, and the driver came back to it (%d)" % [seed, off_road.road_returns])
+	# Facing straight away from the road is 90 degrees off its direction, which reads as wrong-way on
+	# most seeds (5 of the 6 recovery seeds count a turn-around here), so this start mostly exercises
+	# the turn-around branch from off the road rather than the offset term's return alone.
+	_check(off_road.road_returns >= 1, "seed %d off road: the start really was off the road (road returns counted: %d)" % [seed, off_road.road_returns])
 	_check_recovered(seed, "off road", off_road)
 
 	var rock := _pinned_against_a_rock(definition)
@@ -713,9 +730,10 @@ func _verify_recovery(seed: int) -> bool:
 		_report_scenario(seed, "pinned on %s" % rock.id, pinned)
 		# The scenario's own guard: the rock really is right in front of the nose on the first tick,
 		# where the placement put it -- half the car's length plus the gap from the ray's origin at the
-		# car's centre. Which way the driver then gets out is its business: on most seeds the stall
-		# detector reverses it, and on some the obstacle rule's brake, held at a standstill, backs it
-		# off first (TopDownCar turns a held brake at rest into reverse). Both are counted and printed.
+		# car's centre. It is the stall reversal that gets the car out: with it removed, every pinned
+		# start sits there until the stuck rule trips (review of #58). An earlier version of this comment
+		# said the obstacle brake's own reverse got two seeds out; those two were the ghost rocks on
+		# raised ground described at _pinned_against_a_rock, which the ray never saw at all.
 		var expected_gap := CAR_HALF_LENGTH_PX + PINNED_GAP_PX
 		_check(absf(pinned.first_obstacle_distance - expected_gap) < 1.0, "seed %d pinned: the car starts with the rock %.1f px along its nose, where it was placed (expected %.1f)" % [seed, pinned.first_obstacle_distance, expected_gap])
 		_check_recovered(seed, "pinned", pinned)
@@ -800,13 +818,14 @@ func _pose(position: Vector2, forward: Vector2) -> Transform2D:
 ## A rival parked on the start straight, PARKED_RIVAL_DISTANCE ahead, and the reactive car starting
 ## from the grid behind it. It has to reach racing speed and then stop without touching the rival.
 ##
-## **Added after the fact, and said so.** --break-brake-distance still completed every lap: on this
-## generator's circuits a corner slides into the horizon and tightens gradually, so the braking the
-## corner rule asks for never exceeded ~185 px, and the mutation's constant (389 px) is longer than
-## that. The lap test cannot see the difference. This check is the case the issue's own sentence is
-## about -- "braking has to begin far enough out that the car can actually stop" -- and it is where a
-## stopping distance that does not grow with speed runs out: from 437 px/s the car needs about 495 px
-## of real braking, and a constant starts braking 389 + 75 px out.
+## **What this tests: the rival rule.** Remove _rival_margin and the car hits the parked rival at
+## 411-437 px/s on every seed. It is NOT a guard for speed-dependent braking, though it was added after
+## --break-brake-distance was found to complete every lap and was first described as one. It fails the
+## mutation's 389 px constant only because 389 px is close to the car's real stop from its capped
+## 437 px/s -- about 380-390 px with rolling and aerodynamic drag added to the brakes, where the driver
+## believes 702 px. The review of #58 found every constant from 450 px up passes this check on all six
+## seeds it tried. The suite's only guard for speed-dependence is the pair in
+## _verify_braking_distance_grows_with_speed, which fails for any constant at all.
 ##
 ## The rival is frozen, so it is a still car and not a car creeping downhill. The approach must be
 ## clear of ramps -- a car in the air cannot brake -- and ramps favour the start straight, so the car
@@ -1058,9 +1077,9 @@ func _verify_control_streams_repeat() -> bool:
 	var second := await _drive(definition, _make_driver(DETERMINISM_SEED), pose, LAP_TICK_BUDGET, "lap")
 	var nudged_pose := Transform2D(pose.get_rotation(), pose.origin + pose.x.normalized())
 	var nudged := await _drive(definition, _make_driver(DETERMINISM_SEED), nudged_pose, 600, "partial")
-	var first_stream: PackedFloat32Array = first.controls
-	var second_stream: PackedFloat32Array = second.controls
-	var nudged_stream: PackedFloat32Array = nudged.controls
+	var first_stream: PackedFloat64Array = first.controls
+	var second_stream: PackedFloat64Array = second.controls
+	var nudged_stream: PackedFloat64Array = nudged.controls
 	var divergence := _first_difference(first_stream, second_stream)
 	var nudged_divergence := _first_difference(first_stream.slice(0, nudged_stream.size()), nudged_stream)
 	print("determinism seed=%d ticks=%d and %d, first difference at value %d; nudged 1 px: first difference at value %d (tick %d)" % [
@@ -1073,7 +1092,7 @@ func _verify_control_streams_repeat() -> bool:
 	return true
 
 
-func _first_difference(left: PackedFloat32Array, right: PackedFloat32Array) -> int:
+func _first_difference(left: PackedFloat64Array, right: PackedFloat64Array) -> int:
 	for index in range(mini(left.size(), right.size())):
 		if left[index] != right[index]:
 			return index
