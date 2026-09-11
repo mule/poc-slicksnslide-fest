@@ -33,8 +33,44 @@ extends AiDriver
 ## A driver holds no car and no tuning -- the seam refuses both -- so what it knows about its own car
 ## is written below as beliefs, in metres. They are deliberately a little pessimistic against
 ## data/default_vehicle_tuning.tres: a driver that thinks its car stops harder than it does runs off.
+##
+## ## Skill (#59)
+##
+## One number per car in [0, 1), drawn from its own seed stream (`AiDriver.SKILL_STREAM`). It turns
+## three dials together: how far ahead the driver senses, how hard it will corner, and how often it
+## errs. At 1.0 every dial is where #58 left it, so a driver pinned to 1.0 with mistakes off IS #58's
+## driver, control for control; lower skill only ever looks less far and corners more gently, both of
+## which make it slower and not less safe. `set_skill` pins it.
+##
+## ## Mistakes (#59)
+##
+## A deliberate mistake and a bug look identical from outside, so no mistake here is emergent. Each is
+##
+## - **seeded**: mistake n's kind, size and timing gap are a pure function of the car's mistake stream
+##   (`AiDriver.MISTAKE_STREAM`) and n -- see `mistake_plan`. No global RNG, clock or frame count;
+## - **typed and logged**: `active_mistake` says what it is doing this tick, and `mistake_log` records
+##   every mistake committed, the tick it began and the tick it ended;
+## - **suppressible**: `mistakes_enabled` is false unless someone sets it. Off, nothing below runs:
+##   no draw is made, no clock advances and no control is touched.
+##
+## Three kinds, each small and bounded to stay survivable:
+##
+## - **LATE_BRAKE**: where a corner asks for braking, the corner's brake is withheld for `amount`
+##   metres of travel. Only the corner's: never the brake for a rival, an obstacle, a road edge or the
+##   limit of vision.
+## - **WIDE_LINE**: through a bend, the steering aims `amount` metres to the outside of the centreline.
+##   The aim is capped WIDE_LINE_EDGE_KEEP_M from the edge, and -- because the car overshoots its aim
+##   through a bend -- the mistake also ends the moment the car's own centre comes that close to
+##   either edge, and cannot begin there. The bound the car achieves is measured, not promised: see
+##   tests/skill_and_mistakes_test.gd.
+## - **NEEDLESS_LIFT**: on a clear straight at speed, the throttle comes off for `seconds`.
+##
+## A mistake is only begun while the car is racing cleanly -- on the road, aligned with it, at speed,
+## not recovering -- and the clock between mistakes only runs then. Leaving that state ends a mistake
+## at once, so none can compound a recovery.
 
 enum Mode { RACE, REVERSE }
+enum Mistake { NONE, LATE_BRAKE, WIDE_LINE, NEEDLESS_LIFT }
 
 ## m/s^2. The car brakes at 15.5 on dirt (brake_force / mass_kg).
 const BRAKE_DECELERATION_M := 12.0
@@ -116,6 +152,69 @@ const STALL_SECONDS := 0.5
 const REVERSE_SECONDS := 1.6
 const RECOVERY_GRACE_SECONDS := 1.0
 
+## Skill 0.0, the least skilled driver there is. Skill 1.0 is LOOK_AHEAD_M and
+## CORNERING_ACCELERATION_M above; between the two every dial moves linearly.
+const LOWEST_SKILL_LOOK_AHEAD_M := 36.0
+const LOWEST_SKILL_CORNERING_M := 12.0
+## Mean seconds of clean racing between one mistake ending and the next being chosen, at skill 0.0 and
+## at 1.0. The gap actually drawn is between half and one and a half times the mean.
+const LOWEST_SKILL_MISTAKE_GAP_S := 10.0
+const HIGHEST_SKILL_MISTAKE_GAP_S := 30.0
+
+## Racing cleanly, for the purpose of mistakes: at least this fast, as well as on the road, aligned
+## and not recovering.
+const MISTAKE_MIN_SPEED_M := 12.0
+## Seconds of clean racing an armed mistake waits for its moment before it lapses and the next is
+## drawn. Without it one late brake on a circuit whose corners never ask a slow driver to brake would
+## wait all race, and that driver would stop erring at all.
+const MISTAKE_PATIENCE_S := 15.0
+## LATE_BRAKE: metres travelled past the point the corner asked for braking before it brakes.
+const LATE_BRAKE_MIN_M := 4.0
+const LATE_BRAKE_MAX_M := 12.0
+## WIDE_LINE: metres outside the centreline, for how long, and the least bend it is taken on. The
+## keep is how near the edge the aim may be, and how near the car's centre may come before the
+## mistake lets go. It was 3 m, and that bounded only the aim: through a bend the car overshoots its
+## aim by about 3 m, and forced wide lines put the car's centre 0.6-1.7 px from the edge of the
+## narrowest roads. 6 m is the 3 m plus the overshoot.
+const WIDE_LINE_MIN_M := 2.0
+const WIDE_LINE_MAX_M := 5.0
+const WIDE_LINE_MIN_SECONDS := 1.5
+const WIDE_LINE_MAX_SECONDS := 3.0
+const WIDE_LINE_MIN_TURN := 0.15
+const WIDE_LINE_EDGE_KEEP_M := 6.0
+## NEEDLESS_LIFT: for how long, and the least speed it is done at.
+const NEEDLESS_LIFT_MIN_SECONDS := 0.4
+const NEEDLESS_LIFT_MAX_SECONDS := 1.2
+const NEEDLESS_LIFT_MIN_SPEED_M := 18.0
+
+## A draw from a stream: `DomainSeed` yields fifteen hex digits, so dividing by 16^15 gives [0, 1).
+const STREAM_RANGE := 1152921504606846976.0
+## The four draws each mistake takes from the stream, as `DomainSeed.child(stream, n, draw)`.
+const DRAW_GAP := 0
+const DRAW_KIND := 1
+const DRAW_AMOUNT := 2
+const DRAW_SECONDS := 3
+
+## Whether this driver makes deliberate mistakes. False unless someone sets it: a flawless driver is
+## the default everywhere that is not about mistakes.
+var mistakes_enabled: bool = false
+
+var skill: float:
+	get:
+		return _skill
+## The mistake being committed this tick, a Mistake. NONE whenever mistakes are off.
+var active_mistake: int:
+	get:
+		return _active if _mistakes_on() else Mistake.NONE
+## How many mistakes have been drawn from the stream so far, and how many of those lapsed without
+## finding a moment. Both stay 0 while mistakes are off.
+var mistakes_planned: int:
+	get:
+		return _planned
+var mistakes_lapsed: int:
+	get:
+		return _lapsed
+
 var mode: int:
 	get:
 		return _mode
@@ -172,6 +271,114 @@ var _obstacle_distance: float = 0.0
 var _local_velocity: Vector2 = Vector2.ZERO
 var _look_ahead: float = 0.0
 
+## Skill, and the two dials it sets. See `set_skill`.
+var _skill: float = 1.0
+var _look_ahead_m: float = LOOK_AHEAD_M
+var _cornering_m: float = CORNERING_ACCELERATION_M
+
+## Mistakes. `_tick` counts the ticks this driver has driven with senses: the "when" in the log.
+var _mistake_seed: int = 0
+var _tick: int = 0
+var _planned: int = 0
+var _lapsed: int = 0
+## The next mistake, drawn but not yet begun: the clean racing still to run before it is armed, and
+## once armed, how long it has waited for its moment.
+var _next_kind: int = Mistake.NONE
+var _next_amount: float = 0.0
+var _next_seconds: float = 0.0
+var _next_gap: float = 0.0
+var _armed: bool = false
+var _waited: float = 0.0
+## The mistake under way, how long it has run and how far the car has travelled in it.
+var _active: int = Mistake.NONE
+var _active_amount: float = 0.0
+var _active_seconds: float = 0.0
+var _active_time: float = 0.0
+var _active_distance: float = 0.0
+## One entry per mistake committed: n (its number in the plan), kind, tick, amount, seconds, and
+## until (the first tick it no longer acted on; -1 while it is under way).
+var _log: Array[Dictionary] = []
+
+
+func _identity_fixed() -> void:
+	_mistake_seed = _mistake_stream_seed()
+	set_skill(_skill_from_seed())
+
+
+## The car's mistake stream. `--break-mistake-seed` derives it without the car's index.
+func _mistake_stream_seed() -> int:
+	return _stream_seed(car_index, MISTAKE_STREAM)
+
+
+## Skill in [0, 1), from the car's skill stream. `--break-skill-spread` collapses it to a constant.
+func _skill_from_seed() -> float:
+	return float(_stream_seed(car_index, SKILL_STREAM)) / STREAM_RANGE
+
+
+## Pins the skill, clamped to [0, 1], and the dials it turns. Each dial is its skill-1.0 value less
+## the skill still missing times its span, so at exactly 1.0 it is the constant #58 was reviewed at,
+## with no arithmetic between them that could round.
+func set_skill(value: float) -> void:
+	_skill = clampf(value, 0.0, 1.0)
+	var missing := 1.0 - _skill
+	_look_ahead_m = LOOK_AHEAD_M - missing * (LOOK_AHEAD_M - LOWEST_SKILL_LOOK_AHEAD_M)
+	_cornering_m = CORNERING_ACCELERATION_M - missing * (CORNERING_ACCELERATION_M - LOWEST_SKILL_CORNERING_M)
+
+
+## m/s^2 of cornering this driver will ask for, at its skill.
+func cornering_belief_m() -> float:
+	return _cornering_m
+
+
+## Mean seconds of clean racing between mistakes, at this driver's skill.
+func mean_mistake_gap() -> float:
+	return HIGHEST_SKILL_MISTAKE_GAP_S - (1.0 - _skill) * (HIGHEST_SKILL_MISTAKE_GAP_S - LOWEST_SKILL_MISTAKE_GAP_S)
+
+
+## Mistake n as the stream decides it, before any road has had a say: its kind, its amount (metres
+## for LATE_BRAKE and WIDE_LINE, 0 for NEEDLESS_LIFT), its seconds (0 for LATE_BRAKE, which lasts
+## `amount` metres of travel), and the gap of clean racing before it is armed. Kind, amount and
+## seconds come from the stream alone; only the gap reads skill. Pure: asking changes nothing.
+func mistake_plan(n: int) -> Dictionary:
+	var kind: int = Mistake.LATE_BRAKE + mini(int(_draw(n, DRAW_KIND) * 3.0), 2)
+	var amount_draw := _draw(n, DRAW_AMOUNT)
+	var seconds_draw := _draw(n, DRAW_SECONDS)
+	var amount := 0.0
+	var seconds := 0.0
+	match kind:
+		Mistake.LATE_BRAKE:
+			amount = lerpf(LATE_BRAKE_MIN_M, LATE_BRAKE_MAX_M, amount_draw)
+		Mistake.WIDE_LINE:
+			amount = lerpf(WIDE_LINE_MIN_M, WIDE_LINE_MAX_M, amount_draw)
+			seconds = lerpf(WIDE_LINE_MIN_SECONDS, WIDE_LINE_MAX_SECONDS, seconds_draw)
+		Mistake.NEEDLESS_LIFT:
+			seconds = lerpf(NEEDLESS_LIFT_MIN_SECONDS, NEEDLESS_LIFT_MAX_SECONDS, seconds_draw)
+	return {"kind": kind, "amount": amount, "seconds": seconds, "gap": mean_mistake_gap() * (0.5 + _draw(n, DRAW_GAP))}
+
+
+## One draw, in [0, 1), from the car's mistake stream: draw `draw` of mistake `n`.
+func _draw(n: int, draw: int) -> float:
+	return float(DomainSeed.child(_mistake_seed, n, draw)) / STREAM_RANGE
+
+
+## Every mistake committed so far, oldest first, as copies.
+func mistake_log() -> Array[Dictionary]:
+	var copy: Array[Dictionary] = []
+	for entry in _log:
+		copy.append(entry.duplicate())
+	return copy
+
+
+static func mistake_name(kind: int) -> String:
+	match kind:
+		Mistake.LATE_BRAKE:
+			return "late brake"
+		Mistake.WIDE_LINE:
+			return "wide line"
+		Mistake.NEEDLESS_LIFT:
+			return "needless lift"
+	return "none"
+
 
 func perceive(senses: DriverSenses) -> void:
 	_has_senses = true
@@ -198,7 +405,7 @@ func perceive(senses: DriverSenses) -> void:
 func sensing_horizon() -> float:
 	if _has_senses and not _road_found:
 		return WorldScale.metres(LOST_LOOK_AHEAD_M)
-	return WorldScale.metres(LOOK_AHEAD_M)
+	return WorldScale.metres(_look_ahead_m)
 
 
 func drive(delta: float) -> VehicleInputState:
@@ -208,6 +415,12 @@ func drive(delta: float) -> VehicleInputState:
 	var speed := -_local_velocity.y
 	_count_episodes()
 	_watch_the_ground_ahead(delta, speed)
+	if _mistakes_on():
+		_decide_mistakes(delta, speed)
+	elif _active != Mistake.NONE:
+		# Switched off mid-mistake: it ends here, logged, rather than waiting, stale, to resume.
+		_end_mistake()
+	_tick += 1
 	if _mode == Mode.REVERSE:
 		_mode_time += delta
 		if _mode_time < REVERSE_SECONDS:
@@ -235,7 +448,10 @@ func _steer_toward_road(speed: float) -> float:
 			_turn_around_direction = -signf(_heading_error) if _heading_error != 0.0 else 1.0
 		return _turn_around_direction * FULL_LOCK_YAW_RATE
 	_turn_around_direction = 0.0
-	var yaw := -_heading_term(_course_error(speed)) - _offset_term(_lateral_offset, speed)
+	var offset := _lateral_offset
+	if _committing(Mistake.WIDE_LINE):
+		offset -= _wide_line_target()
+	var yaw := -_heading_term(_course_error(speed)) - _offset_term(offset, speed)
 	return yaw + CURVE_FEEDFORWARD * _road_turn_rate(speed)
 
 
@@ -319,10 +535,10 @@ func _braking_margin(distance: float, speed: float, required: float) -> float:
 func _pedals(speed: float) -> Vector2:
 	var margin := INF
 	var forward_speed := maxf(speed, 0.0)
-	var tight_corner_speed := sqrt(WorldScale.metres(CORNERING_ACCELERATION_M) * WorldScale.metres(TIGHTEST_CORNER_RADIUS_M))
-	# What it cannot see: the tightest corner it expects may start just past the horizon.
-	margin = minf(margin, _braking_margin(_look_ahead - WorldScale.metres(VISIBILITY_MARGIN_M), forward_speed, tight_corner_speed))
-	margin = minf(margin, _corner_margin(forward_speed))
+	margin = minf(margin, _visibility_margin(forward_speed))
+	# A late brake withholds the corner's brake, and only the corner's, for its metres.
+	if not _committing(Mistake.LATE_BRAKE):
+		margin = minf(margin, _corner_margin(forward_speed))
 	margin = minf(margin, _edge_margin(forward_speed))
 	margin = minf(margin, _rival_margin())
 	if _obstacle_ahead:
@@ -340,7 +556,15 @@ func _pedals(speed: float) -> Vector2:
 
 	if _ground_falling_away:
 		throttle = 0.0
+	if _committing(Mistake.NEEDLESS_LIFT):
+		throttle = 0.0
 	return Vector2(throttle, brake)
+
+
+## What it cannot see: the tightest corner it expects may start just past the horizon.
+func _visibility_margin(speed: float) -> float:
+	var tight_corner_speed := sqrt(WorldScale.metres(_cornering_m) * WorldScale.metres(TIGHTEST_CORNER_RADIUS_M))
+	return _braking_margin(_look_ahead - WorldScale.metres(VISIBILITY_MARGIN_M), speed, tight_corner_speed)
 
 
 ## How fast the ground ahead is dropping away from the ground under the car, per pixel travelled:
@@ -370,7 +594,7 @@ func _corner_margin(speed: float) -> float:
 	if unexplained * _road_turn() < 0.0:
 		bend = clampf(2.0 * absf(unexplained) / turn, WorldScale.metres(MIN_BEND_M), _look_ahead)
 	var radius := maxf(bend / turn, WorldScale.metres(TIGHTEST_CORNER_RADIUS_M))
-	var corner_speed := sqrt(WorldScale.metres(CORNERING_ACCELERATION_M) * radius)
+	var corner_speed := sqrt(WorldScale.metres(_cornering_m) * radius)
 	return _braking_margin(_look_ahead - bend, speed, corner_speed)
 
 
@@ -470,3 +694,130 @@ func _count_episodes() -> void:
 	if wrong_way and not _was_wrong_way:
 		_turn_arounds += 1
 	_was_wrong_way = wrong_way
+
+
+## The mistake machinery, one tick. Only ever called with mistakes on.
+##
+## A mistake under way runs until it is over or the car stops racing cleanly. Otherwise the next one
+## is drawn from the stream, its gap of clean racing counts down, and once it has run out the mistake
+## waits, armed, for the road to offer it: a corner that asks for braking, a bend, a clear straight.
+## The stream decides what and how much; the road decides where. An armed mistake the road has not
+## offered a moment in MISTAKE_PATIENCE_S lapses, and the next is drawn.
+func _decide_mistakes(delta: float, speed: float) -> void:
+	var clean := _racing_cleanly(speed)
+	if _active != Mistake.NONE:
+		_active_time += delta
+		_active_distance += maxf(speed, 0.0) * delta
+		if clean and not _mistake_is_over():
+			return
+		_end_mistake()
+	if not clean:
+		return
+	if _next_kind == Mistake.NONE:
+		_plan_next_mistake()
+	if not _armed:
+		_next_gap -= delta
+		if _next_gap > 0.0:
+			return
+		_armed = true
+	if _mistake_has_its_moment(_next_kind, speed):
+		_commit_mistake()
+		return
+	_waited += delta
+	if _waited >= MISTAKE_PATIENCE_S:
+		_lapsed += 1
+		_next_kind = Mistake.NONE
+
+
+## On the road, aligned with it, at speed and not recovering. The only state a mistake is begun in,
+## the only state the gap between mistakes counts down in, and the state leaving which ends one.
+func _racing_cleanly(speed: float) -> bool:
+	return _mode == Mode.RACE and _grace <= 0.0 and _road_found and not _off_road and absf(_heading_error) <= MISALIGNED_ANGLE and speed >= WorldScale.metres(MISTAKE_MIN_SPEED_M)
+
+
+func _plan_next_mistake() -> void:
+	var plan := mistake_plan(_planned)
+	_planned += 1
+	_next_kind = plan.kind
+	_next_amount = plan.amount
+	_next_seconds = plan.seconds
+	_next_gap = plan.gap
+	_armed = false
+	_waited = 0.0
+
+
+## Where the road offers the armed mistake a place to happen.
+##
+## - A late brake needs a corner that is asking for braking now, and is what asks for it: a corner
+##   the limit of vision already brakes harder for would hide the mistake.
+## - A wide line needs a bend worth the name.
+## - A needless lift needs no reason to lift: a straight, at speed, nothing in the way.
+func _mistake_has_its_moment(kind: int, speed: float) -> bool:
+	var forward_speed := maxf(speed, 0.0)
+	var turn := absf(_road_turn())
+	match kind:
+		Mistake.LATE_BRAKE:
+			var corner := _corner_margin(forward_speed)
+			return corner < 0.0 and corner <= _visibility_margin(forward_speed)
+		Mistake.WIDE_LINE:
+			return turn >= WIDE_LINE_MIN_TURN and turn <= WRONG_WAY_ANGLE and _nearest_edge() >= WorldScale.metres(WIDE_LINE_EDGE_KEEP_M)
+		Mistake.NEEDLESS_LIFT:
+			return speed >= WorldScale.metres(NEEDLESS_LIFT_MIN_SPEED_M) and turn < MIN_ROAD_TURN and _rival_margin() == INF and not _obstacle_ahead
+	return false
+
+
+func _commit_mistake() -> void:
+	_active = _next_kind
+	_active_amount = _next_amount
+	_active_seconds = _next_seconds
+	_active_time = 0.0
+	_active_distance = 0.0
+	_log.append({"n": _planned - 1, "kind": _active, "tick": _tick, "amount": _active_amount, "seconds": _active_seconds, "until": -1})
+	_next_kind = Mistake.NONE
+	_armed = false
+
+
+## A late brake is over once the car has travelled its metres; the others last their seconds. A wide
+## line is also over the moment the car itself -- not the line it aims at -- comes within
+## WIDE_LINE_EDGE_KEEP_M of an edge: the aim is capped the same distance from the edge, but the car
+## overshoots its aim through a bend, and it is the car that must stay on the road.
+func _mistake_is_over() -> bool:
+	if _active == Mistake.LATE_BRAKE:
+		return _active_distance >= WorldScale.metres(_active_amount)
+	if _active == Mistake.WIDE_LINE and _nearest_edge() < WorldScale.metres(WIDE_LINE_EDGE_KEEP_M):
+		return true
+	return _active_time >= _active_seconds
+
+
+## How far the car's centre is from the nearer road edge.
+func _nearest_edge() -> float:
+	return minf(_left_margin, _right_margin)
+
+
+## `until` is the first tick the mistake no longer acts on: it acted on ticks [tick, until).
+func _end_mistake() -> void:
+	_log[_log.size() - 1]["until"] = _tick
+	_active = Mistake.NONE
+
+
+func _committing(kind: int) -> bool:
+	return _mistakes_on() and _active == kind
+
+
+## The one switch, read in the three places a mistake could show: deciding, acting, and the
+## `active_mistake` getter.
+func _mistakes_on() -> bool:
+	return mistakes_enabled
+
+
+## The offset a wide line aims at: its amount to the outside of the bend -- left of the centreline
+## when the road turns right -- but the AIM is never nearer the edge than WIDE_LINE_EDGE_KEEP_M. The
+## car itself is bounded separately, in `_mistake_is_over`. On a straight, or a reading from another
+## stretch of the lap, the centreline.
+func _wide_line_target() -> float:
+	var turn := _road_turn()
+	if absf(turn) < MIN_ROAD_TURN or absf(turn) > WRONG_WAY_ANGLE:
+		return 0.0
+	var half_width := 0.5 * (_left_margin + _right_margin)
+	var room := maxf(half_width - WorldScale.metres(WIDE_LINE_EDGE_KEEP_M), 0.0)
+	return -signf(turn) * minf(WorldScale.metres(_active_amount), room)

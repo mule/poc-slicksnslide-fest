@@ -225,14 +225,22 @@ func _run() -> void:
 	_finish()
 
 
+## Every driver in this file is pinned to skill 1.0, where each of #59's dials is the value this suite
+## was written and measured against: a 48 m look-ahead and 13.6 m/s^2 of cornering. Its own seed would
+## give each car a skill somewhere in [0, 1) and move every hand-worked number below. Mistakes are off,
+## as they are by default. tests/skill_and_mistakes_test.gd covers what skill and mistakes change.
 func _make_driver(seed: int, index: int = DRIVER_INDEX) -> ReactiveDriver:
+	var driver: ReactiveDriver
 	if _break_heading:
-		return BrokenHeadingDriver.new(seed, index)
-	if _break_braking:
-		return BrokenBrakingDriver.new(seed, index)
-	if _blind:
-		return BlindToTheRoadAheadDriver.new(seed, index)
-	return ReactiveDriver.new(seed, index)
+		driver = BrokenHeadingDriver.new(seed, index)
+	elif _break_braking:
+		driver = BrokenBrakingDriver.new(seed, index)
+	elif _blind:
+		driver = BlindToTheRoadAheadDriver.new(seed, index)
+	else:
+		driver = ReactiveDriver.new(seed, index)
+	driver.set_skill(1.0)
+	return driver
 
 
 # ---------------------------------------------------------------------------------------------
