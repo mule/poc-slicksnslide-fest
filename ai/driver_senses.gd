@@ -104,7 +104,9 @@ var has_rival_ahead: bool = false
 ## a following rule actually reads, and recomputing a length from the offset every tick is waste.
 var rival_offset: Vector2 = Vector2.ZERO
 var rival_distance: float = 0.0
-## That rival's velocity minus this car's, in the car's basis. Negative y is closing.
+## That rival's velocity minus this car's, in the car's basis. POSITIVE y is closing: the rival sits
+## at negative y, and the gap shrinks as the rival moves back toward this car. (Until #58 this line
+## said "negative y is closing", which is backwards; the value itself never changed.)
 var rival_relative_velocity: Vector2 = Vector2.ZERO
 
 ## The nearest solid thing a single ray found straight ahead, within the look-ahead distance:
