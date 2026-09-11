@@ -600,7 +600,7 @@ nowhere near the stuck rule. `set_skill` pins it, clamped to [0, 1].
 | Kind | What the driver does | Bounded by |
 | --- | --- | --- |
 | `LATE_BRAKE` | where a corner asks for braking, withholds **the corner's** brake for 4-12 m of travel | never the brake for a rival, an obstacle, an edge or the limit of vision |
-| `WIDE_LINE` | through a bend, aims 2-5 m to the outside of the centreline for 1.5-3 s | never nearer the edge than 3 m |
+| `WIDE_LINE` | through a bend, aims 2-5 m to the outside of the centreline for 1.5-3 s | the **aim** is capped 6 m from the edge, and the mistake cannot begin, and ends that tick, with the **car's** centre within 6 m of either edge. What the car keeps is measured, below |
 | `NEEDLESS_LIFT` | on a clear straight above 18 m/s, takes the throttle off for 0.4-1.2 s | throttle only: no brake, the same steering |
 
 Mistake n's kind, amount and seconds are drawn from the stream alone; its **gap** -- clean racing
@@ -620,19 +620,34 @@ never a frame count), `amount`, `seconds`, and `until`, the first tick it no lon
 rather than inferring it.
 
 **Suppressed.** `mistakes_enabled` is false unless set. Off, the driver makes no draw, runs no clock
-and touches no control: the gate is read in exactly two places, deciding and acting
-(`_mistakes_on()`). Whoever owns the field sets it on every driver or on none. No session setting
-reads it yet: `MainSession` still spawns `IdleDriver`s, and wiring drivers into the session is #61's.
+and touches no control: the gate (`_mistakes_on()`) is read in three places -- deciding, acting, and
+the `active_mistake` getter. Switched off in the middle of a mistake, the mistake ends that tick and is
+logged as ended; switched back on, it does not resume.
 
-**Survivable, and mostly cheap.** Forced to one kind at its largest, a second of clean racing apart,
-at skill 0.0 and 1.0, a car laps cleanly on every seed tried, with no recovery and no time off the
-road. What each costs is itself a finding. Committed at every chance, a second apart, at skill 1.0
-on seeds 0, 2, 5 and 8, against #58's laps: late brakes **save** 0.10-0.20 s, wide lines cost
-0.71-0.98 s, needless lifts 3.1-7.5 s. A late brake is free because of the slack #58's review
-measured (see "What braking distance does and does not carry"): the car stops in about half the
-distance its driver believes and corners on about 22 m/s² where the driver asks for 13.6, so a corner
-entered 12 m late is still well inside what the car can do. Skill only ever makes the beliefs more
-pessimistic, so it never eats into that slack.
+**There is no field-level switch yet.** The issue asks for a single switch that produces a field of
+flawless drivers. Per driver, the default gives that: a field built without touching the flag is
+flawless. But one switch for a whole field needs a field owner, and there is none: `MainSession`
+still spawns `IdleDriver`s and `session/` was outside #59. #61 must add the session setting, apply it
+to every driver it spawns, and assert over a whole field that it is total.
+
+**Survivable.** Forced to one kind at its largest, a second of clean racing apart, at skill 0.0 and
+1.0, a car laps cleanly on seeds 0, 2, 5, 6 and 8, with no recovery and its body never off the dirt.
+Seeds 0 and 6 are the two narrowest roads of the fifteen (205 px). The wide line's first bound, 3 m,
+held only for its aim: the car overshoots its aim by about 3 m through a bend, and forced wide lines
+put the car's centre 0.6-1.7 px from the edge there. The keep is now the 3 m plus that overshoot, and
+the suite asserts on every lap that the car's centre stays at least its own 15 px radius from the edge;
+forced at every chance, a second apart, the car's centre then keeps 28.4-60.2 px from the edge across
+those five seeds, thinnest on seed 6. A wide line so forced costs 0.25-0.76 s a lap at skill 1.0.
+Putting the keep back to 3 m fails the new assertion on seeds 0, 2 and 6 (0.6, 8.9 and 6.6 px).
+
+**A late brake is a mistake in the log, not in its effect.** It **saves** 0.10-0.20 s a lap
+at skill 1.0. The 4-12 m it withholds sit inside the slack #58's review measured (see "What braking
+distance does and does not carry"): the car stops in about half the distance its driver believes and
+corners on about 22 m/s² where the driver asks for 13.6. It is typed, logged and visible in the
+controls, but a viewer would not see it, and it makes the car faster. Making it bite means sizing it
+against the real slack -- far beyond 12 m, or shrinking the beliefs -- and that is a decision for the
+epic, not something #59 can make alone. Skill only ever makes the beliefs more pessimistic, so it
+never eats into that slack.
 
 ### Proof
 
@@ -643,8 +658,9 @@ pessimistic, so it never eats into that slack.
 - **Chosen.** For each kind, a driver primed to commit it is fed the same synthetic senses as a
   flawless driver. They agree tick for tick until the mistake is logged, then differ exactly as the
   kind says: the corner's brake withheld for 23 ticks (12 m at 400 px/s), the steering aimed at a line
-  exactly 22.5 px out on a road where the edge caps it there, the throttle off for 72 ticks. A rival
-  caught in the path is still braked for through a late brake.
+  exactly 25 px out on a road where the edge caps the aim there, the throttle off for 72 ticks. A rival
+  caught in the path is still braked for through a late brake; a wide line ends the tick the car's
+  centre comes within 6 m of an edge, and cannot begin inside it.
 - **The same car repeats its mistakes.** Seed 1's least skilled rival laps twice with mistakes on and
   logs the same sequence -- plan number, kind, tick, amount, seconds and end of every mistake -- and
   the same control stream, with guards that the log holds at least three mistakes of two kinds and
@@ -662,20 +678,46 @@ pessimistic, so it never eats into that slack.
   skill, differ by at least 5% in lap time; pinned 0.0, 0.5 and 1.0 lap in order, and 1.0 is #58's lap
   to the tick.
 - **The lowest skill finishes**: skill 0.0 with mistakes on laps all fifteen seeds cleanly.
-- **Every kind is survivable** (above), on seeds 0, 2, 5 and 8 -- two tuned, two held out, chosen
-  because they have corners a late brake can happen in.
+- **Every kind is survivable** (above), on seeds 0, 2, 5, 6 and 8 -- chosen because they have corners
+  a late brake can happen in, and including both of the narrowest roads. On every lap the suite
+  drives, the car's centre stays at least its 15 px radius inside the edge.
 - **A field** of twenty with derived skills and mistakes on laps whole, none stuck, none strayed.
 
 ### What it does not settle
 
-- **A field of twenty is not reproducible across process histories.** Run in a fresh process it is
-  identical run after run; run after other physics in the same process, the same seed and drivers lap
-  differently (6 of 20 cars after one other section, 13 after a whole suite). #58's driver at skill
-  1.0 with mistakes off does the same, 9 of 20, so it predates #59. Solo laps never differ: it is
-  car-to-car contact, whose resolution order the physics server's history decides, not anything a
-  driver holds. `skill_and_mistakes_test` runs its field before any other physics for that reason.
-  The epic's "the same seed and count reproduce the same race bit for bit" is therefore a claim about
-  a fresh server, and a restart within one session is exactly what it does not yet cover (#61).
+- **Which race a field of twenty drives depends on how and where it was spawned.** It predates #59:
+  #58's driver at skill 1.0 with mistakes off shows it too. Run in a fresh process, the suite's field
+  is identical run after run; spawned after other sections it was not, 6 of 20 cars differing after
+  one section and 13 after a whole suite. #59's first explanation, car-to-car contact order decided by
+  the server's history, was wrong. The #59 review measured the mechanism and demonstrated it bit for
+  bit:
+  - **The spawn phase.** What decides the race is whether a physics step runs between placing the cars
+    and their first sense. Integrating a body rebuilds its transform from its angle in 32-bit `real_t`,
+    which re-rounds the basis the grid built. At the first driving tick the two spawn phases agree on
+    every position, height and velocity, and differ only in some cars' `global_rotation`, in the last
+    digit. No car touches another at spawn. The driver amplifies that ulp and contact spreads it.
+    Snapping each grid pose to its own fixed point before placing it -- rebuild it from its rotation
+    and origin until it stops changing -- made every spawn phase the review tried drive the identical
+    race.
+  - **A reused space.** Separately, a physics space that has held a different track changed 18 of 20
+    cars even with snapped poses; a fresh `World2D` after the same history did not.
+
+  `skill_and_mistakes_test` runs its field first, so it spawns in the phase and the space
+  `--only=field` has: a measurement fix, not a cure. **What #61 must do** for "the same seed and count
+  reproduce the same race bit for bit":
+  1. give every race a spawn whose first sensed state does not depend on the main-loop phase -- snap
+     each grid pose to its fixed point, or run a fixed number of steps before the first sense *and*
+     snap. A fresh process is neither necessary nor sufficient;
+  2. host each race in its own `World2D`, or prove the session's real restart path does not reuse a
+     space that held another track;
+  3. assert it where it can fail: the same seed and count twice in one process, with different
+     histories between (another track, an idle-frame spawn, a physics-frame spawn), control streams
+     compared at 64 bits. Remove the snap and that test must fail;
+  4. scope the claim: this was shown on seed 0, twenty cars, one Linux machine. Cross-machine
+     determinism of Godot's 2D contact resolution is a separate claim nothing here establishes.
+
+  Solo laps spawned the same way did not differ between histories in #59's runs; with the mechanism
+  above, that is an observation about how they were spawned, not a guarantee.
 - **No overtaking.** A spread field on a road where nothing overtakes strings out behind its slowest
   cars rather than by skill. That is the field's shape to judge (#61), not a mistake's.
 - **The rates are a choice.** A mistake every 10-30 s of clean racing on average; measured, skill
@@ -708,9 +750,9 @@ godot --headless --path . --script res://tests/skill_and_mistakes_test.gd -- --l
 | `--break-sense-frame` | driver senses | Replaces the car's basis with an identity basis at the same origin, so every sense comes out in the world frame |
 | `--break-steer-heading` | reactive driver | Drops the heading term from steering. No seed completes a lap -- each spends 49-66% of five minutes on the grass -- and no recovery start gets back to racing |
 | `--break-brake-distance` | reactive driver | Makes the braking distance a constant. Laps still complete and the stuck rule never trips; the unit pair fails, and so does the parked-rival stop, only because 389 px is close to the car's real stop (see above) |
-| `--break-mistake-seed` | skill and mistakes | Derives the mistake stream without the car index. Every different-cars assertion fails: 190 of 190 plan pairs the same on each seed, 36 of 36 field pairs, and the twins log the same mistakes and drive the same lap. 7 failures of 282 |
-| `--break-skill-spread` | skill and mistakes | Collapses every derived skill to 0.5. The lap-time spread fails on all three seeds at exactly 0.0%, as do the derived-skill range checks, and the repeat car -- no longer the least skilled -- commits too few mistakes for its guard. 10 of 282 |
-| `--leak-mistakes` | skill and mistakes | Evidence, not an issue flag: the switch hides the log and nothing else. The twins' suppression check fails (they part on the first mistake's tick) and so do the primed-but-off unit checks; the issue's literal "two identical cars" wording **passes**. 13 of 282 |
+| `--break-mistake-seed` | skill and mistakes | Derives the mistake stream without the car index. Every different-cars assertion fails: 190 of 190 plan pairs the same on each seed, every comparable field pair the same, and the twins log the same mistakes and drive the same lap |
+| `--break-skill-spread` | skill and mistakes | Collapses every derived skill to 0.5. The lap-time spread fails on all three seeds at exactly 0.0%, as do the derived-skill range checks, and the repeat car -- no longer the least skilled -- commits too few mistakes for its guard |
+| `--leak-mistakes` | skill and mistakes | Evidence, not an issue flag: the switch hides the log and nothing else. The twins' suppression check fails (they part on the first mistake's tick) and so do the primed-but-off unit checks; the issue's literal "two identical cars" wording **passes** |
 
 `--break-sense-frame` is the whole point of the frame assertion. The pass reads its car's pose
 exactly once, through `SensingPass._car_frame()`; substituting an identity basis there leaves every
