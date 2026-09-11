@@ -28,6 +28,9 @@ extends SceneTree
 ## - **Determinism.** Two cars started from the same pose on the same seed produce identical control
 ##   streams, compared tick for tick over a whole lap. A third start 1 px to the side must produce a
 ##   different stream, which is what shows the comparison can see a difference at all.
+## - **Stopping from speed.** A rival parked on the start straight: the car closes on it at racing
+##   speed and comes to rest behind it without touching it. ADDED AFTER the lap test was found not to
+##   fail under --break-brake-distance (see the report and _verify_it_stops_for_a_parked_rival).
 ## - **Senses only.** Structurally: every field the driver declares is plain data, and the only
 ##   object any of its methods accepts is the DriverSenses handed to perceive().
 ##
@@ -82,6 +85,14 @@ const PINNED_APPROACH_ANGLE := PI * 0.25
 ## The car's collision capsule: half its length along the nose, and its radius.
 const CAR_HALF_LENGTH_PX := 26.0
 const CAR_RADIUS_PX := 15.0
+## The stopping check: how far down the start straight the rival is parked, how many seeds it runs
+## on, and the speed the car must have reached for the stop to be a stop from racing speed.
+const PARKED_RIVAL_DISTANCE := 1500.0
+const PARKED_RIVAL_SEED_COUNT := 3
+const PARKED_RIVAL_SCAN_STEP := 10
+const PARKED_RIVAL_MAX_CURVATURE := 0.002
+const PARKED_RIVAL_TICK_BUDGET := 1200
+const RACING_SPEED_M := 28.0
 const STEP_PIN_TICKS := 90
 const STEP_PIN_SPEED := 500.0
 
@@ -190,6 +201,7 @@ func _run() -> void:
 		for seed: int in recovery_seeds:
 			_check(await _verify_recovery(seed), "the seed %d recovery verification ran to completion" % seed)
 		_check(await _verify_control_streams_repeat(), "the determinism verification ran to completion")
+		_check(await _verify_it_stops_for_a_parked_rival(), "the parked-rival verification ran to completion")
 	_finish()
 
 
@@ -416,6 +428,25 @@ func _verify_it_slows_for_what_it_senses() -> bool:
 	beside.rival_relative_velocity = Vector2(0.0, 150.0)
 	var passing := _one_tick(beside)
 	_check(passing.brake == 0.0, "a rival being caught but 100 px beside its path is not in the way (brake %.2f)" % passing.brake)
+	# The path is the road's, not the nose's. A rival 200 px ahead and 45 px right of the nose line,
+	# closing at 200 px/s: on a straight road that is beside the path (45 px against a 37.5 px lane),
+	# and on a road turning 0.9 rad right across the look-ahead it is in it -- the road has moved
+	# 0.9 / 600 * 200^2 / 2 = 30 px right by then, leaving the rival 15 px off the line. Stopping
+	# from 200 px/s takes 163 px of the 125 px left once the following gap is kept. At 200 px/s the
+	# bend itself needs no braking (radius 667 px, corner speed 337 px/s), so the rival is the reason.
+	for bend: float in [0.0, 0.9]:
+		var senses := _straight_road_senses(200.0)
+		senses.road_ahead_heading_error = -bend
+		senses.road_ahead_lateral_offset = -270.0 if bend > 0.0 else 0.0
+		senses.has_rival_ahead = true
+		senses.rival_offset = Vector2(45.0, -200.0)
+		senses.rival_distance = senses.rival_offset.length()
+		senses.rival_relative_velocity = Vector2(0.0, 200.0)
+		var controls := _one_tick(senses)
+		if bend == 0.0:
+			_check(controls.brake == 0.0, "on a straight road a rival 45 px right of the nose line is beside the path (brake %.2f)" % controls.brake)
+		else:
+			_check(controls.brake > 0.5, "on a road bending right the same rival is in the path, and it brakes (brake %.2f)" % controls.brake)
 	# A road edge closing across the nose on a straight road: 0.3 rad toward an edge 40 px away puts
 	# the crossing 40 / sin(0.3) = 135 px ahead, too close to be down to a turning speed from 400 px/s.
 	var crossing := _straight_road_senses(400.0)
@@ -736,6 +767,132 @@ func _clear_of_other_solids(definition: TrackDefinition, centre: Vector2, except
 ## A car's transform with its nose (-y) along `forward`.
 func _pose(position: Vector2, forward: Vector2) -> Transform2D:
 	return Transform2D(atan2(forward.x, -forward.y), position)
+
+
+# ---------------------------------------------------------------------------------------------
+# Stopping from speed
+
+
+## A rival parked on the start straight, PARKED_RIVAL_DISTANCE ahead, and the reactive car starting
+## from the grid behind it. It has to reach racing speed and then stop without touching the rival.
+##
+## **Added after the fact, and said so.** --break-brake-distance still completed every lap: on this
+## generator's circuits a corner slides into the horizon and tightens gradually, so the braking the
+## corner rule asks for never exceeded ~185 px, and the mutation's constant (389 px) is longer than
+## that. The lap test cannot see the difference. This check is the case the issue's own sentence is
+## about -- "braking has to begin far enough out that the car can actually stop" -- and it is where a
+## stopping distance that does not grow with speed runs out: from 437 px/s the car needs about 495 px
+## of real braking, and a constant starts braking 389 + 75 px out.
+##
+## The rival is frozen, so it is a still car and not a car creeping downhill. The approach must be
+## clear of ramps -- a car in the air cannot brake -- and ramps favour the start straight, so the car
+## starts from rest at the first centreline vertex (in steps of PARKED_RIVAL_SCAN_STEP) whose next
+## PARKED_RIVAL_DISTANCE px are ramp-free and no tighter than PARKED_RIVAL_MAX_CURVATURE: gentle
+## enough to reach racing speed, bent enough that a rival on the centreline is not always on the
+## nose's line. The seeds are the first PARKED_RIVAL_SEED_COUNT of TUNED_SEEDS + HELD_OUT_SEEDS.
+func _verify_it_stops_for_a_parked_rival() -> bool:
+	var chosen := 0
+	var all_seeds: Array = TUNED_SEEDS + HELD_OUT_SEEDS
+	for seed: int in all_seeds:
+		if chosen >= PARKED_RIVAL_SEED_COUNT:
+			break
+		var definition: TrackDefinition = _generator.generate(seed)
+		var approach := _clear_approach(definition)
+		if approach.is_empty():
+			continue
+		chosen += 1
+		var record := await _approach_a_parked_rival(definition, approach.start, approach.parked)
+		print("parked rival seed=%d from vertex %d to %d, sharpest bend on the way %.5f /px, rival %.1f px off the starting nose line: peak=%.1f px/s braking_from=%.1f px/s touched=%d rested_at=%.1f px from it at tick %d" % [
+			seed, approach.first, approach.last, approach.curvature, approach.off_line, record.peak, record.braking_from, record.touching, record.rest_gap, record.rest_tick,
+		])
+		_check(record.braking_from >= WorldScale.metres(RACING_SPEED_M), "seed %d: it closes on the parked rival at racing speed, braking from %.1f px/s (at least %.1f)" % [seed, record.braking_from, WorldScale.metres(RACING_SPEED_M)])
+		_check(record.rest_tick >= 0, "seed %d: it comes to rest behind the parked rival (tick %d)" % [seed, record.rest_tick])
+		_check(record.touching == 0, "seed %d: without touching it (%d ticks in contact)" % [seed, record.touching])
+	_check(chosen == PARKED_RIVAL_SEED_COUNT, "%d seeds had a clear start straight to park a rival on (%d)" % [PARKED_RIVAL_SEED_COUNT, chosen])
+	return true
+
+
+## The first run of PARKED_RIVAL_DISTANCE px of centreline, scanning from the start line, that no ramp
+## comes near and that bends no tighter than PARKED_RIVAL_MAX_CURVATURE. Down the centreline by arc
+## length: the first version measured down the start's heading instead, and the generator's
+## "straight" is anything gentler than a 2000 px radius, so it parked seed 12's rival on the grass.
+func _clear_approach(definition: TrackDefinition) -> Dictionary:
+	var unique := definition.centerline.size() - 1
+	var first := 0
+	while first < unique:
+		var index := first
+		var travelled := 0.0
+		var sharpest := 0.0
+		var clear := true
+		while travelled < PARKED_RIVAL_DISTANCE and clear:
+			var a: Vector2 = definition.centerline[index % unique]
+			var b: Vector2 = definition.centerline[(index + 1) % unique]
+			var c: Vector2 = definition.centerline[(index + 2) % unique]
+			var bend := absf((b - a).angle_to(c - b)) / maxf(a.distance_to(b), 1.0)
+			sharpest = maxf(sharpest, bend)
+			clear = bend <= PARKED_RIVAL_MAX_CURVATURE
+			for ramp: JumpRampPlacement in definition.jump_ramps:
+				if a.distance_to(ramp.transform.origin) < ramp.half_length + definition.track_width:
+					clear = false
+			travelled += a.distance_to(b)
+			index += 1
+		if clear:
+			var start_point: Vector2 = definition.centerline[first % unique]
+			var start_forward := (definition.centerline[(first + 1) % unique] - start_point).normalized()
+			var end_point: Vector2 = definition.centerline[index % unique]
+			var end_forward := (definition.centerline[(index + 1) % unique] - end_point).normalized()
+			return {
+				"first": first, "last": index, "curvature": sharpest,
+				"start": _pose(start_point, start_forward), "parked": _pose(end_point, end_forward),
+				"off_line": absf((end_point - start_point).dot(SurfaceQuery.right_normal(start_forward))),
+			}
+		first += PARKED_RIVAL_SCAN_STEP
+	return {}
+
+
+func _approach_a_parked_rival(definition: TrackDefinition, start: Transform2D, parked: Transform2D) -> Dictionary:
+	var runtime := TrackRuntime.new(definition)
+	root.add_child(runtime)
+	var surface := TrackSurfaceMap.new(definition)
+	var rival := VEHICLE_SCENE.instantiate() as TopDownCar
+	rival.tuning = _tuning
+	rival.freeze = true
+	rival.global_transform = parked
+	runtime.add_child(rival)
+	rival.set_surface_query(surface)
+	rival.set_height_query(runtime.height_query())
+	var car := VEHICLE_SCENE.instantiate() as TopDownCar
+	car.tuning = _tuning
+	car.global_transform = start
+	runtime.add_child(car)
+	car.set_surface_query(surface)
+	car.set_height_query(runtime.height_query())
+	car.set_auto_reset_enabled(false)
+	await physics_frame
+	var driver := _make_driver(definition.seed)
+	var sensing := SensingPass.new(surface, runtime.height_query())
+	var field: Array[TopDownCar] = [car, rival]
+	var record := {"peak": 0.0, "braking_from": 0.0, "touching": 0, "rest_tick": -1, "rest_gap": INF}
+	var braking := false
+	for tick in range(PARKED_RIVAL_TICK_BUDGET):
+		var controls := VehicleInputState.new()
+		driver.perceive(sensing.sense(field, 0, driver.sensing_horizon()))
+		controls = driver.drive(TICK)
+		car.set_input_state(controls)
+		if controls.brake > 0.0 and not braking:
+			braking = true
+			record.braking_from = car.get_speed()
+		await physics_frame
+		var speed := car.get_speed()
+		record.peak = maxf(record.peak, speed)
+		record.touching += int(car.get_colliding_bodies().has(rival))
+		if braking and speed < WorldScale.metres(ReactiveDriver.STALL_SPEED_M):
+			record.rest_tick = tick
+			record.rest_gap = car.global_position.distance_to(rival.global_position)
+			break
+	runtime.queue_free()
+	await process_frame
+	return record
 
 
 # ---------------------------------------------------------------------------------------------

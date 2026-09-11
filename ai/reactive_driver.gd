@@ -387,13 +387,32 @@ func _edge_margin(speed: float) -> float:
 ## Only the rival list answers this -- rivals are never on the obstacle ray -- so a rival merely
 ## ahead and not being caught costs nothing.
 func _rival_margin() -> float:
-	if not _rival_ahead or absf(_rival_offset.x) > WorldScale.metres(RIVAL_LANE_HALF_WIDTH_M):
+	if not _rival_ahead or absf(_rival_path_offset()) > WorldScale.metres(RIVAL_LANE_HALF_WIDTH_M):
 		return INF
 	# The rival's velocity minus this car's: a rival ahead (negative y) gets closer as that y grows.
 	var closing := _rival_velocity.y
 	if closing <= 0.0:
 		return INF
 	return _braking_margin(_rival_distance - WorldScale.metres(FOLLOW_GAP_M), closing, 0.0)
+
+
+## How far the rival sits across the road from the line this car is driving, which runs with the road
+## at the car's own offset. Measuring it off the nose line instead would say a car stopped in the
+## middle of a bend is beside the path when it is squarely in it. The rival's offset is turned from
+## the car's frame into the road's by the heading error, and the road's own bend is taken off: a road
+## turning by `turn` across the look-ahead moves sideways by curvature * along^2 / 2 at a distance
+## `along` down it.
+func _rival_path_offset() -> float:
+	var along_nose := -_rival_offset.y
+	var across_nose := _rival_offset.x
+	if not _road_found or absf(_heading_error) > WRONG_WAY_ANGLE:
+		return across_nose
+	var across_road := along_nose * sin(_heading_error) + across_nose * cos(_heading_error)
+	var along_road := along_nose * cos(_heading_error) - across_nose * sin(_heading_error)
+	var turn := _road_turn()
+	if absf(turn) > WRONG_WAY_ANGLE or _look_ahead <= 0.0:
+		return across_road
+	return across_road - (turn / _look_ahead) * along_road * along_road * 0.5
 
 
 func _speed_cap() -> float:
