@@ -626,10 +626,13 @@ reads it yet: `MainSession` still spawns `IdleDriver`s, and wiring drivers into 
 
 **Survivable, and mostly cheap.** Forced to one kind at its largest, a second of clean racing apart,
 at skill 0.0 and 1.0, a car laps cleanly on every seed tried, with no recovery and no time off the
-road. What each costs is itself a finding: a late brake costs nothing, and often saves a few
-hundredths, because the driver's beliefs are pessimistic -- it asks the tyres for 13.6 m/s² where
-dirt holds about 22, so a corner entered 12 m late is still well inside what the car can do. A wide
-line costs up to a second a lap when committed in every bend; needless lifts, up to five.
+road. What each costs is itself a finding. Committed at every chance, a second apart, at skill 1.0
+on seeds 0, 2, 5 and 8, against #58's laps: late brakes **save** 0.10-0.20 s, wide lines cost
+0.71-0.98 s, needless lifts 3.1-7.5 s. A late brake is free because of the slack #58's review
+measured (see "What braking distance does and does not carry"): the car stops in about half the
+distance its driver believes and corners on about 22 m/s² where the driver asks for 13.6, so a corner
+entered 12 m late is still well inside what the car can do. Skill only ever makes the beliefs more
+pessimistic, so it never eats into that slack.
 
 ### Proof
 

@@ -848,7 +848,9 @@ func _verify_a_field_with_skill_and_mistakes() -> bool:
 
 
 ## One car, one driver, the production world, the car's own reset off: until it laps or the budget
-## runs out. #58's lap loop, trimmed to what these checks read.
+## runs out. #58's lap loop, trimmed to what these checks read. The control stream is 64-bit, the
+## width VehicleInputState holds, so "identical" is literal: #58's review found its 32-bit streams
+## could have hidden a difference below float precision.
 func _drive(definition: TrackDefinition, driver: ReactiveDriver, pose: Transform2D, budget: int) -> Dictionary:
 	var runtime := TrackRuntime.new(definition)
 	root.add_child(runtime)
@@ -867,14 +869,14 @@ func _drive(definition: TrackDefinition, driver: ReactiveDriver, pose: Transform
 	detector.reset(car.global_position)
 	var tracker := LapProgressTracker.new(definition.checkpoints.size())
 	var record := {
-		"completed": false, "ticks": 0, "controls": PackedFloat32Array(), "off_road_ticks": 0,
+		"completed": false, "ticks": 0, "controls": PackedFloat64Array(), "off_road_ticks": 0,
 		"outside_ticks": 0, "max_from_centre": 0.0, "longest_slow": 0,
 	}
 	var slow := 0
 	for tick in range(budget):
 		driver.perceive(sensing.sense(field, 0, driver.sensing_horizon()))
 		var controls := driver.drive(TICK)
-		record.controls.append_array(PackedFloat32Array([controls.steer, controls.throttle, controls.brake, controls.handbrake]))
+		record.controls.append_array(PackedFloat64Array([controls.steer, controls.throttle, controls.brake, controls.handbrake]))
 		car.set_input_state(controls)
 		await physics_frame
 		record.ticks += 1
@@ -943,7 +945,7 @@ func _grid_slot(definition: TrackDefinition, slot: int) -> Transform2D:
 	return Transform2D(pose.get_rotation() + PI * 0.5, pose.origin + lateral)
 
 
-func _first_difference(left: PackedFloat32Array, right: PackedFloat32Array) -> int:
+func _first_difference(left: PackedFloat64Array, right: PackedFloat64Array) -> int:
 	for index in range(mini(left.size(), right.size())):
 		if left[index] != right[index]:
 			return index
