@@ -68,8 +68,10 @@ const MAX_APPROACH_ANGLE := 0.6
 const OFFSET_SPEED_FLOOR_M := 4.0
 ## How much of the road's turn across the look-ahead is steered for in advance.
 const CURVE_FEEDFORWARD := 0.8
-## A road that turns less than this across the look-ahead is read as straight.
+## A road that turns less than this across the look-ahead is read as straight, and no bend is read
+## as shorter than MIN_BEND_M.
 const MIN_ROAD_TURN := 0.03
+const MIN_BEND_M := 1.0
 
 ## Seconds between deciding to brake and the brakes biting, as distance per unit of speed to shed.
 const REACTION_SECONDS := 0.15
@@ -299,13 +301,14 @@ func _braking_distance(from_speed: float, to_speed: float) -> float:
 
 ## Distance to spare if the car must be down to `required` within `distance`: negative means braking
 ## should already have started. A car below the speed it needs has nothing to shed; its margin is
-## the distance plus the room it has to speed up before it would have something to shed, which
-## shrinks to nothing as it reaches `required`, so the throttle fades in rather than switching.
+## the distance plus its headroom -- the braking belief run backwards from `required` down to its
+## speed -- which shrinks to nothing as it reaches `required`, so the throttle fades out rather than
+## switching off. The headroom is not a braking distance and the mutation leaves it alone.
 func _braking_margin(distance: float, speed: float, required: float) -> float:
 	if speed > required:
 		return distance - _braking_distance(speed, required)
-	var acceleration := WorldScale.metres(BRAKE_DECELERATION_M)
-	return distance + (required * required - speed * speed) / (2.0 * acceleration)
+	var deceleration := WorldScale.metres(BRAKE_DECELERATION_M)
+	return distance + (required * required - speed * speed) / (2.0 * deceleration)
 
 
 ## Throttle in x, brake in y.
@@ -365,7 +368,7 @@ func _corner_margin(speed: float) -> float:
 	var unexplained := _road_ahead_offset - _lateral_offset - _look_ahead * sin(_heading_error)
 	var bend := _look_ahead
 	if unexplained * _road_turn() < 0.0:
-		bend = clampf(2.0 * absf(unexplained) / turn, WorldScale.metres(EDGE_MARGIN_M), _look_ahead)
+		bend = clampf(2.0 * absf(unexplained) / turn, WorldScale.metres(MIN_BEND_M), _look_ahead)
 	var radius := maxf(bend / turn, WorldScale.metres(TIGHTEST_CORNER_RADIUS_M))
 	var corner_speed := sqrt(WorldScale.metres(CORNERING_ACCELERATION_M) * radius)
 	return _braking_margin(_look_ahead - bend, speed, corner_speed)
