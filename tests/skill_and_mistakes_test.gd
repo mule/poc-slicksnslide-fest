@@ -215,6 +215,12 @@ func _run() -> void:
 		_check(_verify_mistakes_wait_for_clean_racing(), "the clean-racing verification ran to completion")
 	if _wants("plans"):
 		_check(_verify_different_cars_plan_different_mistakes(), "the different-plans verification ran to completion")
+	# The field goes first among the sections that use physics, and that is load-bearing: a field's
+	# contacts resolve differently depending on what the physics server has already done in this
+	# process, so the same field on the same seed laps differently after other sections have run.
+	# First, it always meets a fresh server, as `--only=field` does. See the section's comment.
+	if _wants("field"):
+		_check(await _verify_a_field_with_skill_and_mistakes(), "the field verification ran to completion")
 	if _wants("repeat"):
 		_check(await _verify_the_same_car_repeats_its_mistakes(), "the repeat verification ran to completion")
 	if _wants("twins"):
@@ -225,8 +231,6 @@ func _run() -> void:
 		_check(await _verify_the_lowest_skill_finishes(), "the lowest skill verification ran to completion")
 	if _wants("survival"):
 		_check(await _verify_every_mistake_is_survivable(), "the survival verification ran to completion")
-	if _wants("field"):
-		_check(await _verify_a_field_with_skill_and_mistakes(), "the field verification ran to completion")
 	_finish()
 
 
@@ -744,6 +748,15 @@ func _verify_every_mistake_is_survivable() -> bool:
 ## And the different-cars assertion on real logs. The plan number is what the stream indexes, so two
 ## cars that each committed plan n are compared on what they did under it. --break-mistake-seed gives
 ## every car the same plan n, and every such comparison comes out equal.
+##
+## **The field is not reproducible across process histories, and this suite does not claim it is.**
+## Run first, in a fresh process, it is identical run after run. Run after other sections, the same
+## seed and drivers give different laps: 6 of 20 cars after the repeat section, 13 after the whole
+## suite -- and #58's own driver, skill 1.0 with mistakes off, does the same (9 of 20). Solo laps never
+## differ. Car-to-car contact resolves in an order the physics server's history decides; nothing a
+## driver holds is involved. The first full run met this as this section's guard failing, 89
+## comparable pairs where a fresh field gives 104. The guard was not lowered; the section was moved
+## to run first. Bit-for-bit races across restarts are #61's to establish.
 func _verify_a_field_with_skill_and_mistakes() -> bool:
 	var definition: TrackDefinition = _generator.generate(FIELD_SEED)
 	var runtime := TrackRuntime.new(definition)

@@ -668,10 +668,19 @@ pessimistic, so it never eats into that slack.
 
 ### What it does not settle
 
+- **A field of twenty is not reproducible across process histories.** Run in a fresh process it is
+  identical run after run; run after other physics in the same process, the same seed and drivers lap
+  differently (6 of 20 cars after one other section, 13 after a whole suite). #58's driver at skill
+  1.0 with mistakes off does the same, 9 of 20, so it predates #59. Solo laps never differ: it is
+  car-to-car contact, whose resolution order the physics server's history decides, not anything a
+  driver holds. `skill_and_mistakes_test` runs its field before any other physics for that reason.
+  The epic's "the same seed and count reproduce the same race bit for bit" is therefore a claim about
+  a fresh server, and a restart within one session is exactly what it does not yet cover (#61).
 - **No overtaking.** A spread field on a road where nothing overtakes strings out behind its slowest
   cars rather than by skill. That is the field's shape to judge (#61), not a mistake's.
-- **The rates are a choice.** A mistake every 10-30 s of clean racing, 1-3 committed in a typical lap.
-  They are constants in one place; nothing else depends on them.
+- **The rates are a choice.** A mistake every 10-30 s of clean racing on average; measured, skill
+  0.0 commits 1-6 a lap across the fifteen seeds and a field of twenty 0-4 a car, with late brakes
+  lapsing most often. They are constants in one place; nothing else depends on them.
 
 ## Verification
 
