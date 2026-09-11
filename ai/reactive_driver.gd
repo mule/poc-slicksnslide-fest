@@ -386,17 +386,21 @@ func _edge_margin(speed: float) -> float:
 	return _braking_margin(along_nose, speed, WorldScale.metres(EDGE_TURN_SPEED_M))
 
 
-## A rival in the car's path that it is catching: the gap left over once the closing speed is shed.
-## Only the rival list answers this -- rivals are never on the obstacle ray -- so a rival merely
-## ahead and not being caught costs nothing.
+## A rival in the car's path: the gap left over, beyond the following gap, once the closing speed is
+## shed. Only the rival list answers this -- rivals are never on the obstacle ray. A rival ahead that
+## is not being caught costs nothing until the car is inside the following gap; there the margin is
+## what is left of the gap, so a car that has crept up at equal speed drops back rather than riding
+## the rival's bumper. (The first version returned no constraint at all whenever the car was not
+## closing, and a field of six drove nose to tail in contact for most of a lap.)
 func _rival_margin() -> float:
 	if not _rival_ahead or absf(_rival_path_offset()) > WorldScale.metres(RIVAL_LANE_HALF_WIDTH_M):
 		return INF
+	var gap := _rival_distance - WorldScale.metres(FOLLOW_GAP_M)
 	# The rival's velocity minus this car's: a rival ahead (negative y) gets closer as that y grows.
 	var closing := _rival_velocity.y
 	if closing <= 0.0:
-		return INF
-	return _braking_margin(_rival_distance - WorldScale.metres(FOLLOW_GAP_M), closing, 0.0)
+		return gap
+	return _braking_margin(gap, closing, 0.0)
 
 
 ## How far the rival sits across the road from the line this car is driving, which runs with the road

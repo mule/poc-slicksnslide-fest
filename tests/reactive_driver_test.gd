@@ -31,6 +31,11 @@ extends SceneTree
 ## - **Stopping from speed.** A rival parked on the start straight: the car closes on it at racing
 ##   speed and comes to rest behind it without touching it. ADDED AFTER the lap test was found not to
 ##   fail under --break-brake-distance (see the report and _verify_it_stops_for_a_parked_rival).
+## - **A field of twenty**, every car a ReactiveDriver on the session's own grid, on FIELD_SEED: every
+##   car completes a lap, none meets the stuck rule or leaves the play area, and none is in contact
+##   with another car for more than MAX_CAR_CONTACT_FRACTION of its lap. A baseline for #61, which
+##   owns the field. The contact bound was set after an exploratory field showed 20-40% contact
+##   before the rival rule held its following gap and at most 3.2% after; see the report.
 ## - **Senses only.** Structurally: every field the driver declares is plain data, and the only
 ##   object any of its methods accepts is the DriverSenses handed to perceive().
 ##
@@ -93,6 +98,15 @@ const PARKED_RIVAL_SCAN_STEP := 10
 const PARKED_RIVAL_MAX_CURVATURE := 0.002
 const PARKED_RIVAL_TICK_BUDGET := 1200
 const RACING_SPEED_M := 28.0
+## The field check: the seed, the count, and the most of its lap any car may spend touching another.
+const FIELD_SEED := 0
+const FIELD_SIZE := 20
+const FIELD_TICK_BUDGET := 9000
+const MAX_CAR_CONTACT_FRACTION := 0.05
+## MainSession's grid, restated: rows 8.8 m apart behind the start line, two columns a quarter of
+## the track's width either side of the centreline. See _grid_slot.
+const GRID_ROW_SPACING_M := 8.8
+const GRID_COLUMN_FRACTION := 0.25
 const STEP_PIN_TICKS := 90
 const STEP_PIN_SPEED := 500.0
 
@@ -202,6 +216,7 @@ func _run() -> void:
 			_check(await _verify_recovery(seed), "the seed %d recovery verification ran to completion" % seed)
 		_check(await _verify_control_streams_repeat(), "the determinism verification ran to completion")
 		_check(await _verify_it_stops_for_a_parked_rival(), "the parked-rival verification ran to completion")
+		_check(await _verify_a_field_of_twenty(), "the field verification ran to completion")
 	_finish()
 
 
@@ -421,6 +436,15 @@ func _verify_it_slows_for_what_it_senses() -> bool:
 	leaving.rival_relative_velocity = Vector2(0.0, -50.0)
 	var followed := _one_tick(leaving)
 	_check(followed.brake == 0.0 and followed.throttle > 0.0, "the same rival pulling away costs nothing (throttle %.2f, brake %.2f)" % [followed.throttle, followed.brake])
+	# Inside the following gap (6 m, 75 px) at equal speed: not closing, but too close. It must not
+	# drive on into the rival's bumper.
+	var crept_up := _straight_road_senses(speed)
+	crept_up.has_rival_ahead = true
+	crept_up.rival_offset = Vector2(0.0, -55.0)
+	crept_up.rival_distance = 55.0
+	crept_up.rival_relative_velocity = Vector2.ZERO
+	var dropped_back := _one_tick(crept_up)
+	_check(dropped_back.throttle == 0.0 and dropped_back.brake > 0.0, "a rival 55 px ahead at the same speed is inside the following gap: it comes off the throttle and brakes (throttle %.2f, brake %.2f)" % [dropped_back.throttle, dropped_back.brake])
 	var beside := _straight_road_senses(speed)
 	beside.has_rival_ahead = true
 	beside.rival_offset = Vector2(-100.0, -60.0)
@@ -893,6 +917,129 @@ func _approach_a_parked_rival(definition: TrackDefinition, start: Transform2D, p
 	runtime.queue_free()
 	await process_frame
 	return record
+
+
+# ---------------------------------------------------------------------------------------------
+# A field
+
+
+## Twenty reactive drivers on the session's grid, every one sensing the other nineteen through one
+## SensingPass, all sensed before any drives so each tick every car sees the same world. Each car
+## keeps its own checkpoint detector and lap tracker, as MainSession gives each rival one.
+##
+## This is a baseline, not #61's proof: one seed, and the drivers know nothing about a car alongside
+## or behind them -- the senses carry only the nearest rival ahead -- so where the grid's two columns
+## merge they rub. What it does pin is that a following car keeps its gap: before _rival_margin held
+## the gap for a rival it was not closing on, exploratory fields of six and twenty spent 20-40% of
+## their laps in contact.
+func _verify_a_field_of_twenty() -> bool:
+	var definition: TrackDefinition = _generator.generate(FIELD_SEED)
+	var runtime := TrackRuntime.new(definition)
+	root.add_child(runtime)
+	var surface := TrackSurfaceMap.new(definition)
+	var field: Array[TopDownCar] = []
+	var drivers: Array[ReactiveDriver] = []
+	var detectors: Array[CheckpointCrossingDetector] = []
+	var trackers: Array[LapProgressTracker] = []
+	for slot in range(FIELD_SIZE):
+		var car := VEHICLE_SCENE.instantiate() as TopDownCar
+		car.tuning = _tuning
+		car.global_transform = _grid_slot(definition, slot)
+		runtime.add_child(car)
+		car.set_surface_query(surface)
+		car.set_height_query(runtime.height_query())
+		car.set_auto_reset_enabled(false)
+		field.append(car)
+		drivers.append(_make_driver(FIELD_SEED, slot))
+		var detector := CheckpointCrossingDetector.new(definition)
+		detector.reset(car.global_position)
+		detectors.append(detector)
+		trackers.append(LapProgressTracker.new(definition.checkpoints.size()))
+	await physics_frame
+	var sensing := SensingPass.new(surface, runtime.height_query())
+	var finished_at: Array[int] = []
+	var slow: Array[int] = []
+	var longest_slow: Array[int] = []
+	var touching: Array[int] = []
+	var strayed: Array[int] = []
+	for slot in range(FIELD_SIZE):
+		finished_at.append(-1)
+		slow.append(0)
+		longest_slow.append(0)
+		touching.append(0)
+		strayed.append(0)
+	for tick in range(FIELD_TICK_BUDGET):
+		var senses: Array[DriverSenses] = []
+		for slot in range(FIELD_SIZE):
+			senses.append(sensing.sense(field, slot, drivers[slot].sensing_horizon()))
+		for slot in range(FIELD_SIZE):
+			drivers[slot].perceive(senses[slot])
+			field[slot].set_input_state(drivers[slot].drive(TICK))
+		await physics_frame
+		for slot in range(FIELD_SIZE):
+			if finished_at[slot] >= 0:
+				continue
+			var car := field[slot]
+			slow[slot] = slow[slot] + 1 if car.get_speed() < _tuning.auto_reset_stuck_speed else 0
+			longest_slow[slot] = maxi(longest_slow[slot], slow[slot])
+			for body in car.get_colliding_bodies():
+				if body is TopDownCar:
+					touching[slot] += 1
+					break
+			if not definition.play_area.has_point(car.global_position) or surface.distance_to_centerline(car.global_position, _tuning.auto_reset_lost_distance * 2.0) > _tuning.auto_reset_lost_distance:
+				strayed[slot] += 1
+			var crossing := detectors[slot].sample(car.global_position)
+			if not crossing.is_empty() and trackers[slot].cross_checkpoint(int(crossing.checkpoint), float(crossing.forward_dot)):
+				finished_at[slot] = tick + 1
+		if not finished_at.has(-1):
+			break
+	var finished := 0
+	var worst_contact := 0.0
+	var worst_slow := 0
+	var strayed_cars := 0
+	for slot in range(FIELD_SIZE):
+		var ticks := finished_at[slot] if finished_at[slot] >= 0 else FIELD_TICK_BUDGET
+		finished += int(finished_at[slot] >= 0)
+		worst_contact = maxf(worst_contact, touching[slot] / float(ticks))
+		worst_slow = maxi(worst_slow, longest_slow[slot])
+		strayed_cars += int(strayed[slot] > 0)
+		print("field seed=%d slot=%d finished=%s lap_s=%.2f slowest_streak=%d contact_ticks=%d (%.1f%%) recoveries=%d (reversals=%d turn_arounds=%d road_returns=%d)" % [
+			FIELD_SEED, slot, finished_at[slot] >= 0, ticks * TICK, longest_slow[slot], touching[slot], 100.0 * touching[slot] / ticks,
+			drivers[slot].recoveries, drivers[slot].reversals, drivers[slot].turn_arounds, drivers[slot].road_returns,
+		])
+	_check(finished == FIELD_SIZE, "a field of %d on seed %d: every car completes a lap (%d)" % [FIELD_SIZE, FIELD_SEED, finished])
+	_check(worst_slow < _stuck_ticks(), "no car in the field meets the stuck rule (longest slow streak %d of %d ticks)" % [worst_slow, _stuck_ticks()])
+	_check(strayed_cars == 0, "no car leaves the play area or gets lost (%d did)" % strayed_cars)
+	_check(worst_contact <= MAX_CAR_CONTACT_FRACTION, "no car spends more than %.0f%% of its lap touching another car (worst %.1f%%)" % [100.0 * MAX_CAR_CONTACT_FRACTION, 100.0 * worst_contact])
+	runtime.queue_free()
+	await process_frame
+	return true
+
+
+## MainSession._grid_slot_transform, restated: this file may not reach into the session, and #60's
+## docs fix the layout -- slot 0 is the spawn; slot s sits in row (s + 1) / 2, odd slots one side of
+## the centreline and even slots the other, a quarter of the track's width out, facing the local
+## direction of travel on the arc behind the start line.
+func _grid_slot(definition: TrackDefinition, slot: int) -> Transform2D:
+	if slot <= 0:
+		return definition.spawn_transform
+	var row := (slot + 1) / 2
+	var side := -1.0 if slot % 2 == 1 else 1.0
+	var points := definition.centerline
+	var unique := points.size() - 1
+	var index := 0
+	var remaining := row * WorldScale.metres(GRID_ROW_SPACING_M)
+	var pose := Transform2D((points[1] - points[0]).angle(), points[0])
+	while remaining > 0.0 and unique > 0:
+		var previous := points[(index - 1 + unique) % unique]
+		var segment := points[index].distance_to(previous)
+		if segment >= remaining:
+			pose = Transform2D((points[index] - previous).angle(), points[index].lerp(previous, remaining / maxf(segment, 0.000001)))
+			break
+		remaining -= segment
+		index = (index - 1 + unique) % unique
+	var lateral := pose.y * (side * definition.track_width * GRID_COLUMN_FRACTION)
+	return Transform2D(pose.get_rotation() + PI * 0.5, pose.origin + lateral)
 
 
 # ---------------------------------------------------------------------------------------------
