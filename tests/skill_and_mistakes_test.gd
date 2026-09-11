@@ -594,7 +594,9 @@ func _verify_the_same_car_repeats_its_mistakes() -> bool:
 	for i in range(first.size()):
 		var plan: Dictionary = runs[0].plans[i]
 		faithful = faithful and first[i].kind == plan.kind and first[i].amount == plan.amount and first[i].seconds == plan.seconds
-		ordered = ordered and first[i].until > first[i].tick and (i == 0 or (first[i].n > first[i - 1].n and first[i].tick >= first[i - 1].until))
+		# The last may still be under way when the lap ends (until -1); every other has ended.
+		var ended: bool = first[i].until > first[i].tick or (first[i].until == -1 and i == first.size() - 1)
+		ordered = ordered and ended and (i == 0 or (first[i].n > first[i - 1].n and first[i].tick >= first[i - 1].until))
 	_check(faithful, "every mistake logged is the stream's plan for its number, kind, amount and seconds")
 	_check(ordered, "and they come in plan order, one at a time, each lasting at least a tick")
 	return true
@@ -913,7 +915,8 @@ func _report_lap(label: String, seed: int, index: int, driver: ReactiveDriver, r
 func _log_text(log: Array) -> String:
 	var parts: Array[String] = []
 	for entry in log:
-		parts.append("#%d %s @%d-%d %.2fm %.2fs" % [entry.n, ReactiveDriver.mistake_name(entry.kind), entry.tick, entry.until, entry.amount, entry.seconds])
+		var until: String = str(entry.until) if entry.until >= 0 else "still"
+		parts.append("#%d %s @%d-%s %.2fm %.2fs" % [entry.n, ReactiveDriver.mistake_name(entry.kind), entry.tick, until, entry.amount, entry.seconds])
 	return "[" + ", ".join(parts) + "]"
 
 
