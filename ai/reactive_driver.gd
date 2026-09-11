@@ -58,8 +58,11 @@ extends AiDriver
 ## - **LATE_BRAKE**: where a corner asks for braking, the corner's brake is withheld for `amount`
 ##   metres of travel. Only the corner's: never the brake for a rival, an obstacle, a road edge or the
 ##   limit of vision.
-## - **WIDE_LINE**: through a bend, the steering aims `amount` metres to the outside of the centreline,
-##   never closer than WIDE_LINE_EDGE_KEEP_M to the edge.
+## - **WIDE_LINE**: through a bend, the steering aims `amount` metres to the outside of the centreline.
+##   The aim is capped WIDE_LINE_EDGE_KEEP_M from the edge, and -- because the car overshoots its aim
+##   through a bend -- the mistake also ends the moment the car's own centre comes that close to
+##   either edge, and cannot begin there. The bound the car achieves is measured, not promised: see
+##   tests/skill_and_mistakes_test.gd.
 ## - **NEEDLESS_LIFT**: on a clear straight at speed, the throttle comes off for `seconds`.
 ##
 ## A mistake is only begun while the car is racing cleanly -- on the road, aligned with it, at speed,
@@ -168,14 +171,17 @@ const MISTAKE_PATIENCE_S := 15.0
 ## LATE_BRAKE: metres travelled past the point the corner asked for braking before it brakes.
 const LATE_BRAKE_MIN_M := 4.0
 const LATE_BRAKE_MAX_M := 12.0
-## WIDE_LINE: metres outside the centreline, for how long, the least bend it is taken on, and the
-## road it always leaves between the line it aims at and the edge.
+## WIDE_LINE: metres outside the centreline, for how long, and the least bend it is taken on. The
+## keep is how near the edge the aim may be, and how near the car's centre may come before the
+## mistake lets go. It was 3 m, and that bounded only the aim: through a bend the car overshoots its
+## aim by about 3 m, and forced wide lines put the car's centre 0.6-1.7 px from the edge of the
+## narrowest roads. 6 m is the 3 m plus the overshoot.
 const WIDE_LINE_MIN_M := 2.0
 const WIDE_LINE_MAX_M := 5.0
 const WIDE_LINE_MIN_SECONDS := 1.5
 const WIDE_LINE_MAX_SECONDS := 3.0
 const WIDE_LINE_MIN_TURN := 0.15
-const WIDE_LINE_EDGE_KEEP_M := 3.0
+const WIDE_LINE_EDGE_KEEP_M := 6.0
 ## NEEDLESS_LIFT: for how long, and the least speed it is done at.
 const NEEDLESS_LIFT_MIN_SECONDS := 0.4
 const NEEDLESS_LIFT_MAX_SECONDS := 1.2
@@ -411,6 +417,9 @@ func drive(delta: float) -> VehicleInputState:
 	_watch_the_ground_ahead(delta, speed)
 	if _mistakes_on():
 		_decide_mistakes(delta, speed)
+	elif _active != Mistake.NONE:
+		# Switched off mid-mistake: it ends here, logged, rather than waiting, stale, to resume.
+		_end_mistake()
 	_tick += 1
 	if _mode == Mode.REVERSE:
 		_mode_time += delta
@@ -751,7 +760,7 @@ func _mistake_has_its_moment(kind: int, speed: float) -> bool:
 			var corner := _corner_margin(forward_speed)
 			return corner < 0.0 and corner <= _visibility_margin(forward_speed)
 		Mistake.WIDE_LINE:
-			return turn >= WIDE_LINE_MIN_TURN and turn <= WRONG_WAY_ANGLE
+			return turn >= WIDE_LINE_MIN_TURN and turn <= WRONG_WAY_ANGLE and _nearest_edge() >= WorldScale.metres(WIDE_LINE_EDGE_KEEP_M)
 		Mistake.NEEDLESS_LIFT:
 			return speed >= WorldScale.metres(NEEDLESS_LIFT_MIN_SPEED_M) and turn < MIN_ROAD_TURN and _rival_margin() == INF and not _obstacle_ahead
 	return false
@@ -768,11 +777,21 @@ func _commit_mistake() -> void:
 	_armed = false
 
 
-## A late brake is over once the car has travelled its metres; the others last their seconds.
+## A late brake is over once the car has travelled its metres; the others last their seconds. A wide
+## line is also over the moment the car itself -- not the line it aims at -- comes within
+## WIDE_LINE_EDGE_KEEP_M of an edge: the aim is capped the same distance from the edge, but the car
+## overshoots its aim through a bend, and it is the car that must stay on the road.
 func _mistake_is_over() -> bool:
 	if _active == Mistake.LATE_BRAKE:
 		return _active_distance >= WorldScale.metres(_active_amount)
+	if _active == Mistake.WIDE_LINE and _nearest_edge() < WorldScale.metres(WIDE_LINE_EDGE_KEEP_M):
+		return true
 	return _active_time >= _active_seconds
+
+
+## How far the car's centre is from the nearer road edge.
+func _nearest_edge() -> float:
+	return minf(_left_margin, _right_margin)
 
 
 ## `until` is the first tick the mistake no longer acts on: it acted on ticks [tick, until).
@@ -785,14 +804,16 @@ func _committing(kind: int) -> bool:
 	return _mistakes_on() and _active == kind
 
 
-## The one switch, read in the two places a mistake could reach the controls: deciding and acting.
+## The one switch, read in the three places a mistake could show: deciding, acting, and the
+## `active_mistake` getter.
 func _mistakes_on() -> bool:
 	return mistakes_enabled
 
 
 ## The offset a wide line aims at: its amount to the outside of the bend -- left of the centreline
-## when the road turns right -- but never nearer the edge than WIDE_LINE_EDGE_KEEP_M. On a straight,
-## or a reading from another stretch of the lap, the centreline.
+## when the road turns right -- but the AIM is never nearer the edge than WIDE_LINE_EDGE_KEEP_M. The
+## car itself is bounded separately, in `_mistake_is_over`. On a straight, or a reading from another
+## stretch of the lap, the centreline.
 func _wide_line_target() -> float:
 	var turn := _road_turn()
 	if absf(turn) < MIN_ROAD_TURN or absf(turn) > WRONG_WAY_ANGLE:
