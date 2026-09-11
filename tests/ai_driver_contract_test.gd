@@ -43,7 +43,9 @@ func _verify_drivers() -> bool:
 ## later determinism guarantee becomes unprovable. Task 2 adds senses and is exactly where this
 ## erodes, so the rule is asserted structurally rather than left to inspection.
 func _verify_seam_isolation() -> bool:
-	for producer: AiDriver in [AiDriver.new(7, 2), IdleDriver.new(7, 2)]:
+	# ReactiveDriver (#58) is the first driver with state of its own -- some forty fields of it -- and
+	# the first that is handed senses, so it is exactly where a handle would creep in.
+	for producer: AiDriver in [AiDriver.new(7, 2), IdleDriver.new(7, 2), ReactiveDriver.new(7, 2)]:
 		var class_name_text: String = producer.get_script().get_global_name()
 		var declared := 0
 		for property in producer.get_property_list():

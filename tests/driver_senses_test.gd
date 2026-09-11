@@ -106,12 +106,13 @@ const HEIGHT_TOLERANCE := 0.05
 ## These values are analytic on both sides and agree to float precision.
 const GRADIENT_TOLERANCE := 1e-4
 
-## The pass's fixed query budget, per car per tick.
-const EXPECTED_ROAD_FRAME_QUERIES := 1
+## The pass's fixed query budget, per car per tick. Task #58 added the second road frame -- the road
+## at the look-ahead point -- which is what took the total from five to six.
+const EXPECTED_ROAD_FRAME_QUERIES := 2
 const EXPECTED_SURFACE_SAMPLE_QUERIES := 1
 const EXPECTED_HEIGHT_QUERIES := 2
 const EXPECTED_RAY_QUERIES := 1
-const EXPECTED_TOTAL_QUERIES := 5
+const EXPECTED_TOTAL_QUERIES := 6
 
 ## Cost. The epic's budget is one 16.6 ms frame for a full field.
 const FRAME_BUDGET_MS := 16.6
@@ -125,7 +126,14 @@ const COST_HORIZONS := [200.0, 400.0, 600.0]
 ## What DriverSenses declares today. Every walk over its fields is floored at this, so a field that
 ## stops being reported -- or is quietly dropped from the walk -- fails rather than shrinking a
 ## number nobody reads.
-const DECLARED_SENSE_FIELDS := 19
+const DECLARED_SENSE_FIELDS := 22
+
+## The bent fixture road for the road-ahead check: straight along local +x to a vertex at the origin,
+## then turned by BEND_DEGREES (positive turns right, screen y growing downward). The car sits on the
+## centreline this far before the vertex, nose along the first leg, so its look-ahead point lies
+## beyond the bend, (LOOK_AHEAD - BEND_CAR_BEFORE_VERTEX) px along the first leg's line.
+const BEND_DEGREES := 30.0
+const BEND_CAR_BEFORE_VERTEX := 200.0
 
 const AGREEMENT_SEEDS := [0, 7, 13]
 const AGREEMENT_VERTEX_STRIDE := 37
@@ -287,6 +295,7 @@ func _run() -> void:
 	_check(_verify_lateral_offset_carries_its_sign(), "the lateral offset verification ran to completion")
 	_check(_verify_heading_error_reads_the_yaw(), "the heading error verification ran to completion")
 	_check(_verify_the_road_can_be_out_of_range(), "the lost-road verification ran to completion")
+	_check(_verify_the_road_is_read_ahead_of_the_car(), "the road-ahead verification ran to completion")
 	_check(_verify_ground_ahead_survives_a_shared_sample(), "the shared-sample verification ran to completion")
 	_check(_verify_the_ground_is_sampled_ahead_of_the_car(), "the ground-ahead verification ran to completion")
 	_check(_verify_rivals_come_from_the_field_list(), "the rival verification ran to completion")
@@ -441,9 +450,75 @@ func _verify_the_road_can_be_out_of_range() -> bool:
 	_check(not senses.road_found, "a car 5000 px from the centreline finds no road within its %.0f px horizon" % LOOK_AHEAD)
 	_check(senses.lateral_offset == 0.0 and senses.heading_error == 0.0, "the road fields are zeroed rather than left holding a stale answer")
 	_check(senses.distance_to_left_edge == 0.0 and senses.distance_to_right_edge == 0.0, "the edge distances are zeroed too")
+	_check(not senses.road_ahead_found and senses.road_ahead_lateral_offset == 0.0 and senses.road_ahead_heading_error == 0.0, "and so is the road ahead, whose point is just as far from any road")
 	_check(senses.surface_type == SurfaceQuery.SurfaceType.OFF_TRACK, "the surface still answers, because sample_at has no range limit")
 	_tear_down(world)
 	return true
+
+
+## The road ahead is read at the look-ahead point and nowhere else, and it is compared to the bent
+## fixture's own geometry rather than to the pass.
+##
+## The bend is the point. On a straight road the heading ahead equals the heading under the car, so a
+## pass that answered "ahead" from the car's own road frame would be right about the angle; beyond a
+## bend it reads zero where the road has turned BEND_DEGREES. The car sits on the centreline with its
+## nose along the first leg, so its own offset and heading error are both zero -- anything non-zero
+## below came from the far side of the bend. Both directions of bend are driven, because a sign that
+## is wrong both ways reads right on one.
+##
+## Expectations: the look-ahead point lies (LOOK_AHEAD - BEND_CAR_BEFORE_VERTEX) px past the vertex
+## along the first leg's line, so its perpendicular distance from the second leg is that times
+## sin(bend), on the outside of the bend -- the road's left when the road turns right -- and the road
+## there runs `bend` round from the nose.
+func _verify_the_road_is_read_ahead_of_the_car() -> bool:
+	var beyond := LOOK_AHEAD - BEND_CAR_BEFORE_VERTEX
+	for bend_degrees: float in [BEND_DEGREES, -BEND_DEGREES]:
+		var world := _build_bent_road_world(bend_degrees)
+		var senses := _make_pass(world).sense(world["field"], 0, LOOK_AHEAD)
+		var bend := deg_to_rad(bend_degrees)
+		var expected_offset := -beyond * sin(bend)
+		var expected_heading := -bend
+		print("road ahead: bend %+.0f deg offset=%.4f (expected %.4f) heading=%.6f (expected %.6f) under the car %.4f / %.6f" % [
+			bend_degrees, senses.road_ahead_lateral_offset, expected_offset, senses.road_ahead_heading_error, expected_heading, senses.lateral_offset, senses.heading_error,
+		])
+		# The car's own road frame is flat zero, so the readings below cannot have come from it.
+		_check(senses.road_found and absf(senses.lateral_offset) < POSITION_TOLERANCE and absf(senses.heading_error) < ANGLE_TOLERANCE, "bend %+.0f: the car sits on the centreline, aligned with the road under it" % bend_degrees)
+		# And the point really is off the road: an offset bigger than the fixture's half width, which a
+		# search radius of only half a track would never have found.
+		_check(absf(expected_offset) > FIXTURE_HALF_WIDTH, "bend %+.0f: the look-ahead point lies off the road (%.1f px against a %.1f px half width)" % [bend_degrees, absf(expected_offset), FIXTURE_HALF_WIDTH])
+		_check(senses.road_ahead_found, "bend %+.0f: the road ahead is found from a point beyond the bend" % bend_degrees)
+		_check(absf(senses.road_ahead_lateral_offset - expected_offset) < POSITION_TOLERANCE, "bend %+.0f: the look-ahead point reads %+.4f px from the road beyond the bend (expected %+.4f)" % [bend_degrees, senses.road_ahead_lateral_offset, expected_offset])
+		_check(absf(senses.road_ahead_heading_error - expected_heading) < ANGLE_TOLERANCE, "bend %+.0f: and the road there runs %+.6f rad from the nose (expected %+.6f)" % [bend_degrees, senses.road_ahead_heading_error, expected_heading])
+		_tear_down(world)
+	return true
+
+
+## A road that bends at the local origin, with one car on it. See BEND_DEGREES.
+func _build_bent_road_world(bend_degrees: float) -> Dictionary:
+	var holder := Node2D.new()
+	root.add_child(holder)
+	var definition := TrackDefinition.new()
+	var centerline := PackedVector2Array()
+	var x := -LOCAL_ROAD_HALF_LENGTH
+	while x <= 0.0:
+		centerline.append(Vector2(x, 0.0))
+		x += LOCAL_ROAD_SPACING
+	var second_leg := Vector2.RIGHT.rotated(deg_to_rad(bend_degrees))
+	var along := LOCAL_ROAD_SPACING
+	while along <= LOCAL_ROAD_HALF_LENGTH:
+		centerline.append(second_leg * along)
+		along += LOCAL_ROAD_SPACING
+	definition.centerline = centerline
+	definition.track_width = FIXTURE_TRACK_WIDTH
+	var pose := Transform2D(atan2(1.0, 0.0), Vector2(-BEND_CAR_BEFORE_VERTEX, 0.0))
+	var field: Array[TopDownCar] = [_add_car(holder, pose, pose.basis_xform(OWN_VELOCITY_IN_CAR_FRAME))]
+	return {
+		"holder": holder,
+		"definition": definition,
+		"surface": TrackSurfaceMap.new(definition),
+		"height": LocalGroundHeight.new(Transform2D.IDENTITY),
+		"field": field,
+	}
 
 
 ## The only place `height_change_ahead` is compared to a number, so it carries two duties: the
@@ -669,6 +744,7 @@ func _verify_senses_are_in_the_car_frame() -> bool:
 	# pass that returned an empty DriverSenses twice would satisfy the walk below.
 	_check(first_senses.road_found and first_senses.has_rival_ahead and first_senses.has_obstacle_ahead, "the first placement senses a road, a rival and an obstacle")
 	_check(first_senses.lateral_offset != 0.0 and first_senses.heading_error != 0.0, "its road scalars are non-zero")
+	_check(first_senses.road_ahead_found and first_senses.road_ahead_lateral_offset != 0.0 and first_senses.road_ahead_heading_error != 0.0, "and it finds the road ahead, with non-zero scalars there too")
 	_check(first_senses.gradient_ahead != Vector2.ZERO and first_senses.height_change_ahead != 0.0, "its ground senses are non-zero")
 	_check(first_senses.rival_offset != Vector2.ZERO and first_senses.rival_relative_velocity != Vector2.ZERO, "its rival senses are non-zero")
 	_check(first_senses.obstacle_offset != Vector2.ZERO and first_senses.local_velocity != Vector2.ZERO, "its obstacle and velocity senses are non-zero")
@@ -690,7 +766,7 @@ func _verify_senses_are_in_the_car_frame() -> bool:
 	for difference in differences:
 		print("frame difference: %s" % difference)
 	print("frame: %d fields compared, %d agreed" % [compared, matched])
-	# Nineteen is what DriverSenses declares today; the bound is there so a walk that stopped seeing
+	# Twenty-two is what DriverSenses declares today; the bound is there so a walk that stopped seeing
 	# properties cannot report "all zero fields agreed" and pass, and so that dropping a field from
 	# the walk is a failure rather than a smaller number nobody reads.
 	_check(compared >= DECLARED_SENSE_FIELDS, "the walk saw every field of DriverSenses (%d)" % compared)
@@ -700,7 +776,7 @@ func _verify_senses_are_in_the_car_frame() -> bool:
 	return true
 
 
-## Five queries a tick, whatever the world holds, counted by fixtures the pass does not own. The
+## Six queries a tick, whatever the world holds, counted by fixtures the pass does not own. The
 ## count is pinned rather than described because it is the number that turns twenty cars from
 ## affordable into not, and because an extra ray is invisible in behaviour and obvious here.
 func _verify_the_query_budget_is_fixed() -> bool:
@@ -713,7 +789,7 @@ func _verify_the_query_budget_is_fixed() -> bool:
 	# A pass that bailed out early would spend nothing and satisfy an upper bound. The counts below
 	# only mean something if this pass did the whole job.
 	_check(senses.road_found and senses.has_rival_ahead and senses.has_obstacle_ahead, "the counted pass sensed the whole world rather than bailing out")
-	_check(surface.road_frame_calls == EXPECTED_ROAD_FRAME_QUERIES, "a pass asks the surface query for the road frame exactly %d time" % EXPECTED_ROAD_FRAME_QUERIES)
+	_check(surface.road_frame_calls == EXPECTED_ROAD_FRAME_QUERIES, "a pass asks the surface query for the road frame exactly %d times, under the car and at the look-ahead point" % EXPECTED_ROAD_FRAME_QUERIES)
 	_check(surface.sample_calls == EXPECTED_SURFACE_SAMPLE_QUERIES, "a pass samples the surface exactly %d time" % EXPECTED_SURFACE_SAMPLE_QUERIES)
 	_check(surface.distance_calls == 0, "a pass never calls distance_to_centerline directly")
 	_check(height.sample_calls == EXPECTED_HEIGHT_QUERIES, "a pass samples the height query exactly %d times" % EXPECTED_HEIGHT_QUERIES)
@@ -721,7 +797,7 @@ func _verify_the_query_budget_is_fixed() -> bool:
 	_check(surface.total_calls() + height.sample_calls + pass_under_test.ray_calls == EXPECTED_TOTAL_QUERIES, "a pass spends exactly %d queries in total" % EXPECTED_TOTAL_QUERIES)
 
 	# The count must not depend on what is out there. An empty field and a horizon that reaches
-	# nothing still cost the same five.
+	# nothing still cost the same six.
 	var lonely := CountingSurfaceQuery.new(world["surface"])
 	var lonely_height := CountingHeightQuery.new(world["height"])
 	var lonely_pass := InstrumentedPass.new(lonely, lonely_height, _break_frame)

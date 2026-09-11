@@ -1,12 +1,12 @@
 # AI opponents
 
-Epic #55. This document covers what tasks #56, #57 and #60 landed: the seam an AI drives through,
-the identity that makes each driver reproducible, the camera rule that lets more than one car
-exist, what a driver knows, the field of up to twenty rivals, per-car lap progress, and the
-standings. Judgement (#58), mistakes (#59) and scaling (#61) extend it.
+Epic #55. This document covers what tasks #56, #57, #58 and #60 landed: the seam an AI drives
+through, the identity that makes each driver reproducible, the camera rule that lets more than one
+car exist, what a driver knows, the driver that turns it into controls, the field of up to twenty
+rivals, per-car lap progress, and the standings. Mistakes (#59) and scaling (#61) extend it.
 
-Nothing here makes a car drive itself. It makes a field of cars possible, ranks it, and gives
-each of them something to react to.
+`ReactiveDriver` (#58) is the part that makes a car drive itself. The session does not use it yet:
+`MainSession` still spawns `IdleDriver` rivals and runs no sensing pass, and wiring both in is #61's.
 
 ## The seam
 
@@ -19,7 +19,19 @@ func drive(delta: float) -> VehicleInputState
 
 `TopDownCar.set_input_state()` already takes a `VehicleInputState`; `ControllerInput` produces one
 from hardware and `AiDriver` is the other producer. `IdleDriver` is the concrete neutral driver the
-field runs until reactive driving lands.
+field runs until reactive driving is wired in.
+
+`drive` carries no senses, so #58 added the one door they come in by, and the horizon a driver wants
+them built at. One tick, from whoever owns the field:
+
+```
+driver.perceive(sensing_pass.sense(field, index, driver.sensing_horizon()))
+car.set_input_state(driver.drive(delta))
+```
+
+`AiDriver.perceive` is a no-op and `sensing_horizon` returns 50 m, so the neutral drivers need no
+change to be driven this way. The neutral body stays in `AiDriver` rather than moving to `IdleDriver`:
+#56's issue says `AiDriver` itself returns neutral controls, and `ai_driver_contract_test` pins it.
 
 **A driver never holds a reference to the car it drives.** `_init` takes three integers and `drive`
 takes a float; senses arrive from task #57 as data. A driver that can reach its own `RigidBody2D`
@@ -175,7 +187,7 @@ what the driver *knows*, not about which engine call produced it.
 
 | Sense | Source | Why |
 | --- | --- | --- |
-| Where the road is | `SurfaceQuery.road_frame_at` | Analytic, indexed, the same centerline the car's own rules read |
+| Where the road is, under the car and at the look-ahead point | `SurfaceQuery.road_frame_at` | Analytic, indexed, the same centerline the car's own rules read |
 | What the surface is underneath | `SurfaceQuery.sample_at` | The car already samples exactly this |
 | Whether the ground ahead falls away | the injected `HeightQuery` | Lets a driver lift for a crest it is about to launch off |
 | Where the rivals are | the field's own car list | You have the list. Do not raycast for it. |
@@ -228,8 +240,32 @@ height is a world-frame value wearing a scalar's clothes — it says where on th
 what a driver gets is the *difference*: how much the ground ahead rises or falls from the ground
 under it. Negative means it is about to launch.
 
-The three `road_found` / `has_rival_ahead` / `has_obstacle_ahead` booleans gate the fields around
-them. When one is false its fields are zero and mean nothing; the flags are the contract.
+The four `road_found` / `road_ahead_found` / `has_rival_ahead` / `has_obstacle_ahead` booleans gate
+the fields around them. When one is false its fields are zero and mean nothing; the flags are the
+contract.
+
+### The road ahead (#58)
+
+`road_ahead_found`, `road_ahead_lateral_offset` and `road_ahead_heading_error` are the road at the
+look-ahead point -- where the ground probe and the ray already end -- read exactly as the road under
+the car is. They are the one sense #58 added, and it was needed rather than convenient: the car
+brakes at 15.5 m/s², so shedding top speed for a tight corner takes most of a look-ahead, and nothing
+under the car says a corner is coming until the car is in it. That physics is the case for the sense.
+The measurement agrees without settling it: with the three fields blanked, the committed driver still
+finishes seeds 0-2 but spends 7.0-10.8% of each lap on the grass, three excursions each; with them,
+none (`tests/reactive_driver_test.gd -- --blind-to-road-ahead` reproduces it). The suite's 5% off-road
+bound, which the blind driver fails, was set after both figures were seen, so it is not independent
+evidence.
+
+`heading_error - road_ahead_heading_error` is how far the road turns between the two points, and the
+car's own heading cancels out of it. The reading comes from the nearest centreline segment to the
+point, which on a winding circuit can be a different stretch of the lap; the fields say so rather
+than pretend otherwise. `_verify_the_road_is_read_ahead_of_the_car` pins both values beyond a
+30-degree bend, both ways round, against the fixture's geometry; answering "ahead" from the road
+under the car fails four named assertions.
+
+`rival_relative_velocity`'s comment said negative y is closing. It is the rival's velocity minus this
+car's, so a rival ahead gets closer as y grows; the comment is corrected and the value never moved.
 
 **What the two-placement check does not cover, which matters to whoever adds the next field.** It
 builds both placements from one local layout and carries them out through a placement transform, so
@@ -246,24 +282,26 @@ against a number of its own.
 ### Look-ahead is the one tunable
 
 How far ahead a driver senses is a parameter of `sense()`, not a constant inside it, because it is
-the single dial that most changes behaviour and task #59 varies it by skill. It bounds all three
-forward senses: the ground probe, the rival scan and the ray. It is also the road query's search
-radius, which makes it the dial that moves the cost.
+the single dial that most changes behaviour and task #59 varies it by skill. It bounds all four
+forward senses: the road ahead, the ground probe, the rival scan and the ray. It is also both road
+queries' search radius, which makes it the dial that moves the cost. A driver states the horizon it
+wants through `sensing_horizon()`.
 
 ### The budget
 
-A pass costs a **fixed five queries** whatever the world contains, none of them inside a loop:
+A pass costs a **fixed six queries** whatever the world contains, none of them inside a loop. #58's
+road ahead is the sixth:
 
 | Query | Count |
 | --- | --- |
-| `SurfaceQuery.road_frame_at` (under the car) | 1 |
+| `SurfaceQuery.road_frame_at` (under the car, and at the look-ahead point) | 2 |
 | `SurfaceQuery.sample_at` (under the car) | 1 |
 | `HeightQuery.sample_at` (under the car, and at the look-ahead point) | 2 |
 | `intersect_ray` | 1 |
 
-The rival scan issues none. `driver_senses_test` counts all five through fixtures the pass does not
-own — wrapped queries for the first four, a subclass override for the ray — and pins that twenty
-cars spend exactly a hundred.
+The rival scan issues none. `driver_senses_test` counts all six through fixtures the pass does not
+own — wrapped queries for the surface and height calls, a subclass override for the ray — and pins
+that twenty cars spend exactly a hundred and twenty.
 
 **Nothing is written, nothing is moved, and no sample is held across a query.** `TrackHeightMap`
 hands back one shared, re-zeroed sample on its miss path, so the ground under the car is read out
@@ -301,23 +339,234 @@ twice. The look-ahead curve, printed by the suite, across the same band:
 The conclusion does not depend on where in the band a machine lands: even the loaded end leaves five
 times the headroom the ×20 assertion needs. Plan with the upper figure.
 
+**After #58's sixth query.** The tables above are the five-query pass. Re-measured with the road ahead
+added -- three runs back to back at load 1.3-1.5, so a narrower band than the one above and not
+directly comparable to it:
+
+| Case | Per car | Twenty cars | Of a 16.6 ms frame |
+| --- | --- | --- | --- |
+| On the racing line, 400 px | 165–189 µs | 3.3–3.8 ms | 20–23% |
+| Parked in front of a solid, 400 px | 96–98 µs | 1.9–2.0 ms | 12% |
+| Look-ahead 200 px | 120–124 µs | 2.4–2.5 ms | |
+| Look-ahead 600 px | 198–203 µs | 4.0–4.1 ms | 24% |
+
+`ReactiveDriver` senses at 600 px, so the last row is the one a field of reactive drivers pays: about
+4 ms of every frame for twenty, before their physics. #61 measures the whole thing at size.
+
+## Reactive driving (#58)
+
+`ReactiveDriver` (`ai/reactive_driver.gd`) turns one tick's `DriverSenses` into a `VehicleInputState`.
+It has no route, no waypoint list and no memory of the lap. Between ticks it keeps only what a driver
+keeps: whether it is backing out of something and for how long, which way it chose to turn round, the
+last tick's `height_change_ahead` (lift reads a rate), and its recovery counts. Nothing it holds says
+where on the circuit it is.
+
+### Four jobs
+
+**Steer**, as a yaw rate asked for and divided by what full lock gives at this speed:
+
+```
+yaw = -2.4 * course_error - 2.4 * clamp(1.44 * offset / (2.4 * v), +-0.6) + 0.8 * v * turn / look_ahead
+```
+
+Two terms, because the lateral offset then obeys `offset'' + 2.4 offset' + 1.44 offset = 0` at every
+speed: critically damped at 1.2 rad/s. The heading term *is* the damping; without it the offset term
+is an undamped spring. The heading term reads the **course** -- heading error plus the slip angle
+from `local_velocity` -- because near the grip limit the nose points down the road while the car
+slides off it; damping the nose alone left seed 2 sliding wide through a long right-hander at the
+corner speed it had judged correctly. The feed-forward is the road's own turn across the look-ahead,
+from which the car's heading cancels, so it adds no heading information of its own.
+
+**Slow down.** Every reason is a distance and a speed the car must be down to by then, and all of them
+go through one braking distance, `(v² - v_req²) / (2 · 12 m/s²) + (v - v_req) · 0.15 s`:
+
+| Reason | Distance | Down to |
+| --- | --- | --- |
+| What it cannot see | the look-ahead, less 2 m | the speed for the tightest corner it expects (16 m at 13.6 m/s²) |
+| A corner ahead | where the bend starts | that bend's corner speed |
+| A road edge closing across the nose | where the nose would cross it on a straight road | 14 m/s, a speed it can turn away at |
+| A rival in its path | the gap, less 6 m | the rival's speed; inside the 6 m and not closing, it drops back |
+| An obstacle on the ray | its distance, less 4 m | a stop |
+
+The corner is read from the two road-ahead readings as a straight that becomes an arc: an arc of
+length b and radius R turns b/R and pushes a point on the straight's line b²/2R outside it, so the turn
+and the look-ahead point's unexplained offset give both. "In its path" is judged across the road, not
+off the nose line: the rival's offset is turned into the road's frame and the road's bend is taken off,
+or a car stopped mid-bend reads as beside the path. On top sit speed caps for the car's state now: 12
+m/s on grass, easing from 20 to 10 m/s as the heading error grows from 0.35 to 0.9 rad, 5 m/s wrong way
+round.
+
+**Lift** when the ground ahead falls away relative to the ground under the car faster than 0.03 per
+pixel travelled, above 20 m/s. A rate, not a level: across a 600 px horizon a plain downhill drops
+further than a ramp's 9 px crest, and a ramp on rising ground can read level. Measured on tuning laps,
+climbing a ramp face reads 0.043-0.073; terrain rarely reaches 0.03. The level rule it replaced lifted
+for 22-29% of the lap on the three tuning seeds measured and still missed launches.
+
+**Recover.** Slower than 1 m/s for 0.5 s while racing: reverse for 1.6 s with the nose swinging the way
+the road steering wanted, then 1 s of grace. Wrong way round (heading error past 90 degrees): full lock
+in one committed direction, held across the ±π seam. Off the road: the steering already heads back, at
+up to 0.6 rad, under the grass cap. Road not found at all: ask to sense at 120 m until it is.
+
+### What it believes about its car
+
+A driver holds no car and no tuning, so its model of its own car is written in the driver as beliefs,
+pessimistic on purpose against `default_vehicle_tuning.tres`:
+
+| Belief | Driver | The car |
+| --- | --- | --- |
+| Braking | 12 m/s² | 15.5 m/s² |
+| Cornering it will ask for | 13.6 m/s² | about 22 m/s² before the lateral limit |
+| Full-lock yaw rate | 1.75 rad/s above 18 m/s | the same (`max_steering_rate`, `steering_full_speed`) |
+| Tightest corner | 16 m | the generator's `MAX_CURVATURE`, 0.005 /px |
+
+A session that tunes the car differently leaves the driver's beliefs where they are. That is the
+price of a seam that refuses a tuning handle.
+
+### Look-ahead is the skill dial
+
+48 m (600 px) by default. Every one of the fifteen proof seeds laps cleanly from 30 m to 60 m, and the
+time moves smoothly with it, which is what #59 needs from it:
+
+| Look-ahead | Clean laps | Lap times |
+| --- | --- | --- |
+| 30 m | 15 / 15 | 76.6-106.1 s |
+| 38 m | 15 / 15 | 69.9-96.6 s |
+| 48 m | 15 / 15 | 64.0-87.9 s |
+| 60 m | 15 / 15 | 59.4-80.5 s |
+
+At 48 m the "what it cannot see" rule caps the car at 437 px/s. That is where most of the lap time
+between the rows goes.
+
+### What braking distance does and does not carry
+
+`--break-brake-distance` makes the braking distance a constant: the production answer from half of
+`max_safe_speed` to rest, 389 px. **It still completes every lap, cleanly and 15-20% faster**, and it
+does not trip the stuck rule. Nothing that drives in the suite can tell the speed-dependent term from a
+well-chosen constant on this generator's circuits. The review of #58 went further: a constant of 450 or
+500 px passes the whole suite -- every lap, recovery, parked-rival stop and the field -- except one unit
+check.
+
+**The one guard is a unit check.** `_verify_braking_distance_grows_with_speed` pairs an obstacle 300 px
+ahead at 150 and 400 px/s. It fails for *any* constant, because 250 px of room separates its two speeds:
+a constant of 250 px or more brakes the slow case, and one under 250 px lets the fast case drive on.
+That is a genuine guard for the formulation, but it is not the lap test or the stuck rule the issue
+names.
+
+Why laps do not need the term, measured across all fifteen seeds by the review:
+
+- **The driver's beliefs are pessimistic, and that is the main reason.** With rolling and aerodynamic
+  drag added to the brakes, the car's real stop from its capped 437 px/s is about 380-390 px; the driver
+  believes 702 px. From 595 px/s it is about 620 px against a belief of 1269. The 389 px constant is
+  almost exactly the car's real stop from its capped speed. Cornering is believed at 13.6 m/s² against
+  about 22. A car that stops roughly twice as hard as its driver thinks makes almost any constant in a
+  broad band work. A driver whose beliefs matched its car -- one lever #59 has -- would lose this slack.
+- **Generated corners arrive gradually.** The corner rule binds on 0-326 ticks a lap, never at all on
+  seeds 3 and 7, at most 208 px out and with at most 267 px of braking distance when it does -- all under
+  the constant, which therefore brakes earlier there, not later.
+- **The visibility cap is the speed governor**, the tightest margin on 2,788-4,583 ticks of every lap,
+  and it only ever trims the throttle. The constant switches it off. With the cap removed from production
+  instead, the car still laps every seed cleanly at about 595 px/s.
+
+The parked-rival stop is a test of the **rival rule**: remove `_rival_margin` and the car hits the
+parked rival at 411-437 px/s. It is not a guard for speed-dependent braking. The production driver comes
+to rest with its centre about 65 px from the rival's -- a 13 px gap between bumpers -- on all three seeds,
+two of them on bends. The 389 px constant, braking from about 478 px/s, hits the rival on all three at
+122-131 px/s (about 10 m/s), measured on the tick before contact. It fails there only because 389 px is
+close to the car's real stop; every constant from about 450 px passes. A contact count says nothing about
+how hard a car hit a frozen body -- two ticks for the 10 m/s hit, and two for a 430 px/s one with the
+rival rule removed. The field of twenty also passes under the constant (worst contact 2.3%).
+
+### Proof
+
+`tests/reactive_driver_test.gd`, against the production world -- `TrackRuntime` with its trees, rocks and
+play-area boundary in the physics space, the production surface and height maps, a production
+`SensingPass` -- with the car's **automatic reset off**, so nothing but the driver gets it home.
+
+- **Laps** on fifteen seeds: tuned on 0-4, and 5-14 run for the first time only once tuning was frozen.
+  Every lap completes, is never outside the play area or beyond the car's own lost distance, never
+  meets the stuck rule, spends at most 5% of its ticks off the dirt (every seed: 0.00%), and leaves the
+  ground on every flight with the throttle released. No lap needed a recovery.
+- **Stuck** is the car's own rule, the one its automatic reset fires on -- slower than
+  `auto_reset_stuck_speed` (2 m/s) for `auto_reset_stuck_seconds` (2 s) -- applied everywhere, not only
+  off the road. Fixed before anything was measured against it.
+- **Recovery** from three placed starts per seed on 0, 1, 2, 5, 6 and 7 -- wrong way round, off the road
+  facing away from it, and pinned nose-first against a rock -- each back to racing (two consecutive
+  checkpoints crossed forward) in 19-27 s without meeting the stuck rule. Each start carries a guard
+  that it really was what it claims -- a guard on the start, not the recovery; the rock guard is the ray
+  reading the rock at the 28 px it was placed at. The off-road start faces straight away from the road,
+  90 degrees off its direction, which reads as wrong-way on five of the six seeds, so it mostly
+  exercises the turn-around from off the road. Removing the stall reversal leaves every pinned start
+  sitting there until the stuck rule trips.
+- **A field of twenty** on seed 0, every car a `ReactiveDriver` on the session's grid (restated in
+  the suite, since the session's own method is private): all twenty lap, none meets the stuck rule
+  (longest slow spell 85 of 120 ticks), none strays, and no car touches another for more than 5% of
+  its lap (worst 3.3%). A baseline for #61, which owns the field. The 5% was set after the fact: the
+  first exploratory fields spent 20-40% of their laps in contact, because the rival rule only acted
+  while closing and a car that crept inside the gap at equal speed rode the bumper in front.
+- **Determinism**: two cars from the same pose on the same seed produce identical control streams, all
+  four values kept at the 64 bits `VehicleInputState` holds them at, over a whole lap (4692 ticks on
+  seed 3). A start 1 px to the side differs from tick 0, which is what shows the comparison can see a
+  difference.
+- **Senses only**: every field the driver declares is plain data, and the only object any of its
+  methods, own or inherited, accepts is `perceive()`'s `DriverSenses`. `ai_driver_contract_test` walks
+  `ReactiveDriver` alongside the neutral drivers. The walks cannot see a global reached by name; by
+  inspection the driver names nothing outside itself but `WorldScale`'s pure conversions, the
+  `SurfaceQuery.SurfaceType` enum, and the `VehicleInputState` it returns -- no autoload, no static
+  state, no clock and no random number.
+
+| Seed | Set | Lap | | Seed | Set | Lap |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 | tuned | 66.32 s | | 8 | held out | 64.87 s |
+| 1 | tuned | 84.17 s | | 9 | held out | 85.75 s |
+| 2 | tuned | 64.02 s | | 10 | held out | 84.65 s |
+| 3 | tuned | 78.20 s | | 11 | held out | 65.32 s |
+| 4 | tuned | 84.13 s | | 12 | held out | 81.23 s |
+| 5 | held out | 80.27 s | | 13 | held out | 87.85 s |
+| 6 | held out | 72.52 s | | 14 | held out | 69.07 s |
+| 7 | held out | 76.77 s | | | | |
+
+The map-following `LapDriver` the terrain suites lap with does 69.6-86.8 s on seeds 0, 4 and 9.
+
+### Limits worth knowing
+
+- **Rocks on raised ground are not there for a grounded car.** `TopDownCar` picks its collision mask
+  from its absolute height, so on terrain above the 12.5 px low-obstacle clearance it neither hits nor
+  senses rocks. That is the limitation the terrain epic deferred; the pinned-rock starts pick rocks a
+  grounded car can hit, and two first attempts that did not showed a car "pinned" beside a rock its
+  ray could not see.
+- **No overtaking, and nothing alongside.** The senses carry only the nearest rival *ahead*; a car
+  beside or behind is invisible, and every car's offset term pulls it to the centreline, so where the
+  grid's two columns merge the cars rub. A car catching a rival follows it; nothing steers round it.
+  A rival stopped in the middle of the road is followed to a halt; what happens after the halt is
+  untested, and nothing in the driver would take it round. Exploratory fields of twenty on seeds 0 and 5 both finished whole, none
+  stuck, with a median of 17-27 contact ticks per car; that is #61's starting point, not its proof.
+- **The visibility cap costs time on these circuits** (see above) without buying a lap. It is kept for
+  circuits whose corners arrive faster than this generator's.
+- **One field, one seed.** The rival rules are asserted on synthetic senses, against one parked rival
+  and in one field of twenty on seed 0; nothing here says how a field behaves across seeds.
+
 ## Verification
 
 ```sh
 godot --headless --path . --script res://tests/ai_driver_contract_test.gd
 godot --headless --path . --script res://tests/driver_senses_test.gd
+godot --headless --path . --script res://tests/reactive_driver_test.gd
 ```
 
 The first prints one deliberate `ERROR` line from its tuningless-car fixture; that error is the
-behaviour under test. Mutations, which must fail:
+behaviour under test. The reactive driver suite takes about three minutes. Mutations, which must fail:
 
 ```sh
 godot --headless --path . --script res://tests/driver_senses_test.gd -- --break-sense-frame
+godot --headless --path . --script res://tests/reactive_driver_test.gd -- --break-steer-heading
+godot --headless --path . --script res://tests/reactive_driver_test.gd -- --break-brake-distance
 ```
 
 | Flag | Suite | What it does |
 | --- | --- | --- |
 | `--break-sense-frame` | driver senses | Replaces the car's basis with an identity basis at the same origin, so every sense comes out in the world frame |
+| `--break-steer-heading` | reactive driver | Drops the heading term from steering. No seed completes a lap -- each spends 49-66% of five minutes on the grass -- and no recovery start gets back to racing |
+| `--break-brake-distance` | reactive driver | Makes the braking distance a constant. Laps still complete and the stuck rule never trips; the unit pair fails, and so does the parked-rival stop, only because 389 px is close to the car's real stop (see above) |
 
 `--break-sense-frame` is the whole point of the frame assertion. The pass reads its car's pose
 exactly once, through `SensingPass._car_frame()`; substituting an identity basis there leaves every

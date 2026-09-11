@@ -62,6 +62,28 @@ var heading_error: float = 0.0
 var distance_to_left_edge: float = 0.0
 var distance_to_right_edge: float = 0.0
 
+## The road where the car's nose points, `look_ahead` pixels out -- the same point the ground-ahead
+## probe and the obstacle ray end at. Everything above describes the road UNDER the car, which is
+## enough to follow it and not enough to drive it: a car braking at the tyres' limit needs most of
+## a look-ahead to shed top speed for a tight corner, and nothing under the car says a corner is
+## coming until it has arrived. These three are what a driver sees when it looks down the road.
+##
+## Road-relative, like the four above, and read the same way: measured from the NEAREST centerline
+## segment to that point, whichever part of the lap it belongs to. On a winding circuit that can be a
+## different stretch of road from the one the car is on, and nothing here claims otherwise.
+##
+## False when no centerline lies within the search region of that point; the two fields below are
+## then zero.
+var road_ahead_found: bool = false
+## Signed distance of the look-ahead point from the centerline, in pixels. Positive: the point lies to
+## the road's right. A car pointing straight down a straight road reads its own `lateral_offset`
+## here; the difference is how far the road bends, or the car is turned, across the horizon.
+var road_ahead_lateral_offset: float = 0.0
+## Signed angle in radians from the road's direction at the look-ahead point to the car's nose,
+## exactly as `heading_error` is at the car. `heading_error - road_ahead_heading_error` is how far the
+## road turns between the two -- the car's own heading cancels out of it.
+var road_ahead_heading_error: float = 0.0
+
 ## The surface directly under the car, from the same query the car's own physics samples.
 var surface_type: SurfaceQuery.SurfaceType = SurfaceQuery.SurfaceType.UNKNOWN
 var surface_grip: float = 1.0
@@ -82,7 +104,9 @@ var has_rival_ahead: bool = false
 ## a following rule actually reads, and recomputing a length from the offset every tick is waste.
 var rival_offset: Vector2 = Vector2.ZERO
 var rival_distance: float = 0.0
-## That rival's velocity minus this car's, in the car's basis. Negative y is closing.
+## That rival's velocity minus this car's, in the car's basis. POSITIVE y is closing: the rival sits
+## at negative y, and the gap shrinks as the rival moves back toward this car. (Until #58 this line
+## said "negative y is closing", which is backwards; the value itself never changed.)
 var rival_relative_velocity: Vector2 = Vector2.ZERO
 
 ## The nearest solid thing a single ray found straight ahead, within the look-ahead distance:
