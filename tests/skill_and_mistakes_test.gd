@@ -38,9 +38,10 @@ extends SceneTree
 ##                             different-cars assertions and the twins' "differ" assertion.
 ##   -- --break-skill-spread   collapses every derived skill to 0.5. Must fail the lap-time spread.
 ##   -- --leak-mistakes        evidence, not an issue flag: the switch hides the log but the mistakes
-##                             still act. Must fail the twins' suppression assertion, and passes the
-##                             issue's literal "two identical cars" wording, which is why that
-##                             wording is not the assertion this file relies on.
+##                             still act. Must fail the twins' suppression assertion and the
+##                             off-unless-asked unit check, and passes the issue's literal "two
+##                             identical cars" wording, which is why that wording is not the
+##                             assertion this file relies on.
 ##
 ## Exploration: --only=a,b runs only the named sections (units, repeat, plans, twins, spread, lowest,
 ## survival, field).
@@ -157,6 +158,11 @@ class ForcedMistakeDriver:
 
 	var forced_kind: int = Mistake.NONE
 	var mean_gap_override: float = -1.0
+	## --leak-mistakes reaches these drivers too: the switch then gates nothing.
+	var leaky: bool = false
+
+	func _mistakes_on() -> bool:
+		return leaky or super()
 
 	func _draw(n: int, draw: int) -> float:
 		if forced_kind == Mistake.NONE:
@@ -242,6 +248,7 @@ func _forced(kind: int, mistakes: bool, mean_gap: float) -> ForcedMistakeDriver:
 	driver.forced_kind = kind
 	driver.mean_gap_override = mean_gap
 	driver.mistakes_enabled = mistakes
+	driver.leaky = _leak
 	return driver
 
 
