@@ -250,9 +250,12 @@ contract.
 look-ahead point -- where the ground probe and the ray already end -- read exactly as the road under
 the car is. They are the one sense #58 added, and it was needed rather than convenient: the car
 brakes at 15.5 m/s², so shedding top speed for a tight corner takes most of a look-ahead, and nothing
-under the car says a corner is coming until the car is in it. With the three fields blanked, the same
-driver still finishes on seeds 0-2 but spends 8.2-12.7% of each lap on the grass across three to six
-excursions; with them, none (`tests/reactive_driver_test.gd -- --blind-to-road-ahead` reproduces it).
+under the car says a corner is coming until the car is in it. That physics is the case for the sense.
+The measurement agrees without settling it: with the three fields blanked, the committed driver still
+finishes seeds 0-2 but spends 7.0-10.8% of each lap on the grass, three excursions each; with them,
+none (`tests/reactive_driver_test.gd -- --blind-to-road-ahead` reproduces it). The suite's 5% off-road
+bound, which the blind driver fails, was set after both figures were seen, so it is not independent
+evidence.
 
 `heading_error - road_ahead_heading_error` is how far the road turns between the two points, and the
 car's own heading cancels out of it. The reading comes from the nearest centreline segment to the
@@ -437,20 +440,41 @@ between the rows goes.
 ### What braking distance does and does not carry
 
 `--break-brake-distance` makes the braking distance a constant: the production answer from half of
-`max_safe_speed` to rest, 389 px. **It still completes every lap, cleanly and 15-20% faster.** A
-generated corner slides into the horizon and tightens gradually, so by the time a corner's speed drops
-below the car's, the corner is close: measured, the corner rule binds on 68-144 ticks a lap, at a median
-66-78 px out and never beyond 185 px -- shorter than the constant, which therefore brakes *earlier*
-there, not later. The one rule where the square of speed bites on a lap is the visibility cap, and the
-constant switches it off. The lap test cannot tell the two apart on this generator's circuits.
+`max_safe_speed` to rest, 389 px. **It still completes every lap, cleanly and 15-20% faster**, and it
+does not trip the stuck rule. Nothing that drives in the suite can tell the speed-dependent term from a
+well-chosen constant on this generator's circuits. The review of #58 went further: a constant of 450 or
+500 px passes the whole suite -- every lap, recovery, parked-rival stop and the field -- except one unit
+check.
 
-What it does carry is stopping for something that is simply there: a rival parked on a ramp-free run,
-closed on from 437 px/s. The production driver comes to rest with its centre about 65 px from the
-rival's -- a 13 px gap between bumpers -- on all three seeds tested, two of them on bends; the constant,
-braking from about 478 px/s, brushes the rival on all three, for two ticks each. A brush, not a crash:
-the car brakes harder than the driver believes. That check was added after the lap test was found
-insensitive, and says so in its comment. The field of twenty also passes under the constant (worst
-contact 2.3%).
+**The one guard is a unit check.** `_verify_braking_distance_grows_with_speed` pairs an obstacle 300 px
+ahead at 150 and 400 px/s. It fails for *any* constant, because 250 px of room separates its two speeds:
+a constant of 250 px or more brakes the slow case, and one under 250 px lets the fast case drive on.
+That is a genuine guard for the formulation, but it is not the lap test or the stuck rule the issue
+names.
+
+Why laps do not need the term, measured across all fifteen seeds by the review:
+
+- **The driver's beliefs are pessimistic, and that is the main reason.** With rolling and aerodynamic
+  drag added to the brakes, the car's real stop from its capped 437 px/s is about 380-390 px; the driver
+  believes 702 px. From 595 px/s it is about 620 px against a belief of 1269. The 389 px constant is
+  almost exactly the car's real stop from its capped speed. Cornering is believed at 13.6 m/s² against
+  about 22. A car that stops roughly twice as hard as its driver thinks makes almost any constant in a
+  broad band work. A driver whose beliefs matched its car -- one lever #59 has -- would lose this slack.
+- **Generated corners arrive gradually.** The corner rule binds on 0-326 ticks a lap, never at all on
+  seeds 3 and 7, at most 208 px out and with at most 267 px of braking distance when it does -- all under
+  the constant, which therefore brakes earlier there, not later.
+- **The visibility cap is the speed governor**, the tightest margin on 2,788-4,583 ticks of every lap,
+  and it only ever trims the throttle. The constant switches it off. With the cap removed from production
+  instead, the car still laps every seed cleanly at about 595 px/s.
+
+The parked-rival stop is a test of the **rival rule**: remove `_rival_margin` and the car hits the
+parked rival at 411-437 px/s. It is not a guard for speed-dependent braking. The production driver comes
+to rest with its centre about 65 px from the rival's -- a 13 px gap between bumpers -- on all three seeds,
+two of them on bends. The 389 px constant, braking from about 478 px/s, hits the rival on all three at
+122-131 px/s (about 10 m/s), measured on the tick before contact. It fails there only because 389 px is
+close to the car's real stop; every constant from about 450 px passes. A contact count says nothing about
+how hard a car hit a frozen body -- two ticks for the 10 m/s hit, and two for a 430 px/s one with the
+rival rule removed. The field of twenty also passes under the constant (worst contact 2.3%).
 
 ### Proof
 
@@ -468,8 +492,11 @@ play-area boundary in the physics space, the production surface and height maps,
 - **Recovery** from three placed starts per seed on 0, 1, 2, 5, 6 and 7 -- wrong way round, off the road
   facing away from it, and pinned nose-first against a rock -- each back to racing (two consecutive
   checkpoints crossed forward) in 19-27 s without meeting the stuck rule. Each start carries a guard
-  that it really was what it claims; the rock guard is the ray reading the rock at the 28 px it was
-  placed at.
+  that it really was what it claims -- a guard on the start, not the recovery; the rock guard is the ray
+  reading the rock at the 28 px it was placed at. The off-road start faces straight away from the road,
+  90 degrees off its direction, which reads as wrong-way on five of the six seeds, so it mostly
+  exercises the turn-around from off the road. Removing the stall reversal leaves every pinned start
+  sitting there until the stuck rule trips.
 - **A field of twenty** on seed 0, every car a `ReactiveDriver` on the session's grid (restated in
   the suite, since the session's own method is private): all twenty lap, none meets the stuck rule
   (longest slow spell 85 of 120 ticks), none strays, and no car touches another for more than 5% of
@@ -477,8 +504,9 @@ play-area boundary in the physics space, the production surface and height maps,
   first exploratory fields spent 20-40% of their laps in contact, because the rival rule only acted
   while closing and a car that crept inside the gap at equal speed rode the bumper in front.
 - **Determinism**: two cars from the same pose on the same seed produce identical control streams, all
-  four values, over a whole lap (4692 ticks on seed 3). A start 1 px to the side differs from tick 0,
-  which is what shows the comparison can see a difference.
+  four values kept at the 64 bits `VehicleInputState` holds them at, over a whole lap (4692 ticks on
+  seed 3). A start 1 px to the side differs from tick 0, which is what shows the comparison can see a
+  difference.
 - **Senses only**: every field the driver declares is plain data, and the only object any of its
   methods, own or inherited, accepts is `perceive()`'s `DriverSenses`. `ai_driver_contract_test` walks
   `ReactiveDriver` alongside the neutral drivers. The walks cannot see a global reached by name; by
@@ -538,7 +566,7 @@ godot --headless --path . --script res://tests/reactive_driver_test.gd -- --brea
 | --- | --- | --- |
 | `--break-sense-frame` | driver senses | Replaces the car's basis with an identity basis at the same origin, so every sense comes out in the world frame |
 | `--break-steer-heading` | reactive driver | Drops the heading term from steering. No seed completes a lap -- each spends 49-66% of five minutes on the grass -- and no recovery start gets back to racing |
-| `--break-brake-distance` | reactive driver | Makes the braking distance a constant. Laps still complete; the unit check and the parked-rival stop fail (see above) |
+| `--break-brake-distance` | reactive driver | Makes the braking distance a constant. Laps still complete and the stuck rule never trips; the unit pair fails, and so does the parked-rival stop, only because 389 px is close to the car's real stop (see above) |
 
 `--break-sense-frame` is the whole point of the frame assertion. The pass reads its car's pose
 exactly once, through `SensingPass._car_frame()`; substituting an identity basis there leaves every
