@@ -15,7 +15,7 @@ extends RefCounted
 ##
 ## | Sense | Source | Why |
 ## | --- | --- | --- |
-## | Where the road is | `SurfaceQuery.road_frame_at` | Analytic, indexed, the same centerline the car's own rules read |
+## | Where the road is, here and ahead | `SurfaceQuery.road_frame_at` | Analytic, indexed, the same centerline the car's own rules read |
 ## | What is underneath | `SurfaceQuery.sample_at` | The car already samples exactly this |
 ## | The ground ahead | the injected `HeightQuery` | Lets a driver lift for a crest it is about to launch off |
 ## | Where the rivals are | the field's own list | You have the list. Do not raycast for it. |
@@ -29,11 +29,12 @@ extends RefCounted
 ##
 ## ## The budget
 ##
-## A pass costs a fixed **five** queries whatever the world contains: two on the surface query
-## (`road_frame_at` and `sample_at`, both under the car), two on the height query (under the car and
-## at the look-ahead point), and one physics ray. None of them sit inside a loop, and the rival
-## scan issues none at all. tests/driver_senses_test.gd counts all five through its own fixtures
-## and fails if the number moves.
+## A pass costs a fixed **six** queries whatever the world contains: three on the surface query
+## (`road_frame_at` under the car and at the look-ahead point, `sample_at` under the car), two on the
+## height query (under the car and at the look-ahead point), and one physics ray. None of them sit
+## inside a loop, and the rival scan issues none at all. tests/driver_senses_test.gd counts all six
+## through its own fixtures and fails if the number moves. Task #58 raised it from five: the second
+## road frame is how a driver sees a corner before it is in one.
 ##
 ## ## Purity
 ##
@@ -76,6 +77,7 @@ func sense(field: Array[TopDownCar], car_index: int, look_ahead: float) -> Drive
 	senses.local_velocity = frame.basis_xform_inv(car.linear_velocity)
 
 	_sense_road(senses, position, forward, look_ahead)
+	_sense_road_ahead(senses, look_ahead_point, forward, look_ahead)
 	_sense_surface(senses, position)
 	_sense_ground(senses, frame, position, look_ahead_point)
 	_sense_rivals(senses, field, car_index, frame, position, car.linear_velocity, look_ahead)
@@ -117,6 +119,23 @@ func _sense_road(senses: DriverSenses, position: Vector2, forward: Vector2, look
 	# far outside it is, which a recovery rule needs and a clamp to zero would erase.
 	senses.distance_to_right_edge = road.half_width - road.lateral_offset
 	senses.distance_to_left_edge = road.half_width + road.lateral_offset
+
+
+## The road at the look-ahead point: a second road_frame_at, and the only query task #58 added.
+##
+## Asked with the same search radius as the road under the car, which is what makes it answer
+## whenever the car is on the road at all: the point is exactly `look_ahead` from the car, so the
+## road the car stands on is always inside that radius of it. What comes back may be a nearer stretch
+## of the lap instead; DriverSenses says so rather than pretending otherwise.
+func _sense_road_ahead(senses: DriverSenses, look_ahead_point: Vector2, forward: Vector2, look_ahead: float) -> void:
+	if _surface_query == null:
+		return
+	var road := _surface_query.road_frame_at(look_ahead_point, _road_search_radius(look_ahead))
+	senses.road_ahead_found = road.found
+	if not road.found:
+		return
+	senses.road_ahead_lateral_offset = road.lateral_offset
+	senses.road_ahead_heading_error = road.tangent.angle_to(forward)
 
 
 func _sense_surface(senses: DriverSenses, position: Vector2) -> void:
