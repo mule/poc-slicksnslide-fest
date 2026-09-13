@@ -151,6 +151,26 @@ const STALL_SPEED_M := 1.0
 const STALL_SECONDS := 0.5
 const REVERSE_SECONDS := 1.6
 const RECOVERY_GRACE_SECONDS := 1.0
+## Seconds into a reversal by which the car must be rolling backwards faster than STALL_SPEED_M, or
+## the reversal ends. Unobstructed, the car's reverse engages after 0.4 s and passes that speed about
+## 0.17 s later.
+const REVERSE_PROGRESS_SECONDS := 0.8
+
+## Going round a car stopped in the path (#61). A stall with a rival in the lane no further than
+## PASS_BLOCKED_GAP_M ahead is a blocked stall: nothing in front of the car will ever move it on, and
+## backing out only to drive up to the same car again cycles for as long as that car stays put. So the
+## reversal swings the nose to the side of the rival with more road, and then the car aims
+## PASS_CLEARANCE_M to that side of whatever rival is nearest ahead within PASS_TRACK_M, never nearer
+## an edge than PASS_EDGE_KEEP_M, at no more than PASS_SPEED_M. The pass ends once no rival has been
+## that close ahead for PASS_CLEAR_SECONDS, or after PASS_TIMEOUT_SECONDS of racing; a stall while
+## passing tries the other side.
+const PASS_BLOCKED_GAP_M := 8.0
+const PASS_CLEARANCE_M := 4.0
+const PASS_TRACK_M := 12.0
+const PASS_EDGE_KEEP_M := 1.5
+const PASS_SPEED_M := 8.0
+const PASS_CLEAR_SECONDS := 1.0
+const PASS_TIMEOUT_SECONDS := 6.0
 
 ## Skill 0.0, the least skilled driver there is. Skill 1.0 is LOOK_AHEAD_M and
 ## CORNERING_ACCELERATION_M above; between the two every dial moves linearly.
@@ -231,6 +251,13 @@ var road_returns: int:
 var recoveries: int:
 	get:
 		return _reversals + _turn_arounds + _road_returns
+## How many times a blocked stall sent this driver round the car in front, and whether it is now.
+var passes: int:
+	get:
+		return _passes
+var passing: bool:
+	get:
+		return _pass_side != 0.0
 
 var _mode: int = Mode.RACE
 var _mode_time: float = 0.0
@@ -249,6 +276,15 @@ var _was_wrong_way: bool = false
 var _reversals: int = 0
 var _turn_arounds: int = 0
 var _road_returns: int = 0
+## Going round a stopped car: the side (-1 the road's left, +1 its right, 0 not passing), the offset
+## aimed at, seconds of racing spent passing, and seconds since a rival was last close ahead.
+var _pass_side: float = 0.0
+var _pass_target: float = 0.0
+var _pass_time: float = 0.0
+var _pass_clear_time: float = 0.0
+## Whether a rival sat in the lane close ahead at any tick of the stall now being timed.
+var _stalled_behind_a_rival: bool = false
+var _passes: int = 0
 
 ## The senses this tick, copied out of the DriverSenses as plain values. Only what the driver reads.
 var _has_senses: bool = false
@@ -423,12 +459,17 @@ func drive(delta: float) -> VehicleInputState:
 	_tick += 1
 	if _mode == Mode.REVERSE:
 		_mode_time += delta
-		if _mode_time < REVERSE_SECONDS:
+		# A reversal that has had time to get going and is still not rolling backwards is backing into
+		# something it cannot see -- in a field, the car queued behind -- and holding it only wastes
+		# the time the car has to get moving again.
+		var backing_into_something := _mode_time >= REVERSE_PROGRESS_SECONDS and speed > -WorldScale.metres(STALL_SPEED_M)
+		if _mode_time < REVERSE_SECONDS and not backing_into_something:
 			controls.set_controls(_reverse_steer, 0.0, 1.0, 0.0)
 			return controls
 		_mode = Mode.RACE
 		_mode_time = 0.0
 		_grace = RECOVERY_GRACE_SECONDS
+	_follow_the_pass(delta)
 	var yaw := _steer_toward_road(speed)
 	var pedals := _pedals(speed)
 	controls.set_controls(_steer_for_yaw(yaw, speed), pedals.x, pedals.y, 0.0)
@@ -451,6 +492,8 @@ func _steer_toward_road(speed: float) -> float:
 	var offset := _lateral_offset
 	if _committing(Mistake.WIDE_LINE):
 		offset -= _wide_line_target()
+	if _pass_side != 0.0:
+		offset -= _pass_target
 	var yaw := -_heading_term(_course_error(speed)) - _offset_term(offset, speed)
 	return yaw + CURVE_FEEDFORWARD * _road_turn_rate(speed)
 
@@ -617,7 +660,7 @@ func _edge_margin(speed: float) -> float:
 ## the rival's bumper. (The first version returned no constraint at all whenever the car was not
 ## closing, and a field of six drove nose to tail in contact for most of a lap.)
 func _rival_margin() -> float:
-	if not _rival_ahead or absf(_rival_path_offset()) > WorldScale.metres(RIVAL_LANE_HALF_WIDTH_M):
+	if not _rival_ahead or absf(_rival_path_offset() - _pass_shift()) > WorldScale.metres(RIVAL_LANE_HALF_WIDTH_M):
 		return INF
 	var gap := _rival_distance - WorldScale.metres(FOLLOW_GAP_M)
 	# The rival's velocity minus this car's: a rival ahead (negative y) gets closer as that y grows.
@@ -650,6 +693,8 @@ func _speed_cap() -> float:
 	var cap := INF
 	if _off_road:
 		cap = WorldScale.metres(OFF_ROAD_SPEED_M)
+	if _pass_side != 0.0:
+		cap = minf(cap, WorldScale.metres(PASS_SPEED_M))
 	if _road_found:
 		var misalignment := absf(_heading_error)
 		if misalignment > WRONG_WAY_ANGLE:
@@ -666,23 +711,96 @@ func _watch_for_a_stall(delta: float, speed: float, yaw: float) -> void:
 	if _grace > 0.0:
 		_grace -= delta
 		_stall_time = 0.0
+		_stalled_behind_a_rival = false
 		return
 	if absf(speed) >= WorldScale.metres(STALL_SPEED_M):
 		_stall_time = 0.0
+		_stalled_behind_a_rival = false
 		return
 	_stall_time += delta
+	# Remembered across the stall rather than read on its last tick: in a knot of cars the nearest one
+	# ahead changes from tick to tick, and the one that stopped this car may be beside it by then.
+	_stalled_behind_a_rival = _stalled_behind_a_rival or _blocked_by_a_rival()
 	if _stall_time < STALL_SECONDS:
 		return
 	_stall_time = 0.0
+	var blocked := _stalled_behind_a_rival and _rival_ahead
+	_stalled_behind_a_rival = false
+	if blocked and _pass_side == 0.0:
+		# Stalled nose to tail: go round it forwards. Backing out first would back into whatever has
+		# queued up behind, which the car cannot see.
+		_start_a_pass(_side_with_more_road())
+		_grace = RECOVERY_GRACE_SECONDS
+		return
 	_mode = Mode.REVERSE
 	_mode_time = 0.0
 	_reversals += 1
 	var wanted := signf(yaw)
 	if wanted == 0.0:
 		wanted = -signf(_lateral_offset) if _lateral_offset != 0.0 else 1.0
+	if blocked:
+		# Stalled again while going round: that side did not work. Back out toward the other.
+		_start_a_pass(-_pass_side)
+		wanted = _pass_side
+	else:
+		_pass_side = 0.0
 	# Rolling backwards, TopDownCar turns the other way for the same input, so the nose swings toward
 	# `wanted` with the input reversed.
 	_reverse_steer = -wanted
+
+
+func _start_a_pass(side: float) -> void:
+	_pass_side = side
+	_pass_target = _pass_offset()
+	_pass_time = 0.0
+	_pass_clear_time = 0.0
+	_passes += 1
+
+
+## A rival in the lane, close enough in front that the car's own stall is its doing.
+func _blocked_by_a_rival() -> bool:
+	return _rival_ahead and _rival_distance <= WorldScale.metres(PASS_BLOCKED_GAP_M) and absf(_rival_path_offset()) <= WorldScale.metres(RIVAL_LANE_HALF_WIDTH_M)
+
+
+## Where across the road the nearest rival ahead sits, as a lateral offset like the car's own.
+func _rival_road_offset() -> float:
+	return _lateral_offset + _rival_path_offset()
+
+
+## +1 to go round on the road's right of the rival ahead, -1 on its left: whichever has more road.
+func _side_with_more_road() -> float:
+	var rival := _rival_road_offset()
+	var half_width := 0.5 * (_left_margin + _right_margin)
+	return 1.0 if half_width - rival >= half_width + rival else -1.0
+
+
+## The offset the pass aims at: PASS_CLEARANCE_M to the chosen side of the rival ahead, kept
+## PASS_EDGE_KEEP_M inside the road.
+func _pass_offset() -> float:
+	var half_width := 0.5 * (_left_margin + _right_margin)
+	var room := maxf(half_width - WorldScale.metres(PASS_EDGE_KEEP_M), 0.0)
+	return clampf(_rival_road_offset() + _pass_side * WorldScale.metres(PASS_CLEARANCE_M), -room, room)
+
+
+## One racing tick of going round: aim beside whatever rival is close ahead, and let go once none has
+## been for PASS_CLEAR_SECONDS, or the pass has taken PASS_TIMEOUT_SECONDS.
+func _follow_the_pass(delta: float) -> void:
+	if _pass_side == 0.0:
+		return
+	_pass_time += delta
+	if _rival_ahead and _road_found and _rival_distance <= WorldScale.metres(PASS_TRACK_M):
+		_pass_target = _pass_offset()
+		_pass_clear_time = 0.0
+	else:
+		_pass_clear_time += delta
+	if _pass_clear_time >= PASS_CLEAR_SECONDS or _pass_time >= PASS_TIMEOUT_SECONDS or not _road_found:
+		_pass_side = 0.0
+
+
+## While going round, a rival is judged against the line the car is aiming for, not the one it is on:
+## the rival it is passing is beside that line by construction, and would otherwise hold it back.
+func _pass_shift() -> float:
+	return _pass_target - _lateral_offset if _pass_side != 0.0 else 0.0
 
 
 ## Counts a recovery each time the car enters a state it has to recover from.
@@ -732,7 +850,7 @@ func _decide_mistakes(delta: float, speed: float) -> void:
 ## On the road, aligned with it, at speed and not recovering. The only state a mistake is begun in,
 ## the only state the gap between mistakes counts down in, and the state leaving which ends one.
 func _racing_cleanly(speed: float) -> bool:
-	return _mode == Mode.RACE and _grace <= 0.0 and _road_found and not _off_road and absf(_heading_error) <= MISALIGNED_ANGLE and speed >= WorldScale.metres(MISTAKE_MIN_SPEED_M)
+	return _mode == Mode.RACE and _grace <= 0.0 and _pass_side == 0.0 and _road_found and not _off_road and absf(_heading_error) <= MISALIGNED_ANGLE and speed >= WorldScale.metres(MISTAKE_MIN_SPEED_M)
 
 
 func _plan_next_mistake() -> void:
