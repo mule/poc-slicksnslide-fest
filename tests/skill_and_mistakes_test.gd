@@ -813,7 +813,8 @@ func _verify_every_mistake_is_survivable() -> bool:
 ##
 ## Running first puts this field in the phase and the space `--only=field` has. That is a measurement
 ## fix, not a cure. The cure -- a snapped spawn, a fresh space per race, and a test that runs the same
-## race twice in one process with different histories between -- is #61's. When the first full run
+## race twice in one process with different histories between -- is #61's, in MainSession and
+## tests/field_race_test.gd; this section builds its field by hand and has neither. When the first full run
 ## failed this section's guard (89 comparable pairs against a fresh field's 104), the guard was not
 ## lowered to make that run pass. Once the review had named the mechanism, it was given a basis that
 ## does not depend on which race is driven -- a quarter of the pairs, 48 -- see below.
