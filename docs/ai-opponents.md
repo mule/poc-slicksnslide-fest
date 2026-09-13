@@ -284,16 +284,18 @@ every race. In the game the session is the whole scene, so nothing is. `field_ra
 assertion checks that the `World2D` object changed across the restart. That shows the swap ran; it
 cannot tell a space holding nothing from before from one that carried an outside body in.
 
-**What is asserted** (`tests/field_race_test.gd`, 32 checks, about 3.5 minutes):
+**What is asserted** (`tests/field_race_test.gd`, 37 checks, about 2.5 minutes):
 
 - **A full-field race.** Twenty rivals on seed 0, mistakes off, the player idle at pole: every rival
-  laps, none meets the stuck rule (longest slow streak 95 of 120 ticks), none leaves the play area or
-  gets lost.
+  is watched driving and laps, none meets the stuck rule, none leaves the play area or gets lost. The
+  longest slow streak is 91 of 120 ticks **on seed 0**; that is seed 0's margin, not the field's. The
+  #61a review ran the same field on seed 41 and it met the stuck rule (177 of 120). Nothing here
+  asserts another seed, and the driving fix is part B's.
 - **Deterministic final standings.** Race 1 is a new session's restart from an idle frame; race 2 is
   an in-session restart after the session has raced seed 1, called from a physics frame so one step
   runs before the first sense (0 steps against 1, counted by a probe body). Same finishing order, every
   rival on the same finishing tick, every rival's control stream identical at 64 bits.
-- **Collision does not desync a run.** All twenty rivals touch another car before finishing (2,092
+- **Collision does not desync a run.** All twenty rivals touch another car before finishing (1,730
   contact ticks) and every one's stream is still identical.
 - **The mistake switch is total**: on, all twenty drivers have mistakes on and each has drawn a mistake
   within 25 s; off, none has, none planned one and none logged one over the race.

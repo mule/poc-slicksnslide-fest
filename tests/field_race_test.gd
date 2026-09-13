@@ -177,7 +177,13 @@ func _verify_rivals_spawn_at_physics_fixed_points() -> bool:
 	root.add_child(session)
 	await process_frame
 	# Read by name, so this suite still loads -- and fails here by name -- against a session without them.
-	var constants := session.get_script().get_script_constant_map() as Dictionary
+	var constants := {}
+	var script := session.get_script() as Script
+	while script != null:
+		for name in script.get_script_constant_map():
+			if not constants.has(name):
+				constants[name] = script.get_script_constant_map()[name]
+		script = script.get_base_script()
 	var lattice := float(constants.get("SPAWN_ANGLE_LATTICE", 0.0))
 	var max_steps := int(constants.get("SPAWN_ANGLE_MAX_STEPS", -1))
 	_check(lattice > 0.0 and max_steps >= 0, "the session declares its spawn-angle lattice (%s) and its proved bound (%d steps)" % [lattice, max_steps])
