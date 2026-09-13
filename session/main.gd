@@ -429,14 +429,17 @@ func get_player_position() -> int:
 	return get_race_order().find(0) + 1
 
 
-## Every race gets a physics space no other race has used. Measured on seed 0 with twenty rivals: a
+## Every race gets a new physics space. Measured on seed 0 with twenty rivals: a
 ## restart into the viewport's existing space did not reproduce the race -- racing seed 1 first
 ## changed 18 of 20 cars, racing seed 0 itself first changed 20, and seeds 1 then 2 first changed
 ## none -- while the same three histories with a fresh World2D before the restart each drove the
 ## reference race bit for bit. What inside a reused space carries the history was not measured.
 ##
 ## The previous race's track and cars are freed first, so they never enter the new space on their way
-## out, and the persistent World nodes re-enter the new world's canvas with it.
+## out, and the persistent World nodes re-enter the new world's canvas with it. The swap is the
+## viewport's, so anything else living in that viewport comes along too: a StaticBody2D kept in the root
+## beside the session was in each new space after every restart, and a rival's ray hit it there. The new
+## space is new only of what this restart freed.
 func _host_race_in_a_fresh_world() -> void:
 	for mount in [%TrackMount, %VehicleMount]:
 		for child in mount.get_children():

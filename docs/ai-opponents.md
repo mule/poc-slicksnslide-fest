@@ -4,8 +4,9 @@ Epic #55. This document covers what tasks #56, #57, #58 and #60 landed: the seam
 through, the identity that makes each driver reproducible, the camera rule that lets more than one
 car exist, what a driver knows, the driver that turns it into controls, the field of up to twenty
 rivals, per-car lap progress, and the standings; and what #59 added to the driver: a skill per car
-and deliberate mistakes that are seeded, logged and off by default. #61 wires all of it into the game
-and makes the field race the same way twice; see "Driving the field (#61)".
+and deliberate mistakes that are seeded, logged and off by default. #61 wires all of it into the game,
+and a field of twenty on seed 0 races the same way twice across the two spawn histories its suite
+varies (one machine; the scope is under "Driving the field (#61)").
 
 `ReactiveDriver` (#58) is the part that makes a car drive itself. Since #61 every rival
 `MainSession` spawns drives with one, sensed by the session's own `SensingPass`.
@@ -134,8 +135,12 @@ through `get_session_snapshot()`. Task #60 spawns the field from it.
 session spawns takes it. It is **false in code** -- the default `ReactiveDriver` has too, and every
 test builds its settings with `SessionSettings.new()`, so a test races a flawless field unless it
 asks -- and **true in the shipped `data/default_session_settings.tres`**, because opponents that make
-deliberate mistakes are the epic's design. The shipped `opponent_count` is still 0, so the game as it
-starts shows no rivals until the count is raised.
+deliberate mistakes are the epic's design.
+
+The shipped `data/default_session_settings.tres` sets `opponent_count = 10` (owner decision, #61 fix
+round 1); the code default stays 0, so a test that builds `SessionSettings.new()` spawns only what it
+asks for. Launched as the game, the main scene mounts eleven cars and all ten rivals drive off the grid.
+A suite that loads `main.tscn` with the shipped resource gets those ten rivals, mistakes on.
 
 ## The field (#60)
 
@@ -169,8 +174,9 @@ faces its local direction of travel. The layout is a pure function of the defini
 number: no slot depends on the count, and the same seed always places the same cars in the same
 slots. A car starting behind the line crosses the start/finish gate forward on launch; the
 checkpoint rules already ignore it (it is not the next gate), which is exactly the standing start.
-Each rival is placed at its grid pose's physics fixed point, not the pose as computed; see "Driving
-the field (#61)". The player's pose is `spawn_transform` exactly, unsnapped.
+Each rival is placed at a pose a physics step leaves unchanged, within 9.9e-5 rad of the grid's
+rotation at the same origin; see "Driving the field (#61)". The player's pose is `spawn_transform`
+exactly, unsnapped.
 
 Cars keep collision layer 1 and mask 3, shared with trees and the world boundary, so car-to-car
 contact works without a layer change — confirmed against the physics server in
@@ -219,12 +225,27 @@ count 0 there are no rivals, no `SensingPass` is built and nothing runs.
 angle in 32-bit `real_t`, which re-rounds a basis built any other way in its last digit. The #59 review
 found that whether a step runs between spawn and first sense therefore decides which race the field
 drives. In the session, on seed 0 with twenty rivals, a restart followed by one step before the first
-sense changed 10 of 20 cars' control streams and swapped two finishers. `_physics_fixed_pose` rebuilds
-each grid pose from its rotation and origin until nothing changes, and the rival is placed there; both
-spawns then drive the identical race. The review's loop stopped at 8 rounds; seed 3's slots 11 and 12
-need 14, so the loop runs to convergence (every grid pose on seeds 0-39 converges, none cycles) with a
-64-round guard that reports. A probe confirmed the rebuild is exactly what the server does to a
-resting `RigidBody2D`, step for step. On seeds 0-19, 114 of 400 raw grid poses are not fixed points.
+sense changed 10 of 20 cars' control streams and swapped two finishers. A probe confirmed the rebuild
+is exactly what the server does to a resting `RigidBody2D`, step for step. On seeds 0-19, 114 of 400 raw
+grid poses are not fixed points.
+
+*How the fixed pose is found.* The #59 review's fix rebuilt the pose until nothing changed. #61 first
+capped that at 8 rounds, then 64; **neither was a fix**. The #61a review found seed 41's rivals 11-12 need
+148 rounds and 13-14 need 14,670, and seed 58's 5-6 need 74; at the cap the code only logged an error and
+placed them unsnapped. An exhaustive sweep then settled that no cap is safe: a C model of the rebuild
+(`cosf`, `sinf`, `atan2f` from this machine's glibc, which matched the engine bit for bit on 1,000,000
+angles while the double-precision variants did not) over every float32 angle in [-pi, pi] found runs of
+about 3.7 million consecutive angles that a step moves.
+
+So `_physics_fixed_pose` no longer iterates. It moves the rotation onto a lattice of 2^-16 rad -- every
+point exactly representable in float32 -- and takes the nearest lattice angle the rebuild leaves
+unchanged (nearest first, the higher angle first at equal distance), at the pose's own origin. Of the
+411,775 lattice angles a rotation in [-pi, pi] can round to, 24,478 are moved by a step, and none is
+more than `SPAWN_ANGLE_MAX_STEPS` = 6 steps from a fixed one, so a rival's rotation moves at most
+6.5 x 2^-16 = 9.9e-5 rad from the grid's. The bound is exhaustive over the lattice, the C model found the
+same 24,478 and the same worst case (6 steps, at 0.0337 rad), and `field_race_test` re-proves it in the
+engine on every run, so it holds for whatever math library the suite runs on. Past it is a hard failure:
+an assertion (a SCRIPT ERROR that aborts the spawn in any debug build or test) plus an error in release.
 
 The player's pose is not snapped: it is `spawn_transform` exactly, which #60 pins, and on 6 of seeds
 0-19 (0, 4, 7, 15, 16, 19) that is not a fixed point either. On seed 0 it did not reach the race --
@@ -243,7 +264,9 @@ new process:
 | seed 1 for 5,900 physics frames | 18 (the same race as 600) |
 | seed 1 for 600, then seed 2 for 600 | 0 |
 
-The effect follows which tracks the space held, not for how long. With `root.world_2d = World2D.new()`
+These rows were measured with the iteration snap of the time. Seed 1 held for 600 or for 5,900 frames
+gave the same race, so duration did not matter there; the rows show no simple rule about which tracks
+were held (seed 0 itself changed all twenty, seeds 1 then 2 changed none). With `root.world_2d = World2D.new()`
 before the restart, the first three histories each drove the reference race bit for bit. So
 `restart_with_seed` now frees the previous race's track and cars and then gives the viewport a new
 `World2D` (`_host_race_in_a_fresh_world`) before building; with that, all four histories above drive
@@ -252,9 +275,14 @@ check showed the track, objects, cars, HUD and camera drawing after two restarts
 reused space carries the history -- broadphase pairing, allocation order or anything else -- was not
 measured**, and nothing here names it.
 
-Because the swap is the root viewport's, a restart moves anything else living in that viewport to the
-new world too. In the game the session is the whole scene; a test that keeps its own bodies in the
-root across a session restart will find them in a space the race does not use.
+The swap is the session's viewport's (the root in the game; a `SubViewport` in the capture scripts), so
+anything else living in that viewport moves into the new world with it. Measured (#61a fix round 1):
+a `StaticBody2D` kept in the root beside the session was, after each of two restarts, in the new root
+space -- `PhysicsServer2D.body_get_space` equal to it -- and a ray cast in a rival's world hit it 400 px
+out. So the race's space is new only of what the restart freed; a body outside `World` is carried into
+every race. In the game the session is the whole scene, so nothing is. `field_race_test`'s `FRESH WORLD`
+assertion checks that the `World2D` object changed across the restart. That shows the swap ran; it
+cannot tell a space holding nothing from before from one that carried an outside body in.
 
 **What is asserted** (`tests/field_race_test.gd`, 32 checks, about 3.5 minutes):
 
@@ -269,16 +297,18 @@ root across a session restart will find them in a space the race does not use.
   contact ticks) and every one's stream is still identical.
 - **The mistake switch is total**: on, all twenty drivers have mistakes on and each has drawn a mistake
   within 25 s; off, none has, none planned one and none logged one over the race.
-- **Every rival on seeds 0-19 spawns at its physics fixed point**, guarded by the 114 raw poses that
-  are not and one needing more than 8 rounds.
+- **Every rival spawns at a physics fixed point.** The lattice bound is re-proved over all 411,775
+  angles in the engine; 200,000 random rotations (798 of which the old iteration needed more than 64
+  rounds for) and every rival on seeds 0-19, 41 and 58 (one needing 14,670 rounds) are checked against
+  it: fixed, at the grid origin, within 9.9e-5 rad.
 - **Count 0** builds no sensing pass over 60 physics ticks; count 1 does and its rival drives.
 
 Production mutations, each run on a copy of the tree, each failing by name with all 32 checks run:
 the rivals back on `IdleDriver` (`FULL FIELD`, `DETERMINISTIC`, the contact guard, `SWITCH ON`: 13
 failures); the switch ignored and forced off (`SWITCH ON`) or on (`SWITCH OFF`, both races); a
-`SensingPass` built at count 0 (the count-0 check). **One is only half caught:** the snap capped at
-the review's 8 rounds fails `FIXED POSE` (seed 3's two slots) but not the race, because no seed-0 pose
-needs more than 4 rounds. The race on seed 0 does not guard the cap; the pose sweep does.
+`SensingPass` built at count 0 (the count-0 check). The race on seed 0 cannot guard the snap's
+bound -- no seed-0 pose is hard to snap -- so the pose checks are what do: see fix round 1's
+falsifications in the task #61a report.
 
 The test's probe body enters the race's space, so it is part of that space's history; whether it
 changes the race against a session with no probe was not checked. What is asserted is that one

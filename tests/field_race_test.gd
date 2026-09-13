@@ -1,6 +1,7 @@
 extends SceneTree
 
-## Task #61, part A: the session's field drives itself, and races the same way twice.
+## Task #61, part A: the session's field drives itself, and on seed 0 races the same way twice across the
+## two histories below (scope under "What is not asserted").
 ##
 ## Everything here runs the production session from `session/main.tscn`. The rivals are the session's
 ## own `ReactiveDriver`s, sensed by the session's own `SensingPass` in its own `_physics_process`; this
@@ -352,7 +353,7 @@ func _race(after_a_step: bool) -> Dictionary:
 		_restart(session, probe)
 	var rivals: Array = session.get("_rivals")
 	await physics_frame
-	_check(root.world_2d != world_before, "FRESH WORLD: %s: the restart hosts the race in a physics space no earlier race used" % label)
+	_check(root.world_2d != world_before, "FRESH WORLD: %s: the restart replaced the viewport's World2D (it shows the swap ran, not that nothing outside World came along)" % label)
 	var definition: TrackDefinition = session.get("_track_definition")
 	var surface := TrackSurfaceMap.new(definition)
 	var record := {
