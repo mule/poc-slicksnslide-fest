@@ -305,7 +305,7 @@ cannot tell a space holding nothing from before from one that carried an outside
   it: fixed, at the grid origin, within 9.9e-5 rad.
 - **Count 0** builds no sensing pass over 60 physics ticks; count 1 does and its rival drives.
 
-Production mutations, each run on a copy of the tree, each failing by name with all 32 checks run:
+Production mutations from the first round (when the suite had 32 checks), each run on a copy of the tree and failing by name with every check run:
 the rivals back on `IdleDriver` (`FULL FIELD`, `DETERMINISTIC`, the contact guard, `SWITCH ON`: 13
 failures); the switch ignored and forced off (`SWITCH ON`) or on (`SWITCH OFF`, both races); a
 `SensingPass` built at count 0 (the count-0 check). The race on seed 0 cannot guard the snap's
