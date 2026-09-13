@@ -4,9 +4,12 @@ Epic #55. This document covers what tasks #56, #57, #58 and #60 landed: the seam
 through, the identity that makes each driver reproducible, the camera rule that lets more than one
 car exist, what a driver knows, the driver that turns it into controls, the field of up to twenty
 rivals, per-car lap progress, and the standings; and what #59 added to the driver: a skill per car
-and deliberate mistakes that are seeded, logged and off by default. #61 wires all of it into the game,
-and a field of twenty on seed 0 races the same way twice across the two spawn histories its suite
-varies (one machine; the scope is under "Driving the field (#61)").
+and deliberate mistakes that are seeded, logged and off by default. #61 wires all of it into the game:
+a field of twenty on seed 0 races the same way twice across the two spawn histories its suite varies
+(scope under "Driving the field (#61)"); a driver stuck behind a stopped car goes round it, which took
+the fields of 22 seeds from six meeting the stuck rule to none ("Going round a stopped car (#61)"); and
+"The field at size (#61)" records what twenty cars cost, the multi-seed evidence, and what none of it
+covers. Every result here is from one Linux machine.
 
 `ReactiveDriver` (#58) is the part that makes a car drive itself. Since #61 every rival
 `MainSession` spawns drives with one, sensed by the session's own `SensingPass`.
@@ -288,14 +291,14 @@ cannot tell a space holding nothing from before from one that carried an outside
 
 - **A full-field race.** Twenty rivals on seed 0, mistakes off, the player idle at pole: every rival
   is watched driving and laps, none meets the stuck rule, none leaves the play area or gets lost. The
-  longest slow streak is 91 of 120 ticks **on seed 0**; that is seed 0's margin, not the field's. The
-  #61a review ran the same field on seed 41 and it met the stuck rule (177 of 120). Nothing here
-  asserts another seed, and the driving fix is part B's.
+  longest slow streak is 62 of 120 ticks **on seed 0** since the stuck fix (91 before it); that is seed
+  0's margin, not the field's. Other seeds are `capture_field_evidence`'s: see "Going round a stopped
+  car (#61)" and "The field at size (#61)".
 - **Deterministic final standings.** Race 1 is a new session's restart from an idle frame; race 2 is
   an in-session restart after the session has raced seed 1, called from a physics frame so one step
   runs before the first sense (0 steps against 1, counted by a probe body). Same finishing order, every
   rival on the same finishing tick, every rival's control stream identical at 64 bits.
-- **Collision does not desync a run.** All twenty rivals touch another car before finishing (1,730
+- **Collision does not desync a run.** All twenty rivals touch another car before finishing (1,771
   contact ticks) and every one's stream is still identical.
 - **The mistake switch is total**: on, all twenty drivers have mistakes on and each has drawn a mistake
   within 25 s; off, none has, none planned one and none logged one over the race.
@@ -312,11 +315,130 @@ failures); the switch ignored and forced off (`SWITCH ON`) or on (`SWITCH OFF`, 
 bound -- no seed-0 pose is hard to snap -- so the pose checks are what do: see fix round 1's
 falsifications in the task #61a report.
 
-The test's probe body enters the race's space, so it is part of that space's history; whether it
-changes the race against a session with no probe was not checked. What is asserted is that one
-protocol reproduces itself across the two histories.
+The test's probe body enters the race's space, so it is part of that space's history. On seed 0,
+`capture_field_evidence`'s race A, which has no probe, finished in the same order, on the same last tick
+(5,514) and with the same 1,771 contact ticks as this suite's race 1; streams were not compared between
+the two files. What is asserted here is that one protocol reproduces itself across the two histories.
 Scope: one seed, twenty rivals, one Linux machine, two histories varied. Cross-machine determinism of
-Godot's 2D contact resolution is not established by anything here.
+Godot's 2D contact resolution is not established by anything here. `capture_field_evidence` repeats the
+two histories on three more seeds (see "The field at size (#61)").
+
+## The field at size (#61)
+
+### Evidence across seeds
+
+`tests/capture_field_evidence.gd`, run windowed (`godot --path . --script
+res://tests/capture_field_evidence.gd`), races the production session on four seeds -- 0 and 41, which
+the stuck fix was tuned on, and 4 and 58, which it was not -- four times each: A, a new session restarted
+from an idle frame; B, a session that first races the next seed's track for 600 ticks and restarts from
+a call deferred out of a physics frame; C and D, the same two with mistakes on. The player's car sits
+idle at pole in every race. Then it races the game as launched and saves stills.
+
+Asserted for every race: every rival laps; no rival meets the stuck rule at any tick (stricter than
+"ends the race stuck"); none leaves the play area or its lost distance; the mistake switch is what the
+race says. Asserted for each pair: A and B finish in the same order, every rival on the same tick,
+every control stream identical at 64 bits; C and D log identical mistakes rival by rival -- guarded by
+at least two kinds logged -- and finish the same way.
+
+| Seed | Set | Last finisher (off / on) | Longest slow streak | Contact ticks | Passes | Reversals | Mistakes logged |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | tuned | 5,514 / 5,523 | 62 | 1,771 / 1,771 | 25 | 0 | 31, three kinds |
+| 41 | tuned | 7,251 / 7,251 | 85 | 5,383 / 5,383 | 38 | 6 | 36, two kinds |
+| 4 | held out | 6,489 / 6,495 | 50 | 945 / 903 | 14 | 0 | 36, three kinds |
+| 58 | held out | 6,086 / 6,087 | 59 | 2,755 / 2,755 | 27 | 5 | 34, three kinds |
+
+141 checks, 0 failures, twice; the two runs' ledgers (`docs/evidence/ai-opponents/field-ledger.txt`,
+one line per race with SHA-256 digests of every stream and log) are byte-identical. On every seed the
+mistakes-on streams differ from the mistakes-off ones, so the logs compared are of mistakes that acted.
+
+**The game as launched** -- `main.tscn` on its shipped settings, nothing overridden: ten rivals, mistakes
+on, seed 0. All ten lap (last on tick 5,174), longest slow streak 46, none strays, 19 mistakes logged,
+8 passes. Stills: `launched-seed-0-grid.png` (the field leaving the grid past the idle player),
+`launched-seed-0-under-way.png` (the leader at 20 s) and `seed-41-going-round.png` (the first tick a
+rival on seed 41 is going round a stopped car, 4.3 s in, centred on it). The stills come from sessions of
+their own, with the simulation all but held while a frame is drawn; they assert nothing about the race.
+
+**The player's pose.** It is not snapped: `issue_60_field_test` pins it to `spawn_transform` exactly, and
+on 6 of seeds 0-19 that is not a physics fixed point. Seeds 0 and 4 are two of those six, and on both the
+two spawn histories drove the identical race, streams included. That is two seeds' observation; the pin
+stands, and nothing guarantees it on the other four.
+
+**Scope.** Four seeds reproduced across two histories, twenty-two raced once (the sweep above), one
+machine, one Godot build. That the same seed races the same way on another machine, or with another
+libm, is not shown by anything here.
+
+### Cost
+
+`tests/capture_field_cost.gd`, run windowed: the production session in the game window on seed 0, the
+player idle, physics at 60 ticks a second in real time, vsync off and the frame rate uncapped so a frame
+lasts as long as its work. Each count is measured over the first 3,600 ticks of its race, launch
+included. Nothing else of this task ran alongside; the machine's own load average was 2.3-3.5 (other
+programs; recorded in the file). Intel i7-10510U, Mesa Intel UHD Graphics (CML GT2).
+
+Two runs back to back; each cell is run 1 / run 2. Microseconds, per physics tick or per frame:
+
+| Rivals | Sensing, mean | Decisions, mean | Physics tick span, mean | Frame with a tick: mean | p95 | max |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 | 0 / 0 | 0 / 0 | 118 / 62 | 2,613 / 2,224 | 3,555 / 3,101 | 9,880 / 10,179 |
+| 1 | 315 / 301 | 66 / 64 | 452 / 432 | 3,027 / 2,867 | 4,642 / 4,068 | 10,957 / 14,892 |
+| 5 | 1,335 / 1,271 | 207 / 199 | 1,647 / 1,570 | 4,551 / 4,401 | 6,973 / 6,484 | 12,856 / 11,810 |
+| 10 | 2,507 / 2,575 | 357 / 369 | 3,010 / 3,094 | 6,458 / 6,550 | 9,666 / 9,093 | 16,545 / 15,314 |
+| 20 | 5,137 / 4,902 | 690 / 654 | 6,008 / 5,758 | 10,502 / 10,031 | 15,124 / 13,040 | 23,979 / 19,821 |
+
+**Per-car marginal cost** of the mean, per added rival:
+
+| From | To | Sensing | Decisions | Physics tick span | Frame with a tick |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 1 | 315 / 301 | 66 / 64 | 334 / 370 | 415 / 643 |
+| 1 | 5 | 255 / 242 | 35 / 34 | 299 / 284 | 381 / 384 |
+| 5 | 10 | 235 / 261 | 30 / 34 | 273 / 305 | 381 / 430 |
+| 10 | 20 | 263 / 233 | 33 / 29 | 300 / 266 | 405 / 348 |
+
+**The curve is linear as measured.** The marginal cost of a rival from ten to twenty is within the two runs'
+spread of its cost from one to five in every column; nothing proportional to the square of the field
+shows at this size. The sensing pass's rival scan does walk the whole field for every car, but at twenty it
+is not visible against the queries.
+
+**Budget at twenty, as measured: a frame holding a physics tick averages 10.0-10.5 ms, 13.0-15.1 ms at the
+95th percentile and 19.8-24.0 ms at worst, against 16.6 ms.** Headroom is 6.1-6.6 ms on the mean and
+1.5-3.6 ms at the 95th percentile, and the worst frames of both runs overrun. The worst frames at zero
+rivals are already 9.9-10.2 ms, so the tail is not the field's alone. Most of the field's cost is the
+sensing pass, about 250 us a rival; decisions are about 30 us. The maximum was not lowered.
+
+What the columns are:
+
+- *Sensing* and *decisions*: `MainSession._drive_field`, copied line for line into a subclass with clock
+  reads between its sense loop and its perceive, drive and checkpoint loop. The capture first checks that
+  copy leaves all twenty-one cars at bit-identical transforms and velocities after 1,200 ticks against the
+  production session, and the query wrappers below the same.
+- *Physics tick span*: from the tree's `physics_frame` signal to the next `process_frame`, on frames
+  holding exactly one tick. It holds every `_physics_process`, the field's drive included, and the server's
+  step. It does **not** hold the cars' `_integrate_forces`: the query pass below measures the cars' own
+  queries alone -- which run inside `_integrate_forces` -- at about 840 us a tick at twenty, while the span
+  leaves only 180-200 us beyond the field's drive. The frame figure holds everything.
+- *Frame with a tick*: wall time between consecutive `process_frame`s. Frames without a tick took
+  2.0-2.7 ms at every count (the renderer and the uncapped present); the renderer's own CPU and GPU times
+  were 0.7-0.8 ms and 0.9-1.2 ms at every count.
+
+**Height and surface queries across the field** (run 1, sped up, the first 1,200 ticks at twenty rivals;
+each figure includes the timing wrapper's own 1.2-1.3 us per call):
+
+| Asked by | Query | Calls a tick | us a tick | us a call |
+| --- | --- | --- | --- | --- |
+| cars' own physics | `HeightQuery.sample_at` | 42 | 327 | 7.8 |
+| cars' own physics | `SurfaceQuery.sample_at` | 21 | 512 | 24.4 |
+| sensing | `SurfaceQuery.road_frame_at` | 40 | 2,580 | 64.6 |
+| sensing | `HeightQuery.sample_at` | 40 | 464 | 11.6 |
+| sensing | `SurfaceQuery.sample_at` | 20 | 444 | 22.2 |
+
+The two road frames a car senses are half the sensing pass. The cars' calls include the idle player's.
+
+**Against the calibration figures.** #57 measured twenty cars sensing at 2.26 ms and #58's sixth query
+raised it to about 4 ms (`driver_senses_test`, twenty cars placed around the lap, one pass each). In the
+running session twenty rivals sense in 4.9-5.1 ms a tick on the mean. The conditions differ -- a real race
+from its launch, cars bunched and off the racing line, clock reads inside the loop -- and which of them
+accounts for the difference was not measured.
+
 ## Sensing — what a driver knows
 
 `DriverSenses` (`ai/driver_senses.gd`) is one car's whole view of the world for one tick, and
@@ -547,9 +669,11 @@ climbing a ramp face reads 0.043-0.073; terrain rarely reaches 0.03. The level r
 for 22-29% of the lap on the three tuning seeds measured and still missed launches.
 
 **Recover.** Slower than 1 m/s for 0.5 s while racing: reverse for 1.6 s with the nose swinging the way
-the road steering wanted, then 1 s of grace. Wrong way round (heading error past 90 degrees): full lock
-in one committed direction, held across the ±π seam. Off the road: the steering already heads back, at
-up to 0.6 rad, under the grass cap. Road not found at all: ask to sense at 120 m until it is.
+the road steering wanted, then 1 s of grace; a reversal not rolling backwards by 0.8 s ends there (#61).
+Stalled behind a rival in its lane: go round it instead (#61, below). Wrong way round (heading error
+past 90 degrees): full lock in one committed direction, held across the ±π seam. Off the road: the
+steering already heads back, at up to 0.6 rad, under the grass cap. Road not found at all: ask to sense
+at 120 m until it is.
 
 ### What it believes about its car
 
@@ -682,14 +806,129 @@ The map-following `LapDriver` the terrain suites lap with does 69.6-86.8 s on se
   ray could not see.
 - **No overtaking, and nothing alongside.** The senses carry only the nearest rival *ahead*; a car
   beside or behind is invisible, and every car's offset term pulls it to the centreline, so where the
-  grid's two columns merge the cars rub. A car catching a rival follows it; nothing steers round it.
-  A rival stopped in the middle of the road is followed to a halt; what happens after the halt is
-  untested, and nothing in the driver would take it round. Exploratory fields of twenty on seeds 0 and 5 both finished whole, none
-  stuck, with a median of 17-27 contact ticks per car; that is #61's starting point, not its proof.
+  grid's two columns merge the cars rub. A car catching a moving rival follows it; nothing steers round
+  it. A rival stopped in the road is followed to a halt, and since #61 the car then goes round it (see
+  "Going round a stopped car (#61)"); that is not overtaking, and a slow car is still followed.
 - **The visibility cap costs time on these circuits** (see above) without buying a lap. It is kept for
   circuits whose corners arrive faster than this generator's.
-- **One field, one seed.** The rival rules are asserted on synthetic senses, against one parked rival
-  and in one field of twenty on seed 0; nothing here says how a field behaves across seeds.
+- **One field, one seed, in this suite.** The rival rules are asserted on synthetic senses, against one
+  parked rival and in one field of twenty on seed 0. How the session's field behaves across seeds is
+  #61's capture: see "Going round a stopped car (#61)".
+
+### Going round a stopped car (#61)
+
+With twenty rivals on seed 41 the session's field met the stuck rule. The fix is in the driver; the
+stuck threshold did not move and no car is exempt from it.
+
+**Diagnosis, from measurement.** Everything below was run in the session, seed 41, twenty rivals,
+mistakes off, the player idle at pole, restarted from an idle frame (race A of the capture), on the
+driver as #61a left it.
+
+- *Which cars, and how badly.* Longest slow streaks 144, 128, 125 and 121 ticks against the rule's 120
+  (rivals 19, 18, 20, 13); rivals 4-20 finished 1,800-3,300 ticks behind rivals 1-3, whose worst streak
+  was 7. The #61a review measured 177 on the same seed under the snap of its time.
+- *Where.* A snapshot of the whole field every two seconds showed the idle player's car shoved down the
+  road by the grid's launch -- 273 px from pole at 4 s, 898 px at 20 s -- where it came to rest 22 px off
+  the centreline with seventeen rivals queued behind it.
+- *What the queue was waiting for.* For every rival-tick in a slow streak of 30 ticks or more, a probe
+  walked the chain of "the car in my lane close ahead" to its head. Of 4,698 such ticks, the player's
+  car headed 1,549, more than any other car; every other head was a rival stopped in the same queue.
+- *The variable, varied alone.* The same race with the player's car moved out of reach before the first
+  step: longest streak 89, no rival over the rule, 829 slow rival-ticks, the field home by tick 6,690
+  instead of 8,882.
+- *Why it cycled.* A rival reaching the stopped car held its 6 m following gap, stalled, reversed for
+  1.6 s, and drove up to the same car again; the field logged 126 reversals. A per-tick trace of the
+  four worst streaks after a first attempt at a fix (below) showed the arithmetic: in three of them,
+  88-97 ticks were a reversal spent in contact with other cars and not rolling backwards (rival 13's
+  trace shows it creeping forwards at 7-9 px/s with reverse held), in a queue whose cars behind the driver cannot see. A 0.5 s
+  stall plus a blocked 1.6 s reversal is 126 ticks under the rule's speed, so a blocked reversal meets
+  the rule by construction.
+
+The #58 review's lead -- a car stopped behind a stationary rival reverses after 0.5 s and can cycle --
+was the right one, and what makes it bite in the session is the idle player's car parked in the road.
+
+**The fix.** A stall with a rival in the lane within `PASS_BLOCKED_GAP_M` (8 m) at any tick of the stall
+is a blocked stall, and the driver goes round rather than backing out:
+
+- it aims `PASS_CLEARANCE_M` (4 m) to the side of the nearest rival ahead with more road, never nearer an
+  edge than 1.5 m, at no more than 8 m/s, judging rivals against the line it aims for rather than the
+  one it is on (the rival it is passing is beside that line by construction);
+- it lets go once no rival has been within 12 m ahead for 1 s, or after 6 s; mistakes do not begin
+  while it is passing;
+- a second blocked stall while passing reverses, the nose swinging toward the other side;
+- a reversal that is not rolling backwards by 0.8 s ends.
+
+What stopped the car is remembered across the stall because, in a knot of cars, the nearest one ahead
+changes from tick to tick and the car that stopped this one may be beside it by the stall's last tick.
+Nothing here reads a rival's identity; the senses carry none.
+
+**How it was reached, on the tuned seeds 0 and 41.** Each step was measured before the next:
+
+| Driver | Seed 41 longest streak | Rivals over the rule | Seed 0 |
+| --- | --- | --- | --- |
+| #61a | 144 | 4 | 91 (the suite's race) |
+| reverse toward a passing side, then pass | 148 | 4 | 65 |
+| pass forwards first, reverse on a second stall | 110 | 0 | 62 |
+| and end a reversal that is not reversing | 109 | 0 | 62 |
+| and remember what stopped the car across the stall | 85 | 0 | 62 |
+
+Solo driving is untouched: with no rival nothing new runs, and `reactive_driver_test` reproduces #58's
+fifteen lap times to the hundredth with no recovery and 0.00% off road. The parked-rival stop still comes
+to rest 65 px behind the rival without touching it, because the pass begins only after the stall. In the
+suite's own field of twenty on seed 0 the longest slow streak went from 85 to 45 and the worst contact
+from 3.3% to 2.0%.
+
+**Unit checks** (`_verify_it_goes_round_a_stopped_car`, synthetic senses): a stall behind a rival in the
+lane starts a pass, not a reversal, and drives off to the roomier side without braking for that rival,
+both ways round; a second stall reverses toward the other side; a stall with the rival 100 px beside the
+path is an ordinary reversal; a rival in the lane for the stall's first ticks and beside the path by its
+last still starts a pass; a reversal not rolling back 0.8 s in ends, one rolling back at 50 px/s does
+not. `-- --break-go-round` (no stall is ever caused by a rival) fails seven of them by name; the two it
+should not touch pass.
+
+**Widened, tuned versus held out.** Tuned on seeds 0 and 41 only. With the driver frozen, `tests/capture_field_evidence.gd
+-- --sweep` raced one field of twenty on each of seeds 0-19, 41 and 58 -- twenty of them first raced
+here -- on the fixed driver, and on a copy of the tree with #61a's driver restored. Race A of the capture:
+a new session restarted from an idle frame, mistakes off, the player idle at pole. Run headless: the
+sweep asserts and saves no stills.
+
+| Seed | Set | Before: longest streak | Reversals | After: longest streak | Passes | Reversals |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0 | tuned | 91 | 36 | 62 | 25 | 0 |
+| 41 | tuned | **144** | 126 | 85 | 38 | 6 |
+| 1 | held out | 81 | 17 | 45 | 14 | 0 |
+| 2 | held out | 66 | 26 | 49 | 25 | 0 |
+| 3 | held out | 118 | 52 | 59 | 43 | 5 |
+| 4 | held out | 87 | 22 | 50 | 14 | 0 |
+| 5 | held out | **206** | 163 | 81 | 43 | 1 |
+| 6 | held out | 89 | 24 | 61 | 22 | 7 |
+| 7 | held out | 110 | 66 | 72 | 30 | 0 |
+| 8 | held out | 103 | 17 | 75 | 13 | 0 |
+| 9 | held out | 78 | 20 | 49 | 17 | 0 |
+| 10 | held out | **175**, 10 of 20 lapped in 240 s | 444 | 104 | 30 | 2 |
+| 11 | held out | **122** | 32 | 86 | 26 | 6 |
+| 12 | held out | 88 | 33 | 47 | 23 | 0 |
+| 13 | held out | 87 | 23 | 62 | 23 | 0 |
+| 14 | held out | 99 | 53 | 88 | 39 | 7 |
+| 15 | held out | **127** | 47 | 80 | 35 | 2 |
+| 16 | held out | 98 | 52 | 87 | 35 | 2 |
+| 17 | held out | **144** | 236 | 75 | 42 | 3 |
+| 18 | held out | 81 | 37 | 93 | 38 | 8 |
+| 19 | held out | 114 | 22 | 45 | 18 | 0 |
+| 58 | held out | 86 | 30 | 59 | 27 | 5 |
+
+Before the fix, 6 of the 22 fields met the stuck rule -- one of the two tuned seeds and five of the twenty
+held out -- and on seed 10 half the field had not lapped after four minutes. After it, all 22 lap with
+nobody stuck and nobody out of the play area: longest streak 85 of 120 on the tuned seeds, 104 on the
+held-out ones (seed 10). Seed 18 is the one seed slower after the fix than before (93 against 81). The
+margin is not large everywhere: 16 ticks on seed 10. These are 22 seeds, one race each, one machine.
+
+**The fix bites.** The "before" column is the falsification: the same capture on the tree with #61a's
+`ai/reactive_driver.gd` restored exits 1 with `FAIL: STUCK: seed 41 (tuned) A(mistakes off, new session,
+idle frame): all 20 rivals were watched driving and none meets the stuck rule (20 watched, longest slow
+streak 144 of 120 ticks, by rival 19)`, beside the same failure on seeds 5, 10, 11, 15 and 17 and a LAP
+failure on seed 10. On the committed tree the same seeds pass. Of the nine unit checks above, the restored driver fails
+eight; the ninth, the ordinary stall beside the path, passes as it should.
 
 ## Skill and deliberate mistakes (#59)
 
