@@ -21,11 +21,13 @@ var _track_runtime: TrackRuntime
 var _current_seed := 0
 var _opponent_count := 0
 var _status_hide_at_msec := 0
-## The field beside the player's car. Each entry: index (1..opponent_count), car, driver,
-## detector, progress. The player's own progress stays in _trial, whose TimeTrialState owns a
-## LapProgressTracker exactly like each rival's entry does.
+## The field beside the player's car, in car-index order. Each entry: index (1..opponent_count),
+## car, driver, detector, progress. The player's own progress stays in _trial, whose TimeTrialState
+## owns a LapProgressTracker exactly like each rival's entry does.
 var _rivals: Array[Dictionary] = []
 var _field_surface_map: TrackSurfaceMap
+## The field's one sensing pass (#57): the session owns the field, so it senses for every driver.
+var _sensing: SensingPass
 
 @onready var _diagnostics_overlay: CanvasLayer = %DiagnosticsOverlay
 @onready var _seed_label: Label = %SeedLabel
@@ -78,6 +80,9 @@ func _physics_process(delta: float) -> void:
 		return
 	_trial.advance_time(delta)
 	_controller_input.poll_actions()
+	# The rivals drive before the player's reset handling, so a player's reset -- which returns early
+	# below -- never costs the field a tick.
+	_drive_field(delta)
 	var reset_this_tick := false
 	if Input.is_action_just_pressed("reset_car"):
 		_vehicle.request_safe_reset()
@@ -113,22 +118,51 @@ func _physics_process(delta: float) -> void:
 		if completed:
 			_show_status("Lap %d  ·  %s" % [_trial.lap_count, _format_time(_trial.last_lap_time)], 4.0)
 		_track_runtime.set_next_checkpoint(_trial.next_checkpoint)
-	# A player reset returns early above and skips this loop. A rival's own reset must also
-	# reseed and skip its pending-teleport tick, before stale positions can reach the detector.
+
+
+## One tick of the field. Every rival senses, in car-index order, before any rival drives; then each
+## drives and samples its own checkpoints. Nothing a driver decides moves a car before the physics
+## step, so all twenty senses describe the same world. The order is the field's own list, never one
+## a physics query or a dictionary decides.
+func _drive_field(delta: float) -> void:
+	if _rivals.is_empty():
+		return
+	var field := _field_cars()
+	var driving: Array[Dictionary] = []
 	for rival in _rivals:
-		if not is_instance_valid(rival["car"]):
+		var car := field[int(rival["index"])]
+		if car == null:
 			continue
-		var rival_car := rival["car"] as TopDownCar
-		if rival_car.consume_auto_reset_notice():
-			(rival["detector"] as CheckpointCrossingDetector).reset(rival_car.get_safe_reset_pose().origin)
+		# A rival's own reset reseeds its detector at the safe destination and skips its
+		# pending-teleport tick -- senses, controls and sampling -- before a stale pose reaches any.
+		if car.consume_auto_reset_notice():
+			(rival["detector"] as CheckpointCrossingDetector).reset(car.get_safe_reset_pose().origin)
 			continue
-		rival_car.set_input_state((rival["driver"] as AiDriver).drive(delta))
-		var rival_crossing: Dictionary = (rival["detector"] as CheckpointCrossingDetector).sample(rival_car.global_position)
-		if not rival_crossing.is_empty():
+		driving.append(rival)
+	var senses: Array[DriverSenses] = []
+	for rival in driving:
+		senses.append(_sensing.sense(field, int(rival["index"]), (rival["driver"] as AiDriver).sensing_horizon()))
+	for slot in range(driving.size()):
+		var rival := driving[slot]
+		var car := field[int(rival["index"])]
+		var driver := rival["driver"] as AiDriver
+		driver.perceive(senses[slot])
+		car.set_input_state(driver.drive(delta))
+		var crossing: Dictionary = (rival["detector"] as CheckpointCrossingDetector).sample(car.global_position)
+		if not crossing.is_empty():
 			(rival["progress"] as LapProgressTracker).cross_checkpoint(
-				int(rival_crossing.get("checkpoint", -1)),
-				float(rival_crossing.get("forward_dot", 0.0)),
+				int(crossing.get("checkpoint", -1)),
+				float(crossing.get("forward_dot", 0.0)),
 			)
+
+
+## Every car in the field, indexed by car index: the player at 0, rival n at n. A rival whose car has
+## been freed is a null the sensing pass skips, so no other car's index moves.
+func _field_cars() -> Array[TopDownCar]:
+	var field: Array[TopDownCar] = [_vehicle if is_instance_valid(_vehicle) else null]
+	for rival in _rivals:
+		field.append(rival["car"] as TopDownCar if is_instance_valid(rival["car"]) else null)
+	return field
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -158,6 +192,7 @@ func restart_with_seed(seed: int) -> void:
 	_opponent_count = int(session_settings.get("opponent_count"))
 	_rivals.clear()
 	_field_surface_map = null
+	_sensing = null
 	_track_definition = TrackGenerator.new().generate(seed)
 	var runtime := TrackRuntime.new(_track_definition)
 	runtime.name = "GeneratedTrack"
@@ -184,6 +219,7 @@ func restart_with_seed(seed: int) -> void:
 	_checkpoint_detector.reset(_vehicle.global_position)
 	_track_runtime.set_next_checkpoint(_trial.next_checkpoint)
 	if _opponent_count > 0:
+		_sensing = SensingPass.new(_field_surface_map, runtime.height_query())
 		for index in range(1, _opponent_count + 1):
 			_spawn_rival(index)
 	_controller_input.suppress_until_controls_released()
@@ -239,8 +275,10 @@ func _spawn_rival(index: int) -> void:
 	%VehicleMount.add_child(car)
 	car.set_surface_query(_field_surface_map)
 	car.set_height_query(_track_runtime.height_query())
-	var driver := IdleDriver.new(_current_seed, index)
-	car.set_input_state(driver.drive(0.0))
+	# Skill comes from the car's own seed stream (#59); mistakes from the field's one switch.
+	var driver := ReactiveDriver.new(_current_seed, index)
+	driver.mistakes_enabled = bool(session_settings.get("opponent_mistakes_enabled"))
+	car.set_input_state(VehicleInputState.new())
 	car.set_auto_reset_enabled(bool(session_settings.get("auto_reset_enabled")))
 	var detector := CheckpointCrossingDetector.new(_track_definition)
 	detector.reset(car.global_position)

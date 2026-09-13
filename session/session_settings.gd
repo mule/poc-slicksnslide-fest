@@ -12,3 +12,10 @@ extends Resource
 @export_range(0, 20, 1) var opponent_count: int = 0:
 	set(value):
 		opponent_count = clampi(value, 0, 20)
+
+## The field's one mistake switch: every rival the session spawns takes it. Off unless set, so a
+## settings resource built in code -- which is how every test builds one -- races a flawless field,
+## the same default ReactiveDriver has. The shipped game turns it on in
+## data/default_session_settings.tres, because opponents that make deliberate mistakes are the
+## epic's design (#55).
+@export var opponent_mistakes_enabled: bool = false

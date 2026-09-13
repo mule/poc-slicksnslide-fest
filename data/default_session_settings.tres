@@ -8,3 +8,4 @@ seed = 0
 diagnostics_visible_in_debug = true
 stick_deadzone = 0.2
 trigger_deadzone = 0.1
+opponent_mistakes_enabled = true
