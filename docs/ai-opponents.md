@@ -372,38 +372,44 @@ libm, is not shown by anything here.
 `tests/capture_field_cost.gd`, run windowed: the production session in the game window on seed 0, the
 player idle, physics at 60 ticks a second in real time, vsync off and the frame rate uncapped so a frame
 lasts as long as its work. Each count is measured over the first 3,600 ticks of its race, launch
-included. Nothing else of this task ran alongside; the machine's own load average was 2.3-3.5 (other
-programs; recorded in the file). Intel i7-10510U, Mesa Intel UHD Graphics (CML GT2).
+included. Nothing else of this task ran alongside; the machine's own load average, from other programs, is
+recorded in each file. Intel i7-10510U, Mesa Intel UHD Graphics (CML GT2).
 
-Two runs back to back; each cell is run 1 / run 2. Microseconds, per physics tick or per frame:
+Two runs back to back on the final driver; each cell is run 1 / run 2. Microseconds, per physics tick or
+per frame:
 
 | Rivals | Sensing, mean | Decisions, mean | Physics tick span, mean | Frame with a tick: mean | p95 | max |
 | --- | --- | --- | --- | --- | --- | --- |
-| 0 | 0 / 0 | 0 / 0 | 118 / 62 | 2,613 / 2,224 | 3,555 / 3,101 | 9,880 / 10,179 |
-| 1 | 315 / 301 | 66 / 64 | 452 / 432 | 3,027 / 2,867 | 4,642 / 4,068 | 10,957 / 14,892 |
-| 5 | 1,335 / 1,271 | 207 / 199 | 1,647 / 1,570 | 4,551 / 4,401 | 6,973 / 6,484 | 12,856 / 11,810 |
-| 10 | 2,507 / 2,575 | 357 / 369 | 3,010 / 3,094 | 6,458 / 6,550 | 9,666 / 9,093 | 16,545 / 15,314 |
-| 20 | 5,137 / 4,902 | 690 / 654 | 6,008 / 5,758 | 10,502 / 10,031 | 15,124 / 13,040 | 23,979 / 19,821 |
+| 0 | 0 / 0 | 0 / 0 | 58 / 57 | 1,973 / 1,972 | 2,614 / 2,609 | 10,556 / 6,982 |
+| 1 | 275 / 278 | 57 / 59 | 394 / 399 | 2,490 / 2,504 | 3,326 / 3,295 | 6,541 / 7,838 |
+| 5 | 1,176 / 1,166 | 186 / 188 | 1,455 / 1,447 | 3,950 / 3,937 | 5,380 / 5,179 | 9,071 / 8,267 |
+| 10 | 2,208 / 2,213 | 318 / 322 | 2,652 / 2,663 | 5,554 / 5,575 | 7,145 / 7,271 | 11,613 / 13,224 |
+| 20 | 4,319 / 4,303 | 575 / 580 | 5,070 / 5,054 | 8,820 / 8,796 | 10,910 / 10,525 | 19,051 / 15,902 |
 
 **Per-car marginal cost** of the mean, per added rival:
 
 | From | To | Sensing | Decisions | Physics tick span | Frame with a tick |
 | --- | --- | --- | --- | --- | --- |
-| 0 | 1 | 315 / 301 | 66 / 64 | 334 / 370 | 415 / 643 |
-| 1 | 5 | 255 / 242 | 35 / 34 | 299 / 284 | 381 / 384 |
-| 5 | 10 | 235 / 261 | 30 / 34 | 273 / 305 | 381 / 430 |
-| 10 | 20 | 263 / 233 | 33 / 29 | 300 / 266 | 405 / 348 |
+| 0 | 1 | 275 / 278 | 57 / 59 | 337 / 343 | 517 / 532 |
+| 1 | 5 | 225 / 222 | 32 / 32 | 265 / 262 | 365 / 358 |
+| 5 | 10 | 207 / 209 | 26 / 27 | 239 / 243 | 321 / 328 |
+| 10 | 20 | 211 / 209 | 26 / 26 | 242 / 239 | 327 / 322 |
 
-**The curve is linear as measured.** The marginal cost of a rival from ten to twenty is within the two runs'
-spread of its cost from one to five in every column; nothing proportional to the square of the field
-shows at this size. The sensing pass's rival scan does walk the whole field for every car, but at twenty it
-is not visible against the queries.
+**The curve is linear as measured, if anything slightly less than linear.** A rival added between ten and
+twenty costs what one added between five and ten does in every column, and no more than one between one
+and five. Nothing proportional to the square of the field shows at this size: the sensing pass's rival
+scan walks the whole field for every car, and at twenty it is not visible against the queries.
 
-**Budget at twenty, as measured: a frame holding a physics tick averages 10.0-10.5 ms, 13.0-15.1 ms at the
-95th percentile and 19.8-24.0 ms at worst, against 16.6 ms.** Headroom is 6.1-6.6 ms on the mean and
-1.5-3.6 ms at the 95th percentile, and the worst frames of both runs overrun. The worst frames at zero
-rivals are already 9.9-10.2 ms, so the tail is not the field's alone. Most of the field's cost is the
-sensing pass, about 250 us a rival; decisions are about 30 us. The maximum was not lowered.
+**Budget at twenty, as measured: a frame holding a physics tick averages 8.8 ms, 10.5-10.9 ms at the 95th
+percentile and 15.9-19.1 ms at worst, against 16.6 ms.** Headroom is 7.8 ms on the mean and 5.7-6.1 ms at
+the 95th percentile; the worst frame of one run overran. With no rivals the worst frames already reach
+7.0-10.6 ms, so the tail is not the field's alone. Most of the field's cost is the sensing pass, about
+210-280 us a rival; decisions are about 26-59 us. The maximum was not lowered.
+
+**Load moves these.** The same capture run twice on the commit before the last driver change (which alters
+one comparison in a reversal) with the machine's load average at 2.3-3.5 instead of 1.6-1.9 gave, at twenty
+rivals, frames of 10.0-10.5 ms mean, 13.0-15.1 ms at the 95th percentile and 19.8-24.0 ms at worst, sensing
+4.9-5.1 ms, and the same linear shape (`field-cost-earlier-run-1.txt`, `-2.txt`). Plan with that band.
 
 What the columns are:
 
@@ -414,30 +420,31 @@ What the columns are:
 - *Physics tick span*: from the tree's `physics_frame` signal to the next `process_frame`, on frames
   holding exactly one tick. It holds every `_physics_process`, the field's drive included, and the server's
   step. It does **not** hold the cars' `_integrate_forces`: the query pass below measures the cars' own
-  queries alone -- which run inside `_integrate_forces` -- at about 840 us a tick at twenty, while the span
-  leaves only 180-200 us beyond the field's drive. The frame figure holds everything.
+  queries alone -- which run inside `_integrate_forces` -- at about 820 us a tick at twenty, while the span
+  leaves only about 175 us beyond the field's drive. The frame figure holds everything.
 - *Frame with a tick*: wall time between consecutive `process_frame`s. Frames without a tick took
-  2.0-2.7 ms at every count (the renderer and the uncapped present); the renderer's own CPU and GPU times
-  were 0.7-0.8 ms and 0.9-1.2 ms at every count.
+  1.8-2.4 ms at every count (the renderer and the uncapped present); the renderer's own CPU and GPU times
+  were 0.6-0.7 ms and 1.1-1.5 ms at every count.
 
-**Height and surface queries across the field** (run 1, sped up, the first 1,200 ticks at twenty rivals;
-each figure includes the timing wrapper's own 1.2-1.3 us per call):
+**Height and surface queries across the field** (final run 2, sped up, the first 1,200 ticks at twenty
+rivals; each figure includes the timing wrapper's own 1.1-1.4 us per call):
 
 | Asked by | Query | Calls a tick | us a tick | us a call |
 | --- | --- | --- | --- | --- |
-| cars' own physics | `HeightQuery.sample_at` | 42 | 327 | 7.8 |
-| cars' own physics | `SurfaceQuery.sample_at` | 21 | 512 | 24.4 |
-| sensing | `SurfaceQuery.road_frame_at` | 40 | 2,580 | 64.6 |
-| sensing | `HeightQuery.sample_at` | 40 | 464 | 11.6 |
-| sensing | `SurfaceQuery.sample_at` | 20 | 444 | 22.2 |
+| cars' own physics | `HeightQuery.sample_at` | 42 | 319 | 7.6 |
+| cars' own physics | `SurfaceQuery.sample_at` | 21 | 503 | 24.0 |
+| sensing | `SurfaceQuery.road_frame_at` | 40 | 2,504 | 62.7 |
+| sensing | `HeightQuery.sample_at` | 40 | 450 | 11.3 |
+| sensing | `SurfaceQuery.sample_at` | 20 | 431 | 21.6 |
 
-The two road frames a car senses are half the sensing pass. The cars' calls include the idle player's.
+The two road frames a car senses are more than half the sensing pass. The cars' calls include the idle
+player's.
 
 **Against the calibration figures.** #57 measured twenty cars sensing at 2.26 ms and #58's sixth query
 raised it to about 4 ms (`driver_senses_test`, twenty cars placed around the lap, one pass each). In the
-running session twenty rivals sense in 4.9-5.1 ms a tick on the mean. The conditions differ -- a real race
-from its launch, cars bunched and off the racing line, clock reads inside the loop -- and which of them
-accounts for the difference was not measured.
+running session twenty rivals sense in 4.3 ms a tick on the mean (4.9-5.1 ms at the higher load). The
+conditions differ -- a real race from its launch, cars bunched and off the racing line, clock reads inside
+the loop -- and which of them accounts for any difference was not measured.
 
 ## Sensing — what a driver knows
 
@@ -669,7 +676,7 @@ climbing a ramp face reads 0.043-0.073; terrain rarely reaches 0.03. The level r
 for 22-29% of the lap on the three tuning seeds measured and still missed launches.
 
 **Recover.** Slower than 1 m/s for 0.5 s while racing: reverse for 1.6 s with the nose swinging the way
-the road steering wanted, then 1 s of grace; a reversal not rolling backwards by 0.8 s ends there (#61).
+the road steering wanted, then 1 s of grace; a reversal not rolling backwards at 0.25 m/s by 0.8 s ends there (#61).
 Stalled behind a rival in its lane: go round it instead (#61, below). Wrong way round (heading error
 past 90 degrees): full lock in one committed direction, held across the ±π seam. Off the road: the
 steering already heads back, at up to 0.6 rad, under the grass cap. Road not found at all: ask to sense
@@ -856,7 +863,18 @@ is a blocked stall, and the driver goes round rather than backing out:
 - it lets go once no rival has been within 12 m ahead for 1 s, or after 6 s; mistakes do not begin
   while it is passing;
 - a second blocked stall while passing reverses, the nose swinging toward the other side;
-- a reversal that is not rolling backwards by 0.8 s ends.
+- a reversal that is not rolling backwards at 0.25 m/s by 0.8 s ends -- a car backing into a queue it
+  cannot see stands still or is pushed forwards.
+
+The last bound was first 1 m/s. Running every mutation flag afterwards showed it cutting short a
+legitimate reversal: on grass, begun from a creep forwards, a traced reversal was rolling back at about
+10 px/s by 0.8 s, and `reactive_driver_test`'s seed-0 off-road start under `--break-brake-distance` met
+the stuck rule (141 of 120 ticks), a failure that suite never had before. At 0.25 m/s that start is
+back to exactly #61a's result (109 ticks, 21.10 s), and seeds 0 and 41's fields race exactly as they did
+at 1 m/s. The change was made after the held-out seeds had been raced once, from a solo trace rather
+than a field. The sweep below was raced again on the final driver: every seed's ledger line came out
+identical but seed 6's, where seven rivals finished 6-15 ticks sooner (the table's figures for it did
+not change).
 
 What stopped the car is remembered across the stall because, in a knot of cars, the nearest one ahead
 changes from tick to tick and the car that stopped this one may be beside it by the stall's last tick.
@@ -882,8 +900,8 @@ from 3.3% to 2.0%.
 lane starts a pass, not a reversal, and drives off to the roomier side without braking for that rival,
 both ways round; a second stall reverses toward the other side; a stall with the rival 100 px beside the
 path is an ordinary reversal; a rival in the lane for the stall's first ticks and beside the path by its
-last still starts a pass; a reversal not rolling back 0.8 s in ends, one rolling back at 50 px/s does
-not. `-- --break-go-round` (no stall is ever caused by a rival) fails seven of them by name; the two it
+last still starts a pass; a reversal not rolling back 0.8 s in ends, one rolling back at only 10 px/s
+does not. `-- --break-go-round` (no stall is ever caused by a rival) fails seven of them by name; the two it
 should not touch pass.
 
 **Widened, tuned versus held out.** Tuned on seeds 0 and 41 only. With the driver frozen, `tests/capture_field_evidence.gd
@@ -1087,6 +1105,34 @@ never eats into that slack.
 - **The rates are a choice.** A mistake every 10-30 s of clean racing on average; measured, skill
   0.0 commits 1-6 a lap across the fifteen seeds and a field of twenty 0-4 a car, with late brakes
   lapsing most often. They are constants in one place; nothing else depends on them.
+
+## What is not covered
+
+Said once, in one place, so nobody has to assemble it from the sections above.
+
+- **Other machines.** Every race, every reproduction and every cost here ran on one Linux laptop with one
+  Godot build. Nothing shows the same seed racing the same way elsewhere: Godot's 2D contact resolution
+  across machines, and the spawn snap's bound under another libm (Android's, say), are unestablished.
+- **Reproduction, as far as it goes.** Four seeds (0, 4, 41, 58) raced the same way across two spawn
+  histories, with mistakes off and on; seed 0 also inside `field_race_test`. Twenty-two seeds were raced
+  once each. A race with the player driving -- a human's inputs -- is not reproducible by construction and
+  is not what any of this compares.
+- **The player's pose** is unsnapped and #60 pins it; on seeds 0 and 4 it did not desync a race. The
+  other four seeds of 0-19 where it is not a fixed point (7, 15, 16, 19) were raced only once.
+- **The stuck rule's margin.** 104 of 120 ticks on the worst of the 20 held-out seeds. Nothing bounds it
+  on a seed not raced. A car stuck where no rival is in its lane -- against a tree beside a queue, say --
+  still has only the stall reversal.
+- **Overtaking.** A driver goes round a car stopped in its lane; it still follows a slow moving one, and
+  sees nothing beside or behind it. Contact is common in a full field: 903-5,383 contact ticks a race
+  across the four evidence seeds, summed over twenty rivals.
+- **Every field raced has the player idle at pole.** How twenty rivals race a player who drives was not
+  measured.
+- **The budget's tail.** At twenty rivals the worst frame overran 16.6 ms in three of the four cost runs
+  (15.9-24.0 ms); with no rivals the worst frames already reach 7-11 ms. How often a player would see a dropped frame was
+  not measured, nor was anything on a phone, a slower GPU, or any other track seed than 0.
+- **The late brake does not bite** (see "Skill and deliberate mistakes"), and the driver's beliefs about
+  its car are constants a differently tuned session would leave stale.
+- **Rocks on raised ground** are invisible to a grounded car's ray and mask, as the terrain epic left them.
 
 ## Verification
 

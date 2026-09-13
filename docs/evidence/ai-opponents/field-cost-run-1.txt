@@ -1,48 +1,48 @@
 # Field cost, task #61 part B. Seed 0, the production session in the game window, player idle at pole.
-# Intel(R) Core(TM) i7-10510U CPU @ 1.80GHz; renderer Mesa Intel(R) UHD Graphics (CML GT2); load average at start 2.96 2.58 2.71 2/4010 1979250
+# Intel(R) Core(TM) i7-10510U CPU @ 1.80GHz; renderer Mesa Intel(R) UHD Graphics (CML GT2); load average at start 1.90 1.74 1.72 5/3969 2345178
 # physics 60 ticks/s at time scale 1.0; vsync 0 (0 = off); max_fps 0
 
 ## Per physics tick and per frame, microseconds: mean / p95 / max
 | Rivals | Sensing | Decisions | Physics tick | Frame with a tick | Frame without | Render CPU ms | Render GPU ms |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0 | 0 / 0 / 0 | 0 / 0 / 0 | 118 / 231 / 3502 | 2613 / 3555 / 9880 | 2315 / 3155 / 10018 | 0.771 | 0.908 |
-| 1 | 315 / 477 / 1104 | 66 / 97 / 381 | 452 / 666 / 1349 | 3027 / 4642 / 10957 | 2191 / 3165 / 9681 | 0.697 | 1.124 |
-| 5 | 1335 / 2068 / 3229 | 207 / 299 / 1504 | 1647 / 2503 / 3690 | 4551 / 6973 / 12856 | 2314 / 3362 / 9634 | 0.703 | 1.186 |
-| 10 | 2507 / 3767 / 8508 | 357 / 526 / 1139 | 3010 / 4457 / 9384 | 6458 / 9666 / 16545 | 2430 / 3528 / 10034 | 0.748 | 1.194 |
-| 20 | 5137 / 7960 / 12600 | 690 / 1055 / 1723 | 6008 / 8977 / 14304 | 10502 / 15124 / 23979 | 2735 / 3698 / 8962 | 0.809 | 0.982 |
+| 0 | 0 / 0 / 0 | 0 / 0 / 0 | 58 / 76 / 214 | 1973 / 2614 / 10556 | 1760 / 2312 / 12463 | 0.610 | 1.120 |
+| 1 | 275 / 395 / 699 | 57 / 78 / 129 | 394 / 556 / 882 | 2490 / 3326 / 6541 | 1853 / 2435 / 7434 | 0.616 | 1.214 |
+| 5 | 1176 / 1741 / 2464 | 186 / 259 / 500 | 1455 / 2103 / 2933 | 3950 / 5380 / 9071 | 1997 / 2550 / 8789 | 0.631 | 1.350 |
+| 10 | 2208 / 3081 / 4954 | 318 / 456 / 755 | 2652 / 3581 / 5664 | 5554 / 7145 / 11613 | 2140 / 2680 / 9228 | 0.655 | 1.486 |
+| 20 | 4319 / 5521 / 8998 | 575 / 768 / 1451 | 5070 / 6391 / 10496 | 8820 / 10910 / 19051 | 2424 / 2921 / 8772 | 0.713 | 1.517 |
 
 ## Per-car marginal cost of the mean, microseconds per added rival, between consecutive counts
 | From | To | Sensing | Decisions | Physics tick | Frame with a tick |
 | --- | --- | --- | --- | --- | --- |
-| 0 | 1 | 314.7 | 65.7 | 334.1 | 414.7 |
-| 1 | 5 | 255.0 | 35.3 | 298.7 | 380.8 |
-| 5 | 10 | 234.5 | 30.0 | 272.6 | 381.4 |
-| 10 | 20 | 262.9 | 33.3 | 299.8 | 404.5 |
+| 0 | 1 | 274.7 | 57.3 | 336.5 | 517.0 |
+| 1 | 5 | 225.2 | 32.2 | 265.3 | 365.1 |
+| 5 | 10 | 206.5 | 26.3 | 239.4 | 320.8 |
+| 10 | 20 | 211.1 | 25.8 | 241.7 | 326.6 |
 
-## Budget at 20 rivals: frame with a tick mean 10.50 ms, p95 15.12 ms, max 23.98 ms against 16.6 ms: headroom at p95 1.48 ms
+## Budget at 20 rivals: frame with a tick mean 8.82 ms, p95 10.91 ms, max 19.05 ms against 16.6 ms: headroom at p95 5.69 ms
 
 ## Height and surface queries across the field, sped up (600 ticks/s at time scale 10), over 1200 ticks from the start
-# a timing wrapper's own cost, measured around the base query's empty sample_at: 1.27 us per call, included in every figure below
+# a timing wrapper's own cost, measured around the base query's empty sample_at: 1.14 us per call, included in every figure below
 | Rivals | Asked by | Query | Calls per tick | us per tick | us per call |
 | --- | --- | --- | --- | --- | --- |
-| 1 | car | height.sample_at | 4.0 | 56 | 14.04 |
-| 1 | car | surface.sample_at | 2.0 | 75 | 37.68 |
-| 1 | sensing | height.sample_at | 2.0 | 23 | 11.32 |
-| 1 | sensing | surface.road_frame_at | 2.0 | 157 | 78.62 |
-| 1 | sensing | surface.sample_at | 1.0 | 25 | 24.92 |
-| 5 | car | height.sample_at | 12.0 | 112 | 9.34 |
-| 5 | car | surface.sample_at | 6.0 | 160 | 26.63 |
-| 5 | sensing | height.sample_at | 10.0 | 123 | 12.32 |
-| 5 | sensing | surface.road_frame_at | 10.0 | 668 | 66.89 |
-| 5 | sensing | surface.sample_at | 5.0 | 114 | 22.81 |
-| 10 | car | height.sample_at | 22.0 | 199 | 9.04 |
-| 10 | car | surface.sample_at | 11.0 | 297 | 27.04 |
-| 10 | sensing | height.sample_at | 20.0 | 252 | 12.63 |
-| 10 | sensing | surface.road_frame_at | 20.0 | 1370 | 68.56 |
-| 10 | sensing | surface.sample_at | 10.0 | 237 | 23.74 |
-| 20 | car | height.sample_at | 42.0 | 327 | 7.79 |
-| 20 | car | surface.sample_at | 21.0 | 512 | 24.42 |
-| 20 | sensing | height.sample_at | 40.0 | 464 | 11.60 |
-| 20 | sensing | surface.road_frame_at | 40.0 | 2580 | 64.56 |
-| 20 | sensing | surface.sample_at | 20.0 | 444 | 22.20 |
-# load average at end 3.46 2.93 2.80 2/4011 1999488
+| 1 | car | height.sample_at | 4.0 | 51 | 12.85 |
+| 1 | car | surface.sample_at | 2.0 | 70 | 35.12 |
+| 1 | sensing | height.sample_at | 2.0 | 20 | 9.91 |
+| 1 | sensing | surface.road_frame_at | 2.0 | 140 | 69.95 |
+| 1 | sensing | surface.sample_at | 1.0 | 22 | 22.24 |
+| 5 | car | height.sample_at | 12.0 | 101 | 8.42 |
+| 5 | car | surface.sample_at | 6.0 | 142 | 23.67 |
+| 5 | sensing | height.sample_at | 10.0 | 112 | 11.16 |
+| 5 | sensing | surface.road_frame_at | 10.0 | 596 | 59.63 |
+| 5 | sensing | surface.sample_at | 5.0 | 102 | 20.47 |
+| 10 | car | height.sample_at | 22.0 | 171 | 7.78 |
+| 10 | car | surface.sample_at | 11.0 | 253 | 23.05 |
+| 10 | sensing | height.sample_at | 20.0 | 216 | 10.82 |
+| 10 | sensing | surface.road_frame_at | 20.0 | 1166 | 58.33 |
+| 10 | sensing | surface.sample_at | 10.0 | 205 | 20.49 |
+| 20 | car | height.sample_at | 42.0 | 303 | 7.21 |
+| 20 | car | surface.sample_at | 21.0 | 467 | 22.26 |
+| 20 | sensing | height.sample_at | 40.0 | 426 | 10.66 |
+| 20 | sensing | surface.road_frame_at | 40.0 | 2348 | 58.75 |
+| 20 | sensing | surface.sample_at | 20.0 | 404 | 20.23 |
+# load average at end 1.69 1.94 1.80 1/3966 2382772
