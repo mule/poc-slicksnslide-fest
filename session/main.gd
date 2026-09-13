@@ -8,6 +8,13 @@ const VEHICLE_SCENE := preload("res://vehicle/top_down_car.tscn")
 ## so every slot stays on the road by construction however narrow the generated track is.
 const GRID_ROW_SPACING_M := 8.8
 const GRID_COLUMN_FRACTION := 0.25
+## A rival's spawn rotation is a multiple of 1 / SPAWN_ANGLE_LATTICE radians (2^-16, exact in float32
+## across the whole circle) that a physics step leaves unchanged, and never more than
+## SPAWN_ANGLE_MAX_STEPS lattice steps from the grid's own rotation. The bound is proved, not sampled:
+## tests/field_race_test.gd checks every one of the lattice's 411,775 angles in the engine. See
+## _physics_fixed_pose.
+const SPAWN_ANGLE_LATTICE := 65536.0
+const SPAWN_ANGLE_MAX_STEPS := 6
 
 @export var session_settings: Resource
 @export var vehicle_tuning: Resource
@@ -21,11 +28,13 @@ var _track_runtime: TrackRuntime
 var _current_seed := 0
 var _opponent_count := 0
 var _status_hide_at_msec := 0
-## The field beside the player's car. Each entry: index (1..opponent_count), car, driver,
-## detector, progress. The player's own progress stays in _trial, whose TimeTrialState owns a
-## LapProgressTracker exactly like each rival's entry does.
+## The field beside the player's car, in car-index order. Each entry: index (1..opponent_count),
+## car, driver, detector, progress. The player's own progress stays in _trial, whose TimeTrialState
+## owns a LapProgressTracker exactly like each rival's entry does.
 var _rivals: Array[Dictionary] = []
 var _field_surface_map: TrackSurfaceMap
+## The field's one sensing pass (#57): the session owns the field, so it senses for every driver.
+var _sensing: SensingPass
 
 @onready var _diagnostics_overlay: CanvasLayer = %DiagnosticsOverlay
 @onready var _seed_label: Label = %SeedLabel
@@ -78,6 +87,9 @@ func _physics_process(delta: float) -> void:
 		return
 	_trial.advance_time(delta)
 	_controller_input.poll_actions()
+	# The rivals drive before the player's reset handling, so a player's reset -- which returns early
+	# below -- never costs the field a tick.
+	_drive_field(delta)
 	var reset_this_tick := false
 	if Input.is_action_just_pressed("reset_car"):
 		_vehicle.request_safe_reset()
@@ -113,22 +125,51 @@ func _physics_process(delta: float) -> void:
 		if completed:
 			_show_status("Lap %d  ·  %s" % [_trial.lap_count, _format_time(_trial.last_lap_time)], 4.0)
 		_track_runtime.set_next_checkpoint(_trial.next_checkpoint)
-	# A player reset returns early above and skips this loop. A rival's own reset must also
-	# reseed and skip its pending-teleport tick, before stale positions can reach the detector.
+
+
+## One tick of the field. Every rival senses, in car-index order, before any rival drives; then each
+## drives and samples its own checkpoints. Nothing a driver decides moves a car before the physics
+## step, so all twenty senses describe the same world. The order is the field's own list, never one
+## a physics query or a dictionary decides.
+func _drive_field(delta: float) -> void:
+	if _rivals.is_empty():
+		return
+	var field := _field_cars()
+	var driving: Array[Dictionary] = []
 	for rival in _rivals:
-		if not is_instance_valid(rival["car"]):
+		var car := field[int(rival["index"])]
+		if car == null:
 			continue
-		var rival_car := rival["car"] as TopDownCar
-		if rival_car.consume_auto_reset_notice():
-			(rival["detector"] as CheckpointCrossingDetector).reset(rival_car.get_safe_reset_pose().origin)
+		# A rival's own reset reseeds its detector at the safe destination and skips its
+		# pending-teleport tick -- senses, controls and sampling -- before a stale pose reaches any.
+		if car.consume_auto_reset_notice():
+			(rival["detector"] as CheckpointCrossingDetector).reset(car.get_safe_reset_pose().origin)
 			continue
-		rival_car.set_input_state((rival["driver"] as AiDriver).drive(delta))
-		var rival_crossing: Dictionary = (rival["detector"] as CheckpointCrossingDetector).sample(rival_car.global_position)
-		if not rival_crossing.is_empty():
+		driving.append(rival)
+	var senses: Array[DriverSenses] = []
+	for rival in driving:
+		senses.append(_sensing.sense(field, int(rival["index"]), (rival["driver"] as AiDriver).sensing_horizon()))
+	for slot in range(driving.size()):
+		var rival := driving[slot]
+		var car := field[int(rival["index"])]
+		var driver := rival["driver"] as AiDriver
+		driver.perceive(senses[slot])
+		car.set_input_state(driver.drive(delta))
+		var crossing: Dictionary = (rival["detector"] as CheckpointCrossingDetector).sample(car.global_position)
+		if not crossing.is_empty():
 			(rival["progress"] as LapProgressTracker).cross_checkpoint(
-				int(rival_crossing.get("checkpoint", -1)),
-				float(rival_crossing.get("forward_dot", 0.0)),
+				int(crossing.get("checkpoint", -1)),
+				float(crossing.get("forward_dot", 0.0)),
 			)
+
+
+## Every car in the field, indexed by car index: the player at 0, rival n at n. A rival whose car has
+## been freed is a null the sensing pass skips, so no other car's index moves.
+func _field_cars() -> Array[TopDownCar]:
+	var field: Array[TopDownCar] = [_vehicle if is_instance_valid(_vehicle) else null]
+	for rival in _rivals:
+		field.append(rival["car"] as TopDownCar if is_instance_valid(rival["car"]) else null)
+	return field
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -158,6 +199,8 @@ func restart_with_seed(seed: int) -> void:
 	_opponent_count = int(session_settings.get("opponent_count"))
 	_rivals.clear()
 	_field_surface_map = null
+	_sensing = null
+	_host_race_in_a_fresh_world()
 	_track_definition = TrackGenerator.new().generate(seed)
 	var runtime := TrackRuntime.new(_track_definition)
 	runtime.name = "GeneratedTrack"
@@ -184,6 +227,7 @@ func restart_with_seed(seed: int) -> void:
 	_checkpoint_detector.reset(_vehicle.global_position)
 	_track_runtime.set_next_checkpoint(_trial.next_checkpoint)
 	if _opponent_count > 0:
+		_sensing = SensingPass.new(_field_surface_map, runtime.height_query())
 		for index in range(1, _opponent_count + 1):
 			_spawn_rival(index)
 	_controller_input.suppress_until_controls_released()
@@ -228,6 +272,38 @@ func _centerline_pose_behind(arc_length: float) -> Transform2D:
 	return Transform2D(forward.angle(), points[0])
 
 
+## The pose a physics step would leave a body at rest in. Integrating a body rebuilds its transform
+## from its angle in 32-bit real_t, which re-rounds a basis built any other way -- the grid's is built
+## from a centreline direction plus a quarter turn -- in its last digit. Whether a step ran between
+## spawning and the first sense then decided which race twenty drivers drove: the #59 review measured
+## it (the spawn contexts differed only in some cars' global_rotation, by one ulp). A car spawned at a
+## pose the rebuild leaves unchanged senses one world whichever phase it was spawned in.
+##
+## The review found that pose by rebuilding until nothing changed. That iteration has no usable bound:
+## seed 41's rivals 13 and 14 take 14,670 rounds, and an exhaustive sweep of every float32 angle (task
+## #61 fix round 1, against this machine's libm, whose cosf/sinf/atan2f matched the engine bit for bit on
+## a million angles) found runs of about 3.7 million consecutive angles a step would move. So the
+## rotation is instead moved onto a lattice of 2^-16 rad and the nearest lattice angle the rebuild leaves
+## unchanged is taken, nearest first and the higher angle first at equal distance. Every lattice angle is
+## exactly representable in float32, so the candidates are the same on every run. Of the 411,775 a spawn
+## can round to, 24,478 are moved by a step, and none is more than SPAWN_ANGLE_MAX_STEPS = 6 steps from
+## a fixed one -- at most 9.9e-5 rad of rotation. That bound is exhaustive over the lattice and
+## tests/field_race_test.gd re-proves it in the engine, so it holds for the math library the suite runs
+## on. Past it is a hard failure: an assertion in a debug build and in every test run, and an error in a
+## release build.
+func _physics_fixed_pose(pose: Transform2D) -> Transform2D:
+	var nearest := roundi(pose.get_rotation() * SPAWN_ANGLE_LATTICE)
+	for distance in range(SPAWN_ANGLE_MAX_STEPS + 1):
+		for index in [nearest + distance, nearest - distance]:
+			var candidate := Transform2D(index / SPAWN_ANGLE_LATTICE, pose.origin)
+			if Transform2D(candidate.get_rotation(), candidate.origin) == candidate:
+				return candidate
+	var message := "MainSession: no physics fixed spawn rotation within %d lattice steps of %s" % [SPAWN_ANGLE_MAX_STEPS, pose]
+	push_error(message)
+	assert(false, message)
+	return pose
+
+
 func _spawn_rival(index: int) -> void:
 	var car := VEHICLE_SCENE.instantiate() as TopDownCar
 	car.name = "RivalCar%d" % index
@@ -235,12 +311,14 @@ func _spawn_rival(index: int) -> void:
 	# The scene has default tuning, but it must not override a session's custom tuning.
 	# The camera stays disabled through the scene default.
 	car.tuning = vehicle_tuning
-	car.global_transform = _grid_slot_transform(index)
+	car.global_transform = _physics_fixed_pose(_grid_slot_transform(index))
 	%VehicleMount.add_child(car)
 	car.set_surface_query(_field_surface_map)
 	car.set_height_query(_track_runtime.height_query())
-	var driver := IdleDriver.new(_current_seed, index)
-	car.set_input_state(driver.drive(0.0))
+	# Skill comes from the car's own seed stream (#59); mistakes from the field's one switch.
+	var driver := ReactiveDriver.new(_current_seed, index)
+	driver.mistakes_enabled = bool(session_settings.get("opponent_mistakes_enabled"))
+	car.set_input_state(VehicleInputState.new())
 	car.set_auto_reset_enabled(bool(session_settings.get("auto_reset_enabled")))
 	var detector := CheckpointCrossingDetector.new(_track_definition)
 	detector.reset(car.global_position)
@@ -349,6 +427,24 @@ func _is_ahead_of(a: Dictionary, b: Dictionary) -> bool:
 
 func get_player_position() -> int:
 	return get_race_order().find(0) + 1
+
+
+## Every race gets a new physics space. Measured on seed 0 with twenty rivals: a
+## restart into the viewport's existing space did not reproduce the race -- racing seed 1 first
+## changed 18 of 20 cars, racing seed 0 itself first changed 20, and seeds 1 then 2 first changed
+## none -- while the same three histories with a fresh World2D before the restart each drove the
+## reference race bit for bit. What inside a reused space carries the history was not measured.
+##
+## The previous race's track and cars are freed first, so they never enter the new space on their way
+## out, and the persistent World nodes re-enter the new world's canvas with it. The swap is the
+## viewport's, so anything else living in that viewport comes along too: a StaticBody2D kept in the root
+## beside the session was in each new space after every restart, and a rival's ray hit it there. The new
+## space is new only of what this restart freed.
+func _host_race_in_a_fresh_world() -> void:
+	for mount in [%TrackMount, %VehicleMount]:
+		for child in mount.get_children():
+			child.free()
+	get_viewport().world_2d = World2D.new()
 
 
 func _install_scene(mount: Node2D, scene_root: Node2D) -> void:

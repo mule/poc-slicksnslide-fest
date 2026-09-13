@@ -4,8 +4,9 @@ extends SceneTree
 ##
 ## Everything here drives the production session through its real paths: the field is spawned by
 ## restart_with_seed, progress moves through the session's own checkpoint sampling, and standings
-## are read through get_race_order(). No car steers itself — the drivers are #56's idle ones, which
-## is exactly what this task was sized to run on.
+## are read through get_race_order(). This task was sized to run on #56's idle drivers; since #61 the
+## session's rivals are ReactiveDrivers, and the scenarios below still place cars by hand and tick the
+## session without a physics step wherever a pose is asserted.
 ##
 ## Focused proof runs: -- --proof-seed-only limits the grid sweep to seed 7; all other cases
 ## still run. Normal invocations sweep seeds 0–19.
@@ -17,8 +18,8 @@ extends SceneTree
 ##      checkpoint. A guard first asserts the lap-blind order differs, so the failing case below
 ##      can never pass vacuously.
 ##
-## Deferred to #61 (they need #59's real drivers): two runs at the same seed and count producing
-## identical final standings and a full-field race. Idle-field contact determinism is checked here.
+## Deferred to #61 and asserted there, in tests/field_race_test.gd: two runs at the same seed and
+## count producing identical final standings, a full-field race, and contact not desyncing a run.
 
 const MAIN_SCENE_PATH := "res://session/main.tscn"
 const SEED := 7

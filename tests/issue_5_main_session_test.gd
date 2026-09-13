@@ -39,14 +39,21 @@ func _verify_integrated_world(session: Node) -> bool:
 	var track_mount := session.get_node_or_null("%TrackMount")
 	var vehicle_mount := session.get_node_or_null("%VehicleMount")
 	_check(track_mount != null and track_mount.get_child_count() == 1, "session installs one generated track")
-	_check(vehicle_mount != null and vehicle_mount.get_child_count() == 1, "session installs one playable vehicle")
+	# The shipped settings race a field (#61: opponent_count = 10), so the mount holds the one playable
+	# car -- the player's, first, and the only one with the camera -- plus exactly the shipped rivals.
+	var shipped_rivals := int(session.session_settings.get("opponent_count"))
+	var playable := 0
+	if vehicle_mount != null:
+		for child in vehicle_mount.get_children():
+			playable += int(child is TopDownCar and (child as TopDownCar).camera_enabled)
+	_check(vehicle_mount != null and vehicle_mount.get_child_count() == 1 + shipped_rivals and vehicle_mount.get_child(0).name == "PlayerCar" and playable == 1, "session installs one playable vehicle, first in the mount, beside the %d shipped rivals" % shipped_rivals)
 	if track_mount != null and track_mount.get_child_count() == 1:
 		var runtime := track_mount.get_child(0)
 		_check(runtime is TrackRuntime, "track mount contains runtime generated geometry")
 		var start_finish := runtime.get_node_or_null("Checkpoint0") as Line2D
 		_check(start_finish != null and start_finish.points.size() == 2, "generated finish checkpoint has a visible track-width marker")
 		_check_highlighted_gate_tracks_session(session, runtime)
-	if vehicle_mount != null and vehicle_mount.get_child_count() == 1:
+	if vehicle_mount != null and vehicle_mount.get_child_count() > 0:
 		_check(vehicle_mount.get_child(0) is TopDownCar, "vehicle mount contains the real top-down car")
 	_check(session.has_method("get_session_snapshot"), "session exposes observable time-trial state")
 	if session.has_method("get_session_snapshot"):

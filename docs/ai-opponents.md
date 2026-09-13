@@ -4,10 +4,12 @@ Epic #55. This document covers what tasks #56, #57, #58 and #60 landed: the seam
 through, the identity that makes each driver reproducible, the camera rule that lets more than one
 car exist, what a driver knows, the driver that turns it into controls, the field of up to twenty
 rivals, per-car lap progress, and the standings; and what #59 added to the driver: a skill per car
-and deliberate mistakes that are seeded, logged and off by default. Scaling (#61) extends it.
+and deliberate mistakes that are seeded, logged and off by default. #61 wires all of it into the game,
+and a field of twenty on seed 0 races the same way twice across the two spawn histories its suite
+varies (one machine; the scope is under "Driving the field (#61)").
 
-`ReactiveDriver` (#58) is the part that makes a car drive itself. The session does not use it yet:
-`MainSession` still spawns `IdleDriver` rivals and runs no sensing pass, and wiring both in is #61's.
+`ReactiveDriver` (#58) is the part that makes a car drive itself. Since #61 every rival
+`MainSession` spawns drives with one, sensed by the session's own `SensingPass`.
 
 ## The seam
 
@@ -20,7 +22,7 @@ func drive(delta: float) -> VehicleInputState
 
 `TopDownCar.set_input_state()` already takes a `VehicleInputState`; `ControllerInput` produces one
 from hardware and `AiDriver` is the other producer. `IdleDriver` is the concrete neutral driver the
-field runs until reactive driving is wired in.
+field ran until #61; fixtures still use it.
 
 `drive` carries no senses, so #58 added the one door they come in by, and the horizon a driver wants
 them built at. One tick, from whoever owns the field:
@@ -127,14 +129,24 @@ bit-for-bit what they were before the flag existed, pinned at three ticks of a 6
 
 `SessionSettings.opponent_count` is an `@export_range(0, 20, 1)` integer defaulting to 0 and clamped
 in its setter. `MainSession.restart_with_seed()` reads it into `_opponent_count` and republishes it
-through `get_session_snapshot()`. As of task #56 it is **stored and observable, not wired** — no car
-is spawned from it. Task #60 spawns the field.
+through `get_session_snapshot()`. Task #60 spawns the field from it.
+
+`SessionSettings.opponent_mistakes_enabled` (#61) is the field's one mistake switch: every rival the
+session spawns takes it. It is **false in code** -- the default `ReactiveDriver` has too, and every
+test builds its settings with `SessionSettings.new()`, so a test races a flawless field unless it
+asks -- and **true in the shipped `data/default_session_settings.tres`**, because opponents that make
+deliberate mistakes are the epic's design.
+
+The shipped `data/default_session_settings.tres` sets `opponent_count = 10` (owner decision, #61 fix
+round 1); the code default stays 0, so a test that builds `SessionSettings.new()` spawns only what it
+asks for. Launched as the game, the main scene mounts eleven cars and all ten rivals drive off the grid.
+A suite that loads `main.tscn` with the shipped resource gets those ten rivals, mistakes on.
 
 ## The field (#60)
 
 `MainSession` owns the player's car plus a list of rivals. Each rival is the same
 `top_down_car.tscn` with the same `VehicleTuning` as the player, differing only in its input
-source: an `IdleDriver` until #58's reactive driving replaces it. Tuning and the grid transform
+source: a `ReactiveDriver` since #61 (an `IdleDriver` before). Tuning and the grid transform
 are assigned **before** the car enters the tree: `_ready()` sets mass from the session's tuning
 and captures the grid pose for safe resets. The scene's baked tuning is only a default. Rivals
 never touch `camera_enabled`; the scene default of false holds. All cars share the runtime's one
@@ -144,7 +156,8 @@ is additively extended with `field_size` and `player_position`, and the HUD disp
 
 Every car gets its own `CheckpointCrossingDetector` and its own `LapProgressTracker`. The player's
 tracker lives inside its `TimeTrialState` as before; the singularity that had to go was the
-session owning one of each, not the classes. A player reset skips one tick of rival sampling too.
+session owning one of each, not the classes. Since #61 a player's reset no longer skips a tick of
+the rivals: the field drives before the player's reset handling returns early.
 A rival's own automatic reset drains its notice, reseeds its detector at the safe destination,
 and skips sampling until the next tick to prevent teleport chords earning checkpoints.
 
@@ -161,6 +174,9 @@ faces its local direction of travel. The layout is a pure function of the defini
 number: no slot depends on the count, and the same seed always places the same cars in the same
 slots. A car starting behind the line crosses the start/finish gate forward on launch; the
 checkpoint rules already ignore it (it is not the next gate), which is exactly the standing start.
+Each rival is placed at a pose a physics step leaves unchanged, within 9.9e-5 rad of the grid's
+rotation at the same origin; see "Driving the field (#61)". The player's pose is `spawn_transform`
+exactly, unsnapped.
 
 Cars keep collision layer 1 and mask 3, shared with trees and the world boundary, so car-to-car
 contact works without a layer change — confirmed against the physics server in
@@ -184,14 +200,123 @@ sampling and asserts the exact order, including a car a lap ahead sitting at an 
 exactly that case; deleting the lap comparison from `MainSession._is_ahead_of` fails the same
 assertion in a normal run.
 
-### What waits for #61
+### What #60 deferred
 
-Deterministic final standings over a race and a full-field race need #59's real drivers.
-Two idle-field contact runs already compare every sampled pose, velocity and standing. The idle field cannot
-race; it can only be spawned, laid out, torn down and ranked. One known property of that idle
-field, not a defect: an undriven car creeps downhill, because the integrator applies gravity along
-the ground gradient with no throttle. The moment drivers steer (#58), this is their problem, and
-the standings code does not care either way.
+Deterministic final standings over a race, a full-field race, and contact not desyncing a run needed
+#59's real drivers. #61 asserts all three in `tests/field_race_test.gd`; see "Driving the field (#61)".
+
+### Driving the field (#61)
+
+**One tick.** `MainSession._physics_process` drives the field before it handles the player's reset.
+`_drive_field` builds the field as an array indexed by car index -- the player at 0, rival *n* at
+*n*, a freed rival as a null the pass skips -- and walks `_rivals` in that order:
+
+1. a rival whose own automatic reset fired drains the notice, reseeds its detector at the safe
+   destination and sits the tick out (no senses, no new controls, no sampling);
+2. every other rival **senses**, in index order: `sensing.sense(field, index, driver.sensing_horizon())`;
+3. then each, in the same order, **perceives, drives** (`car.set_input_state(driver.drive(delta))`)
+   and samples its own checkpoints.
+
+A control set this tick moves nothing until the physics step, so every sense of a tick describes one
+world. The order is the session's own list, never one a physics query or a dictionary decides. At
+count 0 there are no rivals, no `SensingPass` is built and nothing runs.
+
+**Spawn at the physics fixed point.** A physics step rebuilds a resting body's transform from its
+angle in 32-bit `real_t`, which re-rounds a basis built any other way in its last digit. The #59 review
+found that whether a step runs between spawn and first sense therefore decides which race the field
+drives. In the session, on seed 0 with twenty rivals, a restart followed by one step before the first
+sense changed 10 of 20 cars' control streams and swapped two finishers. A probe confirmed the rebuild
+is exactly what the server does to a resting `RigidBody2D`, step for step. On seeds 0-19, 114 of 400 raw
+grid poses are not fixed points.
+
+*How the fixed pose is found.* The #59 review's fix rebuilt the pose until nothing changed. #61 first
+capped that at 8 rounds, then 64; **neither was a fix**. The #61a review found seed 41's rivals 11-12 need
+148 rounds and 13-14 need 14,670, and seed 58's 5-6 need 74; at the cap the code only logged an error and
+placed them unsnapped. An exhaustive sweep then settled that no cap is safe: a C model of the rebuild
+(`cosf`, `sinf`, `atan2f` from this machine's glibc, which matched the engine bit for bit on 1,000,000
+angles while the double-precision variants did not) over every float32 angle in [-pi, pi] found runs of
+about 3.7 million consecutive angles that a step moves.
+
+So `_physics_fixed_pose` no longer iterates. It moves the rotation onto a lattice of 2^-16 rad -- every
+point exactly representable in float32 -- and takes the nearest lattice angle the rebuild leaves
+unchanged (nearest first, the higher angle first at equal distance), at the pose's own origin. Of the
+411,775 lattice angles a rotation in [-pi, pi] can round to, 24,478 are moved by a step, and none is
+more than `SPAWN_ANGLE_MAX_STEPS` = 6 steps from a fixed one, so a rival's rotation moves at most
+6.5 x 2^-16 = 9.9e-5 rad from the grid's. The bound is exhaustive over the lattice, the C model found the
+same 24,478 and the same worst case (6 steps, at 0.0337 rad), and `field_race_test` re-proves it in the
+engine on every run, so it holds for whatever math library the suite runs on. Past it is a hard failure:
+an assertion (a SCRIPT ERROR that aborts the spawn in any debug build or test) plus an error in release.
+
+The player's pose is not snapped: it is `spawn_transform` exactly, which #60 pins, and on 6 of seeds
+0-19 (0, 4, 7, 15, 16, 19) that is not a fixed point either. On seed 0 it did not reach the race --
+both spawn phases above include it -- but that is one seed's observation, not a guarantee; the player
+is a human's car in the game.
+
+**A fresh physics space per race.** Separately, a restart into the viewport's existing space did not
+reproduce the race. Measured in the session, seed 0, twenty rivals, snapped poses, each history in a
+new process:
+
+| Before the race's restart, in the same session | Cars differing from the reference race |
+| --- | --- |
+| nothing (the reference) | 0 |
+| a full race on seed 0 itself | 20 |
+| seed 1 for 600 physics frames | 18 |
+| seed 1 for 5,900 physics frames | 18 (the same race as 600) |
+| seed 1 for 600, then seed 2 for 600 | 0 |
+
+These rows were measured with the iteration snap of the time. Seed 1 held for 600 or for 5,900 frames
+gave the same race, so duration did not matter there; the rows show no simple rule about which tracks
+were held (seed 0 itself changed all twenty, seeds 1 then 2 changed none). With `root.world_2d = World2D.new()`
+before the restart, the first three histories each drove the reference race bit for bit. So
+`restart_with_seed` now frees the previous race's track and cars and then gives the viewport a new
+`World2D` (`_host_race_in_a_fresh_world`) before building; with that, all four histories above drive
+one identical race. The persistent world nodes re-enter the new world's canvas, and a graphical
+check showed the track, objects, cars, HUD and camera drawing after two restarts. **What inside a
+reused space carries the history -- broadphase pairing, allocation order or anything else -- was not
+measured**, and nothing here names it.
+
+The swap is the session's viewport's (the root in the game; a `SubViewport` in the capture scripts), so
+anything else living in that viewport moves into the new world with it. Measured (#61a fix round 1):
+a `StaticBody2D` kept in the root beside the session was, after each of two restarts, in the new root
+space -- `PhysicsServer2D.body_get_space` equal to it -- and a ray cast in a rival's world hit it 400 px
+out. So the race's space is new only of what the restart freed; a body outside `World` is carried into
+every race. In the game the session is the whole scene, so nothing is. `field_race_test`'s `FRESH WORLD`
+assertion checks that the `World2D` object changed across the restart. That shows the swap ran; it
+cannot tell a space holding nothing from before from one that carried an outside body in.
+
+**What is asserted** (`tests/field_race_test.gd`, 37 checks, about 2.5 minutes):
+
+- **A full-field race.** Twenty rivals on seed 0, mistakes off, the player idle at pole: every rival
+  is watched driving and laps, none meets the stuck rule, none leaves the play area or gets lost. The
+  longest slow streak is 91 of 120 ticks **on seed 0**; that is seed 0's margin, not the field's. The
+  #61a review ran the same field on seed 41 and it met the stuck rule (177 of 120). Nothing here
+  asserts another seed, and the driving fix is part B's.
+- **Deterministic final standings.** Race 1 is a new session's restart from an idle frame; race 2 is
+  an in-session restart after the session has raced seed 1, called from a physics frame so one step
+  runs before the first sense (0 steps against 1, counted by a probe body). Same finishing order, every
+  rival on the same finishing tick, every rival's control stream identical at 64 bits.
+- **Collision does not desync a run.** All twenty rivals touch another car before finishing (1,730
+  contact ticks) and every one's stream is still identical.
+- **The mistake switch is total**: on, all twenty drivers have mistakes on and each has drawn a mistake
+  within 25 s; off, none has, none planned one and none logged one over the race.
+- **Every rival spawns at a physics fixed point.** The lattice bound is re-proved over all 411,775
+  angles in the engine; 200,000 random rotations (798 of which the old iteration needed more than 64
+  rounds for) and every rival on seeds 0-19, 41 and 58 (one needing 14,670 rounds) are checked against
+  it: fixed, at the grid origin, within 9.9e-5 rad.
+- **Count 0** builds no sensing pass over 60 physics ticks; count 1 does and its rival drives.
+
+Production mutations from the first round (when the suite had 32 checks), each run on a copy of the tree and failing by name with every check run:
+the rivals back on `IdleDriver` (`FULL FIELD`, `DETERMINISTIC`, the contact guard, `SWITCH ON`: 13
+failures); the switch ignored and forced off (`SWITCH ON`) or on (`SWITCH OFF`, both races); a
+`SensingPass` built at count 0 (the count-0 check). The race on seed 0 cannot guard the snap's
+bound -- no seed-0 pose is hard to snap -- so the pose checks are what do: see fix round 1's
+falsifications in the task #61a report.
+
+The test's probe body enters the race's space, so it is part of that space's history; whether it
+changes the race against a session with no probe was not checked. What is asserted is that one
+protocol reproduces itself across the two histories.
+Scope: one seed, twenty rivals, one Linux machine, two histories varied. Cross-machine determinism of
+Godot's 2D contact resolution is not established by anything here.
 ## Sensing — what a driver knows
 
 `DriverSenses` (`ai/driver_senses.gd`) is one car's whole view of the world for one tick, and
@@ -624,11 +749,10 @@ and touches no control: the gate (`_mistakes_on()`) is read in three places -- d
 the `active_mistake` getter. Switched off in the middle of a mistake, the mistake ends that tick and is
 logged as ended; switched back on, it does not resume.
 
-**There is no field-level switch yet.** The issue asks for a single switch that produces a field of
-flawless drivers. Per driver, the default gives that: a field built without touching the flag is
-flawless. But one switch for a whole field needs a field owner, and there is none: `MainSession`
-still spawns `IdleDriver`s and `session/` was outside #59. #61 must add the session setting, apply it
-to every driver it spawns, and assert over a whole field that it is total.
+**The field-level switch (#61).** One switch for a whole field needed a field owner, which #59 did not
+have. `SessionSettings.opponent_mistakes_enabled` is that switch; `MainSession` applies it to every
+rival it spawns, and `tests/field_race_test.gd` asserts over a field of twenty that it is total both
+ways (see "Settings" and "Driving the field (#61)").
 
 **Survivable.** Forced to one kind at its largest, a second of clean racing apart, at skill 0.0 and
 1.0, a car laps cleanly on seeds 0, 2, 5, 6 and 8, with no recovery and its body never off the dirt.
@@ -703,8 +827,9 @@ never eats into that slack.
     cars even with snapped poses; a fresh `World2D` after the same history did not.
 
   `skill_and_mistakes_test` runs its field first, so it spawns in the phase and the space
-  `--only=field` has: a measurement fix, not a cure. **What #61 must do** for "the same seed and count
-  reproduce the same race bit for bit":
+  `--only=field` has: a measurement fix, not a cure. #61 did the cure in `MainSession` -- see "Driving
+  the field (#61)" -- and the hand-built fields in the driver suites still have neither. What the
+  review asked of #61, kept for the record:
   1. give every race a spawn whose first sensed state does not depend on the main-loop phase -- snap
      each grid pose to its fixed point, or run a fixed number of steps before the first sense *and*
      snap. A fresh process is neither necessary nor sufficient;
@@ -731,6 +856,7 @@ godot --headless --path . --script res://tests/ai_driver_contract_test.gd
 godot --headless --path . --script res://tests/driver_senses_test.gd
 godot --headless --path . --script res://tests/reactive_driver_test.gd
 godot --headless --path . --script res://tests/skill_and_mistakes_test.gd
+godot --headless --path . --script res://tests/field_race_test.gd
 ```
 
 The first prints one deliberate `ERROR` line from its tuningless-car fixture; that error is the
@@ -743,6 +869,9 @@ godot --headless --path . --script res://tests/reactive_driver_test.gd -- --brea
 godot --headless --path . --script res://tests/skill_and_mistakes_test.gd -- --break-mistake-seed
 godot --headless --path . --script res://tests/skill_and_mistakes_test.gd -- --break-skill-spread
 godot --headless --path . --script res://tests/skill_and_mistakes_test.gd -- --leak-mistakes
+godot --headless --path . --script res://tests/field_race_test.gd -- --break-spawn-snap
+godot --headless --path . --script res://tests/field_race_test.gd -- --break-fresh-world
+godot --headless --path . --script res://tests/field_race_test.gd -- --break-contact-replay
 ```
 
 | Flag | Suite | What it does |
@@ -753,6 +882,9 @@ godot --headless --path . --script res://tests/skill_and_mistakes_test.gd -- --l
 | `--break-mistake-seed` | skill and mistakes | Derives the mistake stream without the car index. Every different-cars assertion fails: 190 of 190 plan pairs the same on each seed, every comparable field pair the same, and the twins log the same mistakes and drive the same lap |
 | `--break-skill-spread` | skill and mistakes | Collapses every derived skill to 0.5. The lap-time spread fails on all three seeds at exactly 0.0%, as do the derived-skill range checks, and the repeat car -- no longer the least skilled -- commits too few mistakes for its guard |
 | `--leak-mistakes` | skill and mistakes | Evidence, not an issue flag: the switch hides the log and nothing else. The twins' suppression check fails (they part on the first mistake's tick) and so do the primed-but-off unit checks; the issue's literal "two identical cars" wording **passes** |
+| `--break-spawn-snap` | field race | Rivals spawn at the raw grid pose. `FIXED POSE` fails (114 of 400 poses on seeds 0-19), and so do the three `DETERMINISTIC` assertions: the finishing order changes, 13 of 20 finish on the same tick, 10 of 20 streams are identical |
+| `--break-fresh-world` | field race | A restart reuses the space it has (the old race is still freed first). Both `FRESH WORLD` checks fail, and every `DETERMINISTIC` one: 0 of 20 streams identical |
+| `--break-contact-replay` | field race | Evidence, not a production mutation: race 2 moves the first rival to touch another car 0.05 px on that tick. `COLLISION` fails (0 of 20), with the `DETERMINISTIC` assertions it depends on |
 
 `--break-sense-frame` is the whole point of the frame assertion. The pass reads its car's pose
 exactly once, through `SensingPass._car_frame()`; substituting an identity basis there leaves every
