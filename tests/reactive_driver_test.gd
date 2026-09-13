@@ -202,6 +202,7 @@ func _run() -> void:
 		_check(_verify_it_slows_for_what_it_senses(), "the slow-down verification ran to completion")
 		_check(_verify_it_lifts_for_a_falling_crest(), "the lift verification ran to completion")
 		_check(_verify_the_recovery_rules(), "the recovery rule verification ran to completion")
+		_check(_verify_it_goes_round_a_stopped_car(), "the going-round verification ran to completion")
 	var lap_seeds: Array[int] = []
 	if _only_seeds.is_empty():
 		lap_seeds.append_array(TUNED_SEEDS)
@@ -568,6 +569,86 @@ func _verify_the_recovery_rules() -> bool:
 	lost.perceive(nowhere)
 	_check(lost.sensing_horizon() > WorldScale.metres(ReactiveDriver.LOOK_AHEAD_M), "a driver that finds no road asks to look further (%.0f px)" % lost.sensing_horizon())
 	return true
+
+
+## Stalled nose to tail behind a stopped car, a driver goes round it (#61). Before, it held its
+## following gap, stalled, reversed and drove up to the same car again for as long as that car stayed
+## put; in a field of twenty on seed 41 that met the stuck rule. Every car here is at a standstill on a
+## straight road, 240 px wide, with a stopped rival 52 px ahead.
+##
+## - Stalled behind a rival just right of its line, it does not reverse: it starts a pass and, the tick
+##   after, drives off with the nose turning left, the side with more road, without braking for the
+##   rival it is going round. Just left of its line, the mirror.
+## - Stalled again while passing, it backs out toward the other side.
+## - A stall with the rival 100 px beside its path is an ordinary stall: it reverses, no pass.
+## - What stopped it is remembered across the stall: a rival in the lane for the stall's first ticks
+##   that is beside the path by its last still starts a pass.
+## - A reversal that is not rolling backwards 0.8 s in ends; one that is keeps going.
+##
+## Read through get(), so a driver without the pass fails these by name rather than aborting the suite.
+func _verify_it_goes_round_a_stopped_car() -> bool:
+	var stall_ticks := ceili(ReactiveDriver.STALL_SECONDS / TICK) + 1
+	for rival_x: float in [10.0, -10.0]:
+		var driver := _make_driver(0)
+		var boxed := _stalled_behind(rival_x)
+		for tick in range(stall_ticks):
+			_one_tick(boxed, driver)
+		var side := "right" if rival_x > 0.0 else "left"
+		_check(driver.reversals == 0 and driver.get("passing") == true and _int_of(driver, "passes") == 1, "stalled behind a stopped rival 52 px ahead and %.0f px %s of its line, it starts a pass rather than a reversal (reversals %d, passing %s, passes %d)" % [absf(rival_x), side, driver.reversals, driver.get("passing"), _int_of(driver, "passes")])
+		var going := _one_tick(boxed, driver)
+		var turns_away := going.steer < 0.0 if rival_x > 0.0 else going.steer > 0.0
+		_check(going.throttle > 0.0 and going.brake == 0.0 and turns_away, "and drives off turning %s, the side with more road, without braking for the rival it goes round (throttle %.2f, brake %.2f, steer %+.2f)" % ["left" if rival_x > 0.0 else "right", going.throttle, going.brake, going.steer])
+		# Still stuck once the grace after starting the pass has run out: that side did not work. The
+		# second stall is due after the grace and another stall; three seconds is room to spare.
+		var waited := 0
+		while driver.reversals == 0 and waited < 180:
+			_one_tick(boxed, driver)
+			waited += 1
+		var backing := _one_tick(boxed, driver)
+		# Rolling backwards the car turns the other way, so a nose swinging right takes a left input.
+		var toward_other := backing.steer < 0.0 if rival_x > 0.0 else backing.steer > 0.0
+		_check(driver.reversals == 1 and driver.mode == ReactiveDriver.Mode.REVERSE and driver.get("passing") == true and toward_other, "stalled again while passing, it backs out swinging its nose %s, toward the other side (after %d ticks: reversals %d, mode %d, passing %s, steer %+.2f)" % ["right" if rival_x > 0.0 else "left", waited, driver.reversals, driver.mode, driver.get("passing"), backing.steer])
+
+	var beside := _make_driver(0)
+	var clear := _stalled_behind(100.0)
+	for tick in range(stall_ticks):
+		_one_tick(clear, beside)
+	_check(beside.reversals == 1 and beside.get("passing") != true, "a stall with the rival 100 px beside its path is an ordinary stall: it reverses and does not pass (reversals %d, passing %s)" % [beside.reversals, beside.get("passing")])
+
+	var remembering := _make_driver(0)
+	for tick in range(stall_ticks):
+		_one_tick(_stalled_behind(10.0) if tick < stall_ticks - 3 else _stalled_behind(100.0), remembering)
+	_check(remembering.reversals == 0 and remembering.get("passing") == true, "a rival in its lane for the stall's first ticks and beside its path by the last still starts a pass (reversals %d, passing %s)" % [remembering.reversals, remembering.get("passing")])
+
+	var progress_ticks := ceili(0.8 / TICK) + 1
+	var pinned := _make_driver(0)
+	var rolling := _make_driver(0)
+	var nothing_ahead := _straight_road_senses(0.0)
+	for tick in range(stall_ticks):
+		_one_tick(nothing_ahead, pinned)
+		_one_tick(nothing_ahead, rolling)
+	var backing_off := _straight_road_senses(-50.0)
+	for tick in range(progress_ticks):
+		_one_tick(nothing_ahead, pinned)
+		_one_tick(backing_off, rolling)
+	_check(pinned.mode == ReactiveDriver.Mode.RACE and rolling.mode == ReactiveDriver.Mode.REVERSE, "%d ticks into a reversal, one that has not rolled back ends and one rolling back at 50 px/s goes on (modes %d and %d)" % [progress_ticks, pinned.mode, rolling.mode])
+	return true
+
+
+## A car at a standstill on the centreline of a straight road, a stopped rival 52 px ahead and
+## `rival_x` px to the right of its line.
+func _stalled_behind(rival_x: float) -> DriverSenses:
+	var senses := _straight_road_senses(0.0)
+	senses.has_rival_ahead = true
+	senses.rival_offset = Vector2(rival_x, -52.0)
+	senses.rival_distance = senses.rival_offset.length()
+	senses.rival_relative_velocity = Vector2.ZERO
+	return senses
+
+
+func _int_of(driver: ReactiveDriver, property: String) -> int:
+	var value = driver.get(property)
+	return int(value) if value != null else -1
 
 
 # ---------------------------------------------------------------------------------------------
