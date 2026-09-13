@@ -289,9 +289,12 @@ func _verify_the_field_races_the_same_way_twice() -> bool:
 		var label: String = record.label
 		_check(record.steps_before_first_sense == (1 if record.after_a_step else 0), "%s: %d physics step(s) ran between spawn and the first sense" % [label, record.steps_before_first_sense])
 		_check(record.finished == FULL_FIELD, "FULL FIELD: %s: every one of the twenty rivals laps (%d)" % [label, record.finished])
-		_check(record.worst_slow < _stuck_ticks(), "FULL FIELD: %s: no rival meets the stuck rule (longest slow streak %d of %d ticks)" % [label, record.worst_slow, _stuck_ticks()])
-		_check(record.strayed == 0, "FULL FIELD: %s: no rival leaves the play area or gets lost (%d did)" % [label, record.strayed])
-		_check(record.switched_on == 0 and record.mistakes == 0 and record.planned == 0, "SWITCH OFF: %s: no rival has mistakes on, plans one or logs one (%d on, %d planned, %d logged)" % [label, record.switched_on, record.planned, record.mistakes])
+		# These three are only true of a rival that was watched driving: a car is observed from its
+		# driver's first sensed tick, so an idle field would pass them unobserved.
+		var watched: int = record.watched
+		_check(watched == FULL_FIELD and record.worst_slow < _stuck_ticks(), "FULL FIELD: %s: all %d rivals were watched driving and none meets the stuck rule (%d watched, longest slow streak %d of %d ticks)" % [label, FULL_FIELD, watched, record.worst_slow, _stuck_ticks()])
+		_check(watched == FULL_FIELD and record.strayed == 0, "FULL FIELD: %s: all %d rivals were watched driving and none leaves the play area or gets lost (%d watched, %d strayed)" % [label, FULL_FIELD, watched, record.strayed])
+		_check(watched == FULL_FIELD and record.switched_on == 0 and record.mistakes == 0 and record.planned == 0, "SWITCH OFF: %s: all %d rivals were watched driving and none has mistakes on, plans one or logs one (%d watched, %d on, %d planned, %d logged)" % [label, FULL_FIELD, watched, record.switched_on, record.planned, record.mistakes])
 		_check(is_equal_approx(record.step_delta, TICK), "%s: the session drove at the production step (%.6f s)" % [label, record.step_delta])
 		print("%s: finished %d in %d ticks, order %s, cars touching another before finishing %d, contact ticks %d" % [label, record.finished, record.ticks, record.order, record.touched, record.contact_ticks])
 
@@ -354,7 +357,7 @@ func _race(after_a_step: bool) -> Dictionary:
 	var surface := TrackSurfaceMap.new(definition)
 	var record := {
 		"label": label, "after_a_step": after_a_step, "order": [], "finished": 0, "worst_slow": 0, "strayed": 0,
-		"touched": 0, "contact_ticks": 0, "switched_on": 0, "planned": 0, "mistakes": 0, "ticks": 0,
+		"touched": 0, "watched": 0, "contact_ticks": 0, "switched_on": 0, "planned": 0, "mistakes": 0, "ticks": 0,
 		"steps_before_first_sense": -1, "step_delta": 0.0,
 	}
 	var finish: Array[int] = []
@@ -412,6 +415,7 @@ func _race(after_a_step: bool) -> Dictionary:
 		var driver: AiDriver = rivals[slot]["driver"]
 		record.finished += int(finish[slot] >= 0)
 		record.strayed += int(strayed[slot])
+		record.watched += int(streams[slot].size() > 0)
 		record.touched += int(first_contact[slot] >= 0)
 		record.switched_on += int(driver.get("mistakes_enabled") == true)
 		record.planned += _driver_int(driver, "mistakes_planned")
