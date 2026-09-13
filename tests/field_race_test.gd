@@ -27,7 +27,9 @@ extends SceneTree
 ##   VehicleInputState holds, are identical.
 ## - **Collision does not desync a deterministic run** (#60, deferred): the race is full of car-to-car
 ##   contact (guarded: most cars touch another before finishing), and every car's stream is still
-##   identical through and after its contacts.
+##   identical through and after its contacts. It is not independent of the stream assertion above:
+##   it is that assertion restricted to cars that touched another, and on RACE_SEED all twenty do.
+##   What it adds is the guard that the determinism was measured through contact, not around it.
 ##
 ## ## What is not asserted
 ##
@@ -148,8 +150,8 @@ func _verify_count_zero_runs_no_field() -> bool:
 	root.add_child(one)
 	await physics_frame
 	await physics_frame
-	var driver := (one.get("_rivals") as Array)[0]["driver"] as ReactiveDriver
-	_check(one.get("_sensing") != null and driver != null and int(driver.get("_tick")) > 0, "count 1 builds the pass and its rival drives with senses, so the check above can tell them apart")
+	var driver: AiDriver = (one.get("_rivals") as Array)[0]["driver"]
+	_check(one.get("_sensing") != null and _driver_int(driver, "_tick") > 0, "count 1 builds the pass and its rival drives with senses, so the check above can tell them apart")
 	one.free()
 	await process_frame
 	return true
@@ -191,9 +193,9 @@ func _verify_the_mistake_switch_reaches_every_rival() -> bool:
 	var switched_on := 0
 	var planning := 0
 	for rival in session.get("_rivals"):
-		var driver := rival["driver"] as ReactiveDriver
-		switched_on += int(driver.mistakes_enabled)
-		planning += int(driver.mistakes_planned > 0)
+		var driver: AiDriver = rival["driver"]
+		switched_on += int(driver.get("mistakes_enabled") == true)
+		planning += int(_driver_int(driver, "mistakes_planned") > 0)
 	_check(switched_on == FULL_FIELD, "SWITCH ON: every one of the twenty rivals' drivers has mistakes on (%d)" % switched_on)
 	_check(planning == FULL_FIELD, "SWITCH ON: every rival has drawn a mistake within %d s of racing (%d of %d)" % [SWITCH_TICKS / 60, planning, FULL_FIELD])
 	session.free()
@@ -214,19 +216,19 @@ func _verify_the_field_races_the_same_way_twice() -> bool:
 		_check(is_equal_approx(record.step_delta, TICK), "%s: the session drove at the production step (%.6f s)" % [label, record.step_delta])
 		print("%s: finished %d in %d ticks, order %s, cars touching another before finishing %d, contact ticks %d" % [label, record.finished, record.ticks, record.order, record.touched, record.contact_ticks])
 
-	_check(first.order == second.order, "DETERMINISTIC: the same seed and count finish in the same order across both spawns (%s against %s)" % [first.order, second.order])
+	_check(first.order.size() == FULL_FIELD and first.order == second.order, "DETERMINISTIC: the same seed and count finish, all twenty, in the same order in both races (%s against %s)" % [first.order, second.order])
 	var same_finish := 0
 	var same_stream := 0
 	var diverged: Array[String] = []
 	for slot in range(FULL_FIELD):
-		same_finish += int(first.finish[slot] == second.finish[slot])
+		same_finish += int(first.finish[slot] >= 0 and first.finish[slot] == second.finish[slot])
 		var difference := _first_difference(first.streams[slot], second.streams[slot])
-		if difference < 0:
+		if difference < 0 and first.streams[slot].size() > 0:
 			same_stream += 1
 		else:
 			diverged.append("car %d at tick %d (first contact tick %d)" % [slot + 1, difference / 4, first.first_contact[slot]])
-	_check(same_finish == FULL_FIELD, "DETERMINISTIC: every rival finishes on the same tick in both races (%d of %d)" % [same_finish, FULL_FIELD])
-	_check(same_stream == FULL_FIELD, "DETERMINISTIC: every rival's control stream is identical at 64 bits (%d of %d; diverged: %s)" % [same_stream, FULL_FIELD, ", ".join(diverged)])
+	_check(same_finish == FULL_FIELD, "DETERMINISTIC: every rival finishes, on the same tick in both races (%d of %d)" % [same_finish, FULL_FIELD])
+	_check(same_stream == FULL_FIELD, "DETERMINISTIC: every rival's control stream is non-empty and identical at 64 bits (%d of %d; diverged: %s)" % [same_stream, FULL_FIELD, ", ".join(diverged)])
 
 	# Collision. Only a stream that went through contact can show contact did not desync it.
 	var through_contact := 0
@@ -235,7 +237,7 @@ func _verify_the_field_races_the_same_way_twice() -> bool:
 		if first.first_contact[slot] < 0:
 			continue
 		through_contact += 1
-		through_contact_same += int(_first_difference(first.streams[slot], second.streams[slot]) < 0)
+		through_contact_same += int(first.streams[slot].size() > int(first.first_contact[slot]) * 4 and _first_difference(first.streams[slot], second.streams[slot]) < 0)
 	_check(through_contact >= FULL_FIELD / 2, "the race is a contact race: %d of %d rivals touch another car before finishing" % [through_contact, FULL_FIELD])
 	_check(through_contact > 0 and through_contact_same == through_contact, "COLLISION: every rival that touched another car drives an identical stream through and after its contacts (%d of %d)" % [through_contact_same, through_contact])
 	return true
@@ -259,7 +261,7 @@ func _race(after_a_step: bool) -> Dictionary:
 	if after_a_step:
 		for tick in range(OTHER_TICKS):
 			await physics_frame
-		var raced_other := int(((session.get("_rivals") as Array)[0]["driver"] as ReactiveDriver).get("_tick"))
+		var raced_other := _driver_int((session.get("_rivals") as Array)[0]["driver"], "_tick")
 		_check(raced_other >= OTHER_TICKS - 2, "%s: the session raced seed %d first (%d ticks)" % [label, OTHER_SEED, raced_other])
 		world_before = root.world_2d
 		await physics_frame
@@ -294,9 +296,8 @@ func _race(after_a_step: bool) -> Dictionary:
 		# Each frame is observed before the session's _physics_process for it: what is seen is the
 		# decision the last tick made and the pose the last step left.
 		for slot in range(FULL_FIELD):
-			var driver := rivals[slot]["driver"] as ReactiveDriver
 			var car := rivals[slot]["car"] as TopDownCar
-			var tick := int(driver.get("_tick"))
+			var tick := _driver_int(rivals[slot]["driver"], "_tick")
 			if tick == 0 or finish[slot] >= 0:
 				continue
 			if record.steps_before_first_sense < 0:
@@ -329,13 +330,13 @@ func _race(after_a_step: bool) -> Dictionary:
 	record.streams = streams
 	record.first_contact = first_contact
 	for slot in range(FULL_FIELD):
-		var driver := rivals[slot]["driver"] as ReactiveDriver
+		var driver: AiDriver = rivals[slot]["driver"]
 		record.finished += int(finish[slot] >= 0)
 		record.strayed += int(strayed[slot])
 		record.touched += int(first_contact[slot] >= 0)
-		record.switched_on += int(driver.mistakes_enabled)
-		record.planned += driver.mistakes_planned
-		record.mistakes += driver.mistake_log().size()
+		record.switched_on += int(driver.get("mistakes_enabled") == true)
+		record.planned += _driver_int(driver, "mistakes_planned")
+		record.mistakes += (driver.call("mistake_log") as Array).size() if driver.has_method("mistake_log") else 0
 	probe.free()
 	session.free()
 	await process_frame
@@ -378,6 +379,13 @@ func _new_session(count: int, mistakes: bool, seed: int) -> MainSession:
 	settings.opponent_mistakes_enabled = mistakes
 	session.session_settings = settings
 	return session as MainSession
+
+
+## Read through the seam's base type, so a field whose drivers are not ReactiveDrivers -- the idle
+## field this task replaced -- fails the assertions that read these rather than aborting the section.
+func _driver_int(driver: AiDriver, property: String) -> int:
+	var value = driver.get(property)
+	return int(value) if value != null else 0
 
 
 func _rounds_to_fixed_point(pose: Transform2D) -> int:
