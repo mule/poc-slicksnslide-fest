@@ -152,10 +152,14 @@ const STALL_SPEED_M := 1.0
 const STALL_SECONDS := 0.5
 const REVERSE_SECONDS := 1.6
 const RECOVERY_GRACE_SECONDS := 1.0
-## Seconds into a reversal by which the car must be rolling backwards faster than STALL_SPEED_M, or
-## the reversal ends. Unobstructed, the car's reverse engages after 0.4 s and passes that speed about
-## 0.17 s later.
+## Seconds into a reversal by which the car must be rolling backwards at REVERSE_PROGRESS_SPEED_M at
+## least, or the reversal ends. The car's reverse engages 0.4 s after it stops; on grass, starting from a
+## creep forwards, a traced reversal was rolling back at about 10 px/s (0.8 m/s) by 0.8 s. A car backing
+## into another stands still or is pushed forwards. A bound of STALL_SPEED_M (1 m/s) here, the first
+## version, ended that grass reversal and left the car stuck: measured on reactive_driver_test's seed-0
+## off-road start under --break-brake-distance, 141 ticks of the stuck rule's 120.
 const REVERSE_PROGRESS_SECONDS := 0.8
+const REVERSE_PROGRESS_SPEED_M := 0.25
 
 ## Going round a car stopped in the path (#61). A stall with a rival in the lane no further than
 ## PASS_BLOCKED_GAP_M ahead is a blocked stall: nothing in front of the car will ever move it on, and
@@ -463,7 +467,7 @@ func drive(delta: float) -> VehicleInputState:
 		# A reversal that has had time to get going and is still not rolling backwards is backing into
 		# something it cannot see -- in a field, the car queued behind -- and holding it only wastes
 		# the time the car has to get moving again.
-		var backing_into_something := _mode_time >= REVERSE_PROGRESS_SECONDS and speed > -WorldScale.metres(STALL_SPEED_M)
+		var backing_into_something := _mode_time >= REVERSE_PROGRESS_SECONDS and speed > -WorldScale.metres(REVERSE_PROGRESS_SPEED_M)
 		if _mode_time < REVERSE_SECONDS and not backing_into_something:
 			controls.set_controls(_reverse_steer, 0.0, 1.0, 0.0)
 			return controls

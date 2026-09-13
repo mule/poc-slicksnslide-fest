@@ -637,18 +637,19 @@ func _verify_it_goes_round_a_stopped_car() -> bool:
 		_one_tick(_stalled_behind(10.0) if tick < stall_ticks - 3 else _stalled_behind(100.0), remembering)
 	_check(remembering.reversals == 0 and remembering.get("passing") == true, "a rival in its lane for the stall's first ticks and beside its path by the last still starts a pass (reversals %d, passing %s)" % [remembering.reversals, remembering.get("passing")])
 
+	# 10 px/s back is what a reversal on grass that began from a creep forwards was doing by then.
 	var progress_ticks := ceili(0.8 / TICK) + 1
 	var pinned := _make_driver(0)
-	var rolling := _make_driver(0)
+	var slowly := _make_driver(0)
 	var nothing_ahead := _straight_road_senses(0.0)
 	for tick in range(stall_ticks):
 		_one_tick(nothing_ahead, pinned)
-		_one_tick(nothing_ahead, rolling)
-	var backing_off := _straight_road_senses(-50.0)
+		_one_tick(nothing_ahead, slowly)
+	var backing_off := _straight_road_senses(-10.0)
 	for tick in range(progress_ticks):
 		_one_tick(nothing_ahead, pinned)
-		_one_tick(backing_off, rolling)
-	_check(pinned.mode == ReactiveDriver.Mode.RACE and rolling.mode == ReactiveDriver.Mode.REVERSE, "%d ticks into a reversal, one that has not rolled back ends and one rolling back at 50 px/s goes on (modes %d and %d)" % [progress_ticks, pinned.mode, rolling.mode])
+		_one_tick(backing_off, slowly)
+	_check(pinned.mode == ReactiveDriver.Mode.RACE and slowly.mode == ReactiveDriver.Mode.REVERSE, "%d ticks into a reversal, one that has not rolled back ends and one rolling back at only 10 px/s goes on (modes %d and %d)" % [progress_ticks, pinned.mode, slowly.mode])
 	return true
 
 
