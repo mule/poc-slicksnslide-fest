@@ -10,10 +10,10 @@ extends SceneTree
 ##
 ## - **Count 0 runs no field**: no rival, no sensing pass, over real physics ticks. Count 1 does build
 ##   one, so the check can tell the two apart.
-## - **Every rival spawns at its physics fixed point** on seeds 0-19: rebuilding its transform from its
-##   rotation and origin -- what a physics step does to a resting body -- changes nothing. Guarded by
-##   the raw grid poses that are not fixed points (so the snap has work to do on these seeds), and by
-##   one that needs more than the 8 rounds the #59 review's loop allowed.
+## - **Every rival spawns at a physics fixed point**: rebuilding its transform from its rotation and
+##   origin -- what a physics step does to a resting body -- changes nothing. The snap's bound is proved
+##   over its whole angle lattice in the engine; 200,000 random rotations and every rival on seeds 0-19,
+##   41 and 58 are checked against it. See _verify_rivals_spawn_at_physics_fixed_points.
 ## - **The mistake switch is total**: with `opponent_mistakes_enabled` on, every rival's driver has
 ##   mistakes on and plans one; off (the race below), every driver has them off, plans none and logs none.
 ## - **A full-field race** (#60, deferred): twenty rivals on RACE_SEED, mistakes off. Every rival laps,
@@ -60,9 +60,14 @@ const RACE_SEED := 0
 ## The track race 2's session races first, and for how long, before its restart onto RACE_SEED.
 const OTHER_SEED := 1
 const OTHER_TICKS := 600
-const POSE_SEEDS := 20
-## The #59 review's snap loop stopped after this many rounds.
-const REVIEW_SNAP_ROUNDS := 8
+## The grid seeds the pose sweep spawns: 0-19, plus 41 and 58, whose rivals the old snap -- rebuild
+## until nothing changes, capped at 64 rounds -- left unsnapped (41's rivals 13 and 14 need 14,670).
+const POSE_SEEDS := [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 41, 58]
+## Random starting rotations for the seedless check.
+const SEEDLESS_ROTATIONS := 200000
+## The old snap's cap, and how far the guard below follows an iteration to see it exceeded.
+const OLD_SNAP_ROUNDS := 64
+const ROUNDS_SEARCHED := 20000
 ## Two hundred seconds. The slowest of the field lapped in under a hundred on RACE_SEED.
 const RACE_TICK_BUDGET := 12000
 ## Twenty-five seconds of a mistakes-on field: enough for every rival to start racing cleanly, which is
@@ -157,32 +162,106 @@ func _verify_count_zero_runs_no_field() -> bool:
 	return true
 
 
+## Three checks of MainSession._physics_fixed_pose, each able to fail on a snap that is not total:
+##
+## 1. **The bound is proved over the whole lattice, in the engine.** Every lattice angle a spawn can round
+##    to, and SPAWN_ANGLE_MAX_STEPS either side of the ends, is tested with the rebuild the physics step
+##    does; the worst distance from any of them to the nearest fixed one must be within the constant.
+## 2. **Seedless:** SEEDLESS_ROTATIONS random rotations each come back fixed, at the same origin, within
+##    the bound. Guarded by how many of them the old iteration needed more than 64 rounds for.
+## 3. **Seeds:** every rival spawned on POSE_SEEDS sits at a fixed pose within the bound of its raw grid
+##    pose. Guarded by the raw poses that are not fixed, and the most rounds the old iteration needed.
 func _verify_rivals_spawn_at_physics_fixed_points() -> bool:
 	var session := _new_session(FULL_FIELD, false, RACE_SEED)
 	root.add_child(session)
 	await process_frame
-	var not_fixed := 0
-	var fixed := 0
+	# Read by name, so this suite still loads -- and fails here by name -- against a session without them.
+	var constants := session.get_script().get_script_constant_map() as Dictionary
+	var lattice := float(constants.get("SPAWN_ANGLE_LATTICE", 0.0))
+	var max_steps := int(constants.get("SPAWN_ANGLE_MAX_STEPS", -1))
+	_check(lattice > 0.0 and max_steps >= 0, "the session declares its spawn-angle lattice (%s) and its proved bound (%d steps)" % [lattice, max_steps])
+	var bound := (max_steps + 0.5) / lattice if lattice > 0.0 else 0.0
+
+	# 1. The proof.
+	if lattice > 0.0 and max_steps >= 0:
+		var float32 := PackedByteArray()
+		float32.resize(4)
+		float32.encode_float(0, PI)
+		var top := roundi(float32.decode_float(0) * lattice)
+		var reach := top + max_steps + 1
+		var fixed := PackedByteArray()
+		fixed.resize(2 * reach + 1)
+		var non_fixed := 0
+		for index in range(-reach, reach + 1):
+			var candidate := Transform2D(index / lattice, Vector2.ZERO)
+			var is_fixed := Transform2D(candidate.get_rotation(), candidate.origin) == candidate
+			fixed[index + reach] = int(is_fixed)
+			non_fixed += int(not is_fixed and absi(index) <= top)
+		var worst := 0
+		var worst_at := 0
+		var last_fixed := -1000000000
+		var from_left := PackedInt32Array()
+		from_left.resize(2 * reach + 1)
+		for slot in range(2 * reach + 1):
+			if fixed[slot] == 1:
+				last_fixed = slot
+			from_left[slot] = mini(slot - last_fixed, 1000000000)
+		var next_fixed := 1000000000
+		for slot in range(2 * reach, -1, -1):
+			if fixed[slot] == 1:
+				next_fixed = slot
+			if absi(slot - reach) > top:
+				continue
+			var distance := mini(from_left[slot], next_fixed - slot)
+			if distance > worst:
+				worst = distance
+				worst_at = slot - reach
+		_check(non_fixed > 0, "the lattice holds angles a physics step would move, so there is something to prove (%d of %d)" % [non_fixed, 2 * top + 1])
+		_check(worst <= max_steps, "PROVED BOUND: from every one of the %d lattice angles a spawn rounds to, a fixed one is within %d steps (worst %d, at %.9f rad)" % [2 * top + 1, max_steps, worst, worst_at / lattice])
+
+	# 2. Seedless.
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 61
+	var seedless_bad := 0
+	var beyond_old_cap := 0
+	for sample in range(SEEDLESS_ROTATIONS):
+		var raw := Transform2D(rng.randf_range(-PI, PI), Vector2(rng.randf_range(-5000.0, 5000.0), rng.randf_range(-5000.0, 5000.0)))
+		beyond_old_cap += int(_rounds_to_fixed_point(raw, OLD_SNAP_ROUNDS + 1) > OLD_SNAP_ROUNDS)
+		seedless_bad += int(not _is_snapped(session.call("_physics_fixed_pose", raw), raw, bound))
+	_check(beyond_old_cap > 0, "the seedless rotations include ones the old iteration needed more than %d rounds for (%d of %d)" % [OLD_SNAP_ROUNDS, beyond_old_cap, SEEDLESS_ROTATIONS])
+	_check(seedless_bad == 0, "FIXED POSE (seedless): every one of %d random rotations snaps to a pose a physics step leaves unchanged, at the same origin, within the bound (%d do not)" % [SEEDLESS_ROTATIONS, seedless_bad])
+
+	# 3. Seeds.
+	var not_snapped: Array[String] = []
+	var placed := 0
 	var raw_not_fixed := 0
 	var most_rounds := 0
-	for seed in range(POSE_SEEDS):
+	for seed: int in POSE_SEEDS:
 		session.restart_with_seed(seed)
 		for rival in session.get("_rivals"):
 			var car := rival["car"] as TopDownCar
-			var pose := car.global_transform
-			if Transform2D(pose.get_rotation(), pose.origin) == pose:
-				fixed += 1
-			else:
-				not_fixed += 1
 			var raw: Transform2D = session.call("_grid_slot_transform", int(rival["index"]))
+			placed += 1
+			if not _is_snapped(car.global_transform, raw, bound):
+				not_snapped.append("seed %d rival %d" % [seed, int(rival["index"])])
 			raw_not_fixed += int(Transform2D(raw.get_rotation(), raw.origin) != raw)
-			most_rounds = maxi(most_rounds, _rounds_to_fixed_point(raw))
-	_check(raw_not_fixed > 0, "the raw grid poses on seeds 0-%d include ones a physics step would move (%d of %d)" % [POSE_SEEDS - 1, raw_not_fixed, POSE_SEEDS * FULL_FIELD])
-	_check(most_rounds > REVIEW_SNAP_ROUNDS, "one of them needs more than the review loop's %d rounds to reach its fixed point (%d)" % [REVIEW_SNAP_ROUNDS, most_rounds])
-	_check(not_fixed == 0, "FIXED POSE: every rival on seeds 0-%d spawns at the pose a physics step leaves it at (%d of %d are not)" % [POSE_SEEDS - 1, not_fixed, fixed + not_fixed])
+			most_rounds = maxi(most_rounds, _rounds_to_fixed_point(raw, ROUNDS_SEARCHED))
+	_check(raw_not_fixed > 0, "the raw grid poses on the swept seeds include ones a physics step would move (%d of %d)" % [raw_not_fixed, placed])
+	_check(most_rounds > OLD_SNAP_ROUNDS, "one of them needs more than the old snap's %d rounds to reach a fixed point by iteration (%d)" % [OLD_SNAP_ROUNDS, most_rounds])
+	_check(not_snapped.is_empty(), "FIXED POSE: every rival on seeds 0-19, 41 and 58 spawns at a pose a physics step leaves unchanged, at its grid origin, within the bound (%d of %d are not: %s)" % [not_snapped.size(), placed, ", ".join(not_snapped)])
 	session.free()
 	await process_frame
 	return true
+
+
+## A physics step leaves it unchanged, it stands where the raw pose stands, and its rotation is within
+## `bound` radians of the raw pose's.
+func _is_snapped(pose: Transform2D, raw: Transform2D, bound: float) -> bool:
+	return (
+		Transform2D(pose.get_rotation(), pose.origin) == pose
+		and pose.origin == raw.origin
+		and absf(angle_difference(raw.get_rotation(), pose.get_rotation())) <= bound
+	)
 
 
 func _verify_the_mistake_switch_reaches_every_rival() -> bool:
@@ -388,13 +467,14 @@ func _driver_int(driver: AiDriver, property: String) -> int:
 	return int(value) if value != null else 0
 
 
-func _rounds_to_fixed_point(pose: Transform2D) -> int:
-	for round in range(64):
+## Rebuilds until nothing changes, as the old snap did; `limit` when it has not stopped by then.
+func _rounds_to_fixed_point(pose: Transform2D, limit: int) -> int:
+	for round in range(limit):
 		var rebuilt := Transform2D(pose.get_rotation(), pose.origin)
 		if rebuilt == pose:
 			return round
 		pose = rebuilt
-	return 64
+	return limit
 
 
 func _stuck_ticks() -> int:

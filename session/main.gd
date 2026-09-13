@@ -8,9 +8,13 @@ const VEHICLE_SCENE := preload("res://vehicle/top_down_car.tscn")
 ## so every slot stays on the road by construction however narrow the generated track is.
 const GRID_ROW_SPACING_M := 8.8
 const GRID_COLUMN_FRACTION := 0.25
-## How many times a spawn pose may be rebuilt on its way to its physics fixed point. See
+## A rival's spawn rotation is a multiple of 1 / SPAWN_ANGLE_LATTICE radians (2^-16, exact in float32
+## across the whole circle) that a physics step leaves unchanged, and never more than
+## SPAWN_ANGLE_MAX_STEPS lattice steps from the grid's own rotation. The bound is proved, not sampled:
+## tests/field_race_test.gd checks every one of the lattice's 411,775 angles in the engine. See
 ## _physics_fixed_pose.
-const MAX_FIXED_POSE_ROUNDS := 64
+const SPAWN_ANGLE_LATTICE := 65536.0
+const SPAWN_ANGLE_MAX_STEPS := 6
 
 @export var session_settings: Resource
 @export var vehicle_tuning: Resource
@@ -272,19 +276,31 @@ func _centerline_pose_behind(arc_length: float) -> Transform2D:
 ## from its angle in 32-bit real_t, which re-rounds a basis built any other way -- the grid's is built
 ## from a centreline direction plus a quarter turn -- in its last digit. Whether a step ran between
 ## spawning and the first sense then decided which race twenty drivers drove: the #59 review measured
-## it (the spawn contexts differed only in some cars' global_rotation, by one ulp) and this loop is
-## the fix it demonstrated. Rebuilding from rotation and origin until nothing changes spawns each car
-## already at that fixed point, so a step changes nothing and every spawn phase senses one world.
+## it (the spawn contexts differed only in some cars' global_rotation, by one ulp). A car spawned at a
+## pose the rebuild leaves unchanged senses one world whichever phase it was spawned in.
 ##
-## The review's loop stopped after 8 rounds. That is not enough: seed 3's slots 11 and 12 take 14.
-## Across seeds 0-39 every grid pose converges and none cycles, so the bound below is only a guard.
+## The review found that pose by rebuilding until nothing changed. That iteration has no usable bound:
+## seed 41's rivals 13 and 14 take 14,670 rounds, and an exhaustive sweep of every float32 angle (task
+## #61 fix round 1, against this machine's libm, whose cosf/sinf/atan2f matched the engine bit for bit on
+## a million angles) found runs of about 3.7 million consecutive angles a step would move. So the
+## rotation is instead moved onto a lattice of 2^-16 rad and the nearest lattice angle the rebuild leaves
+## unchanged is taken, nearest first and the higher angle first at equal distance. Every lattice angle is
+## exactly representable in float32, so the candidates are the same on every run. Of the 411,775 a spawn
+## can round to, 24,478 are moved by a step, and none is more than SPAWN_ANGLE_MAX_STEPS = 6 steps from
+## a fixed one -- at most 9.9e-5 rad of rotation. That bound is exhaustive over the lattice and
+## tests/field_race_test.gd re-proves it in the engine, so it holds for the math library the suite runs
+## on. Past it is a hard failure: an assertion in a debug build and in every test run, and an error in a
+## release build.
 func _physics_fixed_pose(pose: Transform2D) -> Transform2D:
-	for round in range(MAX_FIXED_POSE_ROUNDS):
-		var rebuilt := Transform2D(pose.get_rotation(), pose.origin)
-		if rebuilt == pose:
-			return pose
-		pose = rebuilt
-	push_error("MainSession: spawn pose %s did not reach a physics fixed point in %d rounds" % [pose, MAX_FIXED_POSE_ROUNDS])
+	var nearest := roundi(pose.get_rotation() * SPAWN_ANGLE_LATTICE)
+	for distance in range(SPAWN_ANGLE_MAX_STEPS + 1):
+		for index in [nearest + distance, nearest - distance]:
+			var candidate := Transform2D(index / SPAWN_ANGLE_LATTICE, pose.origin)
+			if Transform2D(candidate.get_rotation(), candidate.origin) == candidate:
+				return candidate
+	var message := "MainSession: no physics fixed spawn rotation within %d lattice steps of %s" % [SPAWN_ANGLE_MAX_STEPS, pose]
+	push_error(message)
+	assert(false, message)
 	return pose
 
 
