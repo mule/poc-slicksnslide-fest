@@ -273,6 +273,13 @@ root across a session restart will find them in a space the race does not use.
   are not and one needing more than 8 rounds.
 - **Count 0** builds no sensing pass over 60 physics ticks; count 1 does and its rival drives.
 
+Production mutations, each run on a copy of the tree, each failing by name with all 32 checks run:
+the rivals back on `IdleDriver` (`FULL FIELD`, `DETERMINISTIC`, the contact guard, `SWITCH ON`: 13
+failures); the switch ignored and forced off (`SWITCH ON`) or on (`SWITCH OFF`, both races); a
+`SensingPass` built at count 0 (the count-0 check). **One is only half caught:** the snap capped at
+the review's 8 rounds fails `FIXED POSE` (seed 3's two slots) but not the race, because no seed-0 pose
+needs more than 4 rounds. The race on seed 0 does not guard the cap; the pose sweep does.
+
 The test's probe body enters the race's space, so it is part of that space's history; whether it
 changes the race against a session with no probe was not checked. What is asserted is that one
 protocol reproduces itself across the two histories.
@@ -843,6 +850,9 @@ godot --headless --path . --script res://tests/field_race_test.gd -- --break-con
 | `--break-mistake-seed` | skill and mistakes | Derives the mistake stream without the car index. Every different-cars assertion fails: 190 of 190 plan pairs the same on each seed, every comparable field pair the same, and the twins log the same mistakes and drive the same lap |
 | `--break-skill-spread` | skill and mistakes | Collapses every derived skill to 0.5. The lap-time spread fails on all three seeds at exactly 0.0%, as do the derived-skill range checks, and the repeat car -- no longer the least skilled -- commits too few mistakes for its guard |
 | `--leak-mistakes` | skill and mistakes | Evidence, not an issue flag: the switch hides the log and nothing else. The twins' suppression check fails (they part on the first mistake's tick) and so do the primed-but-off unit checks; the issue's literal "two identical cars" wording **passes** |
+| `--break-spawn-snap` | field race | Rivals spawn at the raw grid pose. `FIXED POSE` fails (114 of 400 poses on seeds 0-19), and so do the three `DETERMINISTIC` assertions: the finishing order changes, 13 of 20 finish on the same tick, 10 of 20 streams are identical |
+| `--break-fresh-world` | field race | A restart reuses the space it has (the old race is still freed first). Both `FRESH WORLD` checks fail, and every `DETERMINISTIC` one: 0 of 20 streams identical |
+| `--break-contact-replay` | field race | Evidence, not a production mutation: race 2 moves the first rival to touch another car 0.05 px on that tick. `COLLISION` fails (0 of 20), with the `DETERMINISTIC` assertions it depends on |
 
 `--break-sense-frame` is the whole point of the frame assertion. The pass reads its car's pose
 exactly once, through `SensingPass._car_frame()`; substituting an identity basis there leaves every
