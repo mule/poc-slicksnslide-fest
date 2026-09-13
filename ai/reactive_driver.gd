@@ -26,7 +26,8 @@ extends AiDriver
 ## - **Recover** from being stuck (reverse and swing the nose), from facing the wrong way (commit to
 ##   one direction of turn and hold it), from being off the road (the steering already heads back,
 ##   and a speed cap gives the grass's poor grip a chance), and from losing the road entirely (look
-##   further).
+##   further). Stuck behind a car that has stopped in its path, it goes round it rather than backing
+##   out (#61); see PASS_BLOCKED_GAP_M.
 ##
 ## ## What it believes about its car
 ##

@@ -51,6 +51,9 @@ extends SceneTree
 ##                              production distance from half of max_safe_speed to rest, whatever
 ##                              the actual speed. Chosen as the middle of the car's range before the
 ##                              mutation was first run, and not adjusted since.
+##   -- --break-go-round        a stall never counts as caused by a rival (NoGoingRoundDriver), so a
+##                              car stuck behind a stopped one reverses as it did before #61. Must
+##                              fail the going-round checks.
 ##
 ## Either one replaces the driver in every section of this file, so the unit checks fail with it as
 ## well as the laps.
@@ -154,6 +157,14 @@ class BrokenBrakingDriver:
 		return _constant
 
 
+## --break-go-round. Nothing ahead is ever what stopped the car, so every stall is an ordinary one.
+class NoGoingRoundDriver:
+	extends ReactiveDriver
+
+	func _blocked_by_a_rival() -> bool:
+		return false
+
+
 ## Evidence, not a mutation the issue names: the driver with #58's one added sense blanked, so the
 ## report can say what the road-ahead sense buys. Only run through --blind-to-road-ahead.
 class BlindToTheRoadAheadDriver:
@@ -167,6 +178,7 @@ class BlindToTheRoadAheadDriver:
 
 
 var _blind := false
+var _break_go_round := false
 
 
 func _initialize() -> void:
@@ -175,6 +187,7 @@ func _initialize() -> void:
 	var arguments := OS.get_cmdline_user_args()
 	_break_heading = arguments.has("--break-steer-heading")
 	_break_braking = arguments.has("--break-brake-distance")
+	_break_go_round = arguments.has("--break-go-round")
 	_blind = arguments.has("--blind-to-road-ahead")
 	_laps_only = arguments.has("--laps-only")
 	_recovery_only = arguments.has("--recovery-only")
@@ -193,6 +206,8 @@ func _run() -> void:
 		print("NOTE: --break-steer-heading is on; every driver in this run steers without its heading term.")
 	if _break_braking:
 		print("NOTE: --break-brake-distance is on; every driver in this run brakes at one constant distance.")
+	if _break_go_round:
+		print("NOTE: --break-go-round is on; no driver in this run goes round a car stopped in front of it.")
 	if not _laps_only:
 		_check(await _verify_the_physics_step(), "the physics step verification ran to completion")
 		_check(_verify_the_driver_reads_only_its_senses(), "the senses-only verification ran to completion")
@@ -236,6 +251,8 @@ func _make_driver(seed: int, index: int = DRIVER_INDEX) -> ReactiveDriver:
 		driver = BrokenHeadingDriver.new(seed, index)
 	elif _break_braking:
 		driver = BrokenBrakingDriver.new(seed, index)
+	elif _break_go_round:
+		driver = NoGoingRoundDriver.new(seed, index)
 	elif _blind:
 		driver = BlindToTheRoadAheadDriver.new(seed, index)
 	else:
