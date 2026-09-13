@@ -196,6 +196,7 @@ func restart_with_seed(seed: int) -> void:
 	_rivals.clear()
 	_field_surface_map = null
 	_sensing = null
+	_host_race_in_a_fresh_world()
 	_track_definition = TrackGenerator.new().generate(seed)
 	var runtime := TrackRuntime.new(_track_definition)
 	runtime.name = "GeneratedTrack"
@@ -410,6 +411,21 @@ func _is_ahead_of(a: Dictionary, b: Dictionary) -> bool:
 
 func get_player_position() -> int:
 	return get_race_order().find(0) + 1
+
+
+## Every race gets a physics space no other race has used. Measured on seed 0 with twenty rivals: a
+## restart into the viewport's existing space did not reproduce the race -- racing seed 1 first
+## changed 18 of 20 cars, racing seed 0 itself first changed 20, and seeds 1 then 2 first changed
+## none -- while the same three histories with a fresh World2D before the restart each drove the
+## reference race bit for bit. What inside a reused space carries the history was not measured.
+##
+## The previous race's track and cars are freed first, so they never enter the new space on their way
+## out, and the persistent World nodes re-enter the new world's canvas with it.
+func _host_race_in_a_fresh_world() -> void:
+	for mount in [%TrackMount, %VehicleMount]:
+		for child in mount.get_children():
+			child.free()
+	get_viewport().world_2d = World2D.new()
 
 
 func _install_scene(mount: Node2D, scene_root: Node2D) -> void:
