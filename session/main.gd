@@ -8,6 +8,9 @@ const VEHICLE_SCENE := preload("res://vehicle/top_down_car.tscn")
 ## so every slot stays on the road by construction however narrow the generated track is.
 const GRID_ROW_SPACING_M := 8.8
 const GRID_COLUMN_FRACTION := 0.25
+## How many times a spawn pose may be rebuilt on its way to its physics fixed point. See
+## _physics_fixed_pose.
+const MAX_FIXED_POSE_ROUNDS := 64
 
 @export var session_settings: Resource
 @export var vehicle_tuning: Resource
@@ -264,6 +267,26 @@ func _centerline_pose_behind(arc_length: float) -> Transform2D:
 	return Transform2D(forward.angle(), points[0])
 
 
+## The pose a physics step would leave a body at rest in. Integrating a body rebuilds its transform
+## from its angle in 32-bit real_t, which re-rounds a basis built any other way -- the grid's is built
+## from a centreline direction plus a quarter turn -- in its last digit. Whether a step ran between
+## spawning and the first sense then decided which race twenty drivers drove: the #59 review measured
+## it (the spawn contexts differed only in some cars' global_rotation, by one ulp) and this loop is
+## the fix it demonstrated. Rebuilding from rotation and origin until nothing changes spawns each car
+## already at that fixed point, so a step changes nothing and every spawn phase senses one world.
+##
+## The review's loop stopped after 8 rounds. That is not enough: seed 3's slots 11 and 12 take 14.
+## Across seeds 0-39 every grid pose converges and none cycles, so the bound below is only a guard.
+func _physics_fixed_pose(pose: Transform2D) -> Transform2D:
+	for round in range(MAX_FIXED_POSE_ROUNDS):
+		var rebuilt := Transform2D(pose.get_rotation(), pose.origin)
+		if rebuilt == pose:
+			return pose
+		pose = rebuilt
+	push_error("MainSession: spawn pose %s did not reach a physics fixed point in %d rounds" % [pose, MAX_FIXED_POSE_ROUNDS])
+	return pose
+
+
 func _spawn_rival(index: int) -> void:
 	var car := VEHICLE_SCENE.instantiate() as TopDownCar
 	car.name = "RivalCar%d" % index
@@ -271,7 +294,7 @@ func _spawn_rival(index: int) -> void:
 	# The scene has default tuning, but it must not override a session's custom tuning.
 	# The camera stays disabled through the scene default.
 	car.tuning = vehicle_tuning
-	car.global_transform = _grid_slot_transform(index)
+	car.global_transform = _physics_fixed_pose(_grid_slot_transform(index))
 	%VehicleMount.add_child(car)
 	car.set_surface_query(_field_surface_map)
 	car.set_height_query(_track_runtime.height_query())
