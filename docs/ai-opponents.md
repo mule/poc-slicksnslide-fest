@@ -403,11 +403,30 @@ twenty costs what one added between five and ten does in every column, and no mo
 and five. Nothing proportional to the square of the field shows at this size: the sensing pass's rival
 scan walks the whole field for every car, and at twenty it is not visible against the queries.
 
-**Budget at twenty, as measured: a frame holding a physics tick averages 8.8 ms, 10.5-10.9 ms at the 95th
-percentile and 15.9-19.1 ms at worst, against 16.6 ms.** Headroom is 7.8 ms on the mean and 5.7-6.1 ms at
-the 95th percentile; the worst frame of one run overran. With no rivals the worst frames already reach
-7.0-10.6 ms, so the tail is not the field's alone. Most of the field's cost is the sensing pass, about
-210-280 us a rival; decisions are about 26-59 us. The maximum was not lowered.
+**At twenty, as measured, the mean and the 95th percentile fit the 16.6 ms budget and the worst frame does
+not.** A frame holding a physics tick averages 8.8 ms, 10.5-10.9 ms at the 95th percentile and 15.9-19.1 ms
+at worst: headroom 7.8 ms on the mean and 5.7-6.1 ms at the 95th percentile; the worst frame of one of these
+two runs overran. Whether that meets the epic's "twenty cars hold the frame budget" is the owner's call; this
+document does not call the budget held. Most of the field's cost is the sensing pass, about 210-280 us a
+rival; decisions are about 26-59 us. The maximum was not lowered.
+
+**How often a frame overran** (#61b fix round: two more runs of the same capture on `8d830f0`, whose driver is
+`e1aa53e`'s, load 1.5-2.0, now counting frames over 16.6 ms and the 99th percentile;
+`field-cost-run-3.txt`, `-4.txt`):
+
+| Rivals | Frames with a tick over 16.6 ms | Their p99, us | Their max, us | Frames without a tick over 16.6 ms |
+| --- | --- | --- | --- | --- |
+| 0 | 0 of 3,592 / 0 of 3,592 | 3,213 / 3,290 | 5,102 / 10,352 | 0 of 30,301 / 0 of 30,449 |
+| 1 | 0 of 3,592 / 0 of 3,590 | 4,504 / 4,254 | 6,656 / 7,707 | 0 / 0 |
+| 5 | 0 of 3,590 / 0 of 3,590 | 6,132 / 6,596 | 10,129 / 7,985 | 0 / 0 |
+| 10 | 0 of 3,590 / 0 of 3,589 | 8,858 / 9,014 | 15,566 / 12,229 | 0 / 0 |
+| 20 | **1 of 3,586 / 1 of 3,586** (0.028%) | 13,680 / 14,111 | **19,767 / 17,226** | 0 of 11,698 / 0 of 11,500 |
+
+In those two runs, one frame in a minute of race overran at twenty rivals, and none at ten or fewer. The
+means and 95th percentiles repeat the table above (8.78 and 8.88 ms; 10.76 and 11.12 ms). Across all six cost
+runs of the final driver or its predecessor, the worst frame at twenty overran in five. What makes that one
+frame long -- the field, the launch's contact, the machine, the renderer -- was not measured, and one
+overrunning frame per run is too few to tell apart from the zero at ten.
 
 **Load moves these.** The same capture run twice on the commit before the last driver change (which alters
 one comparison in a reversal) with the machine's load average at 2.3-3.5 instead of 1.6-1.9 gave, at twenty
@@ -1143,9 +1162,10 @@ Said once, in one place, so nobody has to assemble it from the sections above.
   `field_race_test` bounds turn-arounds or wrong-way ticks; a lap counts only forward, in-order checkpoint
   crossings, which rules out a lap driven backwards but not a wrong-way excursion within one. (The seed-41
   suite field prints its turn-arounds: 1.)
-- **The budget's tail.** At twenty rivals the worst frame overran 16.6 ms in three of the four cost runs
-  (15.9-24.0 ms); with no rivals the worst frames already reach 7-11 ms. How often a player would see a dropped frame was
-  not measured, nor was anything on a phone, a slower GPU, or any other track seed than 0.
+- **The budget's tail.** At twenty rivals the worst frame overran 16.6 ms in five of six cost runs
+  (15.9-24.0 ms); counted in two of them, 1 of 3,586 frames each. Why that frame is long was not measured.
+  The mean and 95th percentile fit; the worst frame does not, and the budget is not described here as held.
+  Nothing was measured on a phone, a slower GPU, with a driving player, or on any track seed but 0.
 - **The late brake does not bite** (see "Skill and deliberate mistakes"), and the driver's beliefs about
   its car are constants a differently tuned session would leave stale.
 - **Rocks on raised ground** are invisible to a grounded car's ray and mask, as the terrain epic left them.
@@ -1171,8 +1191,8 @@ godot --headless --path . --script res://tests/capture_field_evidence.gd -- --sw
 godot --path . --script res://tests/capture_field_cost.gd                  # about 6-12 min; field-cost.txt
 ```
 
-The sweep asserts without drawing, so it runs headless. The checked-in `field-cost-run-1.txt` and
-`-run-2.txt` are two runs of the cost capture renamed; `field-sweep-ledger-before-fix.txt` is the sweep on
+The sweep asserts without drawing, so it runs headless. The checked-in `field-cost-run-1.txt` to
+`-run-4.txt` are runs of the cost capture renamed (3 and 4 also count overrunning frames); `field-sweep-ledger-before-fix.txt` is the sweep on
 #61a's driver, raw capture output apart from its first line, a hand-written header saying so. Run nothing alongside the cost capture.
 
 Mutations, which must fail:

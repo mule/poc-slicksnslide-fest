@@ -1,0 +1,57 @@
+# Field cost, task #61 part B. Seed 0, the production session in the game window, player idle at pole.
+# Intel(R) Core(TM) i7-10510U CPU @ 1.80GHz; renderer Mesa Intel(R) UHD Graphics (CML GT2); load average at start 1.66 1.53 1.53 2/3909 3115325
+# physics 60 ticks/s at time scale 1.0; vsync 0 (0 = off); max_fps 0
+
+## Per physics tick and per frame, microseconds: mean / p95 / max
+| Rivals | Sensing | Decisions | Physics tick | Frame with a tick | Frame without | Render CPU ms | Render GPU ms |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 0 / 0 / 0 | 0 / 0 / 0 | 56 / 75 / 173 | 1952 / 2585 / 10352 | 1735 / 2292 / 8432 | 0.606 | 1.091 |
+| 1 | 283 / 417 / 588 | 59 / 84 / 184 | 405 / 578 / 821 | 2528 / 3486 / 7707 | 1859 / 2494 / 8194 | 0.627 | 1.195 |
+| 5 | 1177 / 1738 / 2772 | 188 / 260 / 425 | 1460 / 2095 / 3271 | 3935 / 5330 / 7985 | 1986 / 2556 / 7460 | 0.635 | 2.132 |
+| 10 | 2218 / 3080 / 6547 | 320 / 454 / 698 | 2665 / 3618 / 7418 | 5578 / 7278 / 12229 | 2135 / 2739 / 7222 | 0.659 | 1.462 |
+| 20 | 4336 / 5539 / 8955 | 582 / 814 / 1068 | 5096 / 6489 / 10348 | 8880 / 11118 / 17226 | 2429 / 3023 / 6644 | 0.723 | 1.503 |
+
+## Frames longer than 16.6 ms, and the 99th percentile, microseconds
+| Rivals | Frames with a tick over budget | Their p99 | Frames without a tick over budget | Their p99 |
+| --- | --- | --- | --- | --- |
+| 0 | 0 of 3592 (0.000%) | 3290 | 0 of 30449 (0.000%) | 2735 |
+| 1 | 0 of 3590 (0.000%) | 4254 | 0 of 27311 (0.000%) | 3109 |
+| 5 | 0 of 3590 (0.000%) | 6596 | 0 of 23011 (0.000%) | 3186 |
+| 10 | 0 of 3589 (0.000%) | 9014 | 0 of 18646 (0.000%) | 3358 |
+| 20 | 1 of 3586 (0.028%) | 14111 | 0 of 11500 (0.000%) | 3659 |
+
+## Per-car marginal cost of the mean, microseconds per added rival, between consecutive counts
+| From | To | Sensing | Decisions | Physics tick | Frame with a tick |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 1 | 282.6 | 59.4 | 348.9 | 576.3 |
+| 1 | 5 | 223.6 | 32.1 | 263.6 | 351.6 |
+| 5 | 10 | 208.3 | 26.3 | 241.1 | 328.7 |
+| 10 | 20 | 211.8 | 26.3 | 243.1 | 330.2 |
+
+## Budget at 20 rivals: frame with a tick mean 8.88 ms, p95 11.12 ms, max 17.23 ms against 16.6 ms: headroom at p95 5.48 ms
+
+## Height and surface queries across the field, sped up (600 ticks/s at time scale 10), over 1200 ticks from the start
+# a timing wrapper's own cost, measured around the base query's empty sample_at: 1.14 us per call, included in every figure below
+| Rivals | Asked by | Query | Calls per tick | us per tick | us per call |
+| --- | --- | --- | --- | --- | --- |
+| 1 | car | height.sample_at | 4.0 | 52 | 13.12 |
+| 1 | car | surface.sample_at | 2.0 | 71 | 35.33 |
+| 1 | sensing | height.sample_at | 2.0 | 21 | 10.36 |
+| 1 | sensing | surface.road_frame_at | 2.0 | 147 | 73.52 |
+| 1 | sensing | surface.sample_at | 1.0 | 23 | 23.35 |
+| 5 | car | height.sample_at | 12.0 | 101 | 8.39 |
+| 5 | car | surface.sample_at | 6.0 | 142 | 23.63 |
+| 5 | sensing | height.sample_at | 10.0 | 111 | 11.11 |
+| 5 | sensing | surface.road_frame_at | 10.0 | 598 | 59.85 |
+| 5 | sensing | surface.sample_at | 5.0 | 102 | 20.48 |
+| 10 | car | height.sample_at | 22.0 | 170 | 7.73 |
+| 10 | car | surface.sample_at | 11.0 | 253 | 22.99 |
+| 10 | sensing | height.sample_at | 20.0 | 215 | 10.74 |
+| 10 | sensing | surface.road_frame_at | 20.0 | 1175 | 58.79 |
+| 10 | sensing | surface.sample_at | 10.0 | 204 | 20.38 |
+| 20 | car | height.sample_at | 42.0 | 311 | 7.42 |
+| 20 | car | surface.sample_at | 21.0 | 485 | 23.12 |
+| 20 | sensing | height.sample_at | 40.0 | 434 | 10.86 |
+| 20 | sensing | surface.road_frame_at | 40.0 | 2417 | 60.49 |
+| 20 | sensing | surface.sample_at | 20.0 | 417 | 20.88 |
+# load average at end 2.06 1.93 1.67 1/3908 3152031
