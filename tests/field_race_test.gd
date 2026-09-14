@@ -26,6 +26,10 @@ extends SceneTree
 ##   runs between spawn and first sense (0 steps against 1, counted by a probe body, not assumed). The
 ##   finishing order, every car's finishing tick, and every car's whole control stream at the 64 bits
 ##   VehicleInputState holds, are identical.
+## - **A field that has to go round** (#61): twenty rivals on PASS_SEED, mistakes off, the player idle at
+##   pole. On #61a's driver this field met the stuck rule (144 of 120 ticks): the player's car, shoved into
+##   the road, stopped with a queue behind it. Every rival laps, none meets the stuck rule, none strays.
+##   Guarded by the rivals having gone round a stopped car at least once, so the seed still asks for it.
 ## - **Collision does not desync a deterministic run** (#60, deferred): the race is full of car-to-car
 ##   contact (guarded: most cars touch another before finishing), and every car's stream is still
 ##   identical through and after its contacts. It is not independent of the stream assertion above:
@@ -43,12 +47,17 @@ extends SceneTree
 ##                               point assertion and the DETERMINISTIC assertions.
 ##   -- --break-fresh-world      the session restarts into the space it already has. Must fail the
 ##                               FRESH WORLD assertion and the DETERMINISTIC assertions.
+##   -- --break-go-round        in the PASS_SEED race only, every rival's driver is swapped, before its
+##                               first tick, for one whose stalls are never caused by a rival, so it
+##                               reverses behind a stopped car as #61a's did. Must fail the GO ROUND
+##                               stuck assertion. The same flag in tests/reactive_driver_test.gd fails
+##                               the unit checks.
 ##   -- --break-contact-replay   evidence, not a production mutation: in the second race only, the
 ##                               first rival to touch another car is moved 0.05 px on that tick. Must
 ##                               fail the COLLISION assertion, which shows the comparison can see a
 ##                               difference that starts at a contact.
 ##
-## Exploration: --only=a,b runs only the named sections (zero, poses, switch, race).
+## Exploration: --only=a,b runs only the named sections (zero, poses, switch, race, pass).
 
 const MAIN_SCENE_PATH := "res://session/main.tscn"
 const TUNING_PATH := "res://data/default_vehicle_tuning.tres"
@@ -58,6 +67,8 @@ const TIME_SCALE := 10.0
 const TICK := 1.0 / 60.0
 const FULL_FIELD := 20
 const RACE_SEED := 0
+## The field #61's stuck fix was diagnosed on.
+const PASS_SEED := 41
 ## The track race 2's session races first, and for how long, before its restart onto RACE_SEED.
 const OTHER_SEED := 1
 const OTHER_TICKS := 600
@@ -84,7 +95,14 @@ var _only: Array[String] = []
 var _break_spawn_snap := false
 var _break_contact_replay := false
 var _break_fresh_world := false
+var _break_go_round := false
 var _tuning: VehicleTuning
+
+
+## --break-go-round: nothing ahead is ever what stopped the car, so every stall is an ordinary reversal.
+class NoGoingRoundDriver extends ReactiveDriver:
+	func _blocked_by_a_rival() -> bool:
+		return false
 
 
 ## --break-spawn-snap: the pose as the grid built it.
@@ -108,6 +126,7 @@ func _initialize() -> void:
 	_break_spawn_snap = arguments.has("--break-spawn-snap")
 	_break_contact_replay = arguments.has("--break-contact-replay")
 	_break_fresh_world = arguments.has("--break-fresh-world")
+	_break_go_round = arguments.has("--break-go-round")
 	for argument in arguments:
 		if argument.begins_with("--only="):
 			for name in argument.trim_prefix("--only=").split(","):
@@ -127,8 +146,12 @@ func _run() -> void:
 		print("NOTE: --break-contact-replay is on; the second race nudges the first rival to touch another car.")
 	if _break_fresh_world:
 		print("NOTE: --break-fresh-world is on; a restart reuses the physics space it already has.")
+	if _break_go_round:
+		print("NOTE: --break-go-round is on; in the seed %d race no rival goes round a car stopped in front of it." % PASS_SEED)
 	if _wants("race"):
 		_check(await _verify_the_field_races_the_same_way_twice(), "the race verification ran to completion")
+	if _wants("pass"):
+		_check(await _verify_a_field_that_has_to_go_round(), "the go-round field verification ran to completion")
 	if _wants("zero"):
 		_check(await _verify_count_zero_runs_no_field(), "the count-zero verification ran to completion")
 	if _wants("poses"):
@@ -332,6 +355,19 @@ func _verify_the_field_races_the_same_way_twice() -> bool:
 	return true
 
 
+## The seed-41 field: the race-1 protocol (a new session, restarted from an idle frame) on PASS_SEED.
+func _verify_a_field_that_has_to_go_round() -> bool:
+	var record := await _race(false, PASS_SEED, _break_go_round)
+	var label := "seed %d, twenty rivals, the player idle at pole" % PASS_SEED
+	var watched: int = record.watched
+	_check(record.finished == FULL_FIELD, "GO ROUND: %s: every one of the twenty rivals laps (%d, in %d ticks)" % [label, record.finished, record.ticks])
+	_check(watched == FULL_FIELD and record.worst_slow < _stuck_ticks(), "GO ROUND: %s: all %d rivals were watched driving and none meets the stuck rule (%d watched, longest slow streak %d of %d ticks, by rival %d)" % [label, FULL_FIELD, watched, record.worst_slow, _stuck_ticks(), record.worst_slow_rival])
+	_check(watched == FULL_FIELD and record.strayed == 0, "GO ROUND: %s: all %d rivals were watched driving and none leaves the play area or gets lost (%d watched, %d strayed)" % [label, FULL_FIELD, watched, record.strayed])
+	_check(record.passes > 0, "GO ROUND: %s: the field went round a stopped car, so this seed still asks for it (%d passes)" % [label, record.passes])
+	print("seed %d go-round field: finished %d in %d ticks, longest slow %d (rival %d), passes %d, reversals %d, turn-arounds %d, contact ticks %d" % [PASS_SEED, record.finished, record.ticks, record.worst_slow, record.worst_slow_rival, record.passes, record.reversals, record.turn_arounds, record.contact_ticks])
+	return true
+
+
 # ---------------------------------------------------------------------------------------------
 # The race
 
@@ -340,9 +376,9 @@ func _verify_the_field_races_the_same_way_twice() -> bool:
 ## is the session's own restart_with_seed, called either from an idle frame -- the next thing to run
 ## is the session's own sensing -- or from a call deferred out of a physics frame, which runs after the
 ## session's _physics_process and before that frame's step, so one step comes first.
-func _race(after_a_step: bool) -> Dictionary:
+func _race(after_a_step: bool, seed := RACE_SEED, go_round_broken := false) -> Dictionary:
 	var label := "race 2 (in-session restart after seed %d, spawned before a physics step)" % OTHER_SEED if after_a_step else "race 1 (new session, spawned in an idle frame)"
-	var session := _new_session(FULL_FIELD, false, OTHER_SEED if after_a_step else RACE_SEED)
+	var session := _new_session(FULL_FIELD, false, OTHER_SEED if after_a_step else seed)
 	root.add_child(session)
 	await process_frame
 	var probe := _step_probe()
@@ -354,16 +390,23 @@ func _race(after_a_step: bool) -> Dictionary:
 		_check(raced_other >= OTHER_TICKS - 2, "%s: the session raced seed %d first (%d ticks)" % [label, OTHER_SEED, raced_other])
 		world_before = root.world_2d
 		await physics_frame
-		_restart.call_deferred(session, probe)
+		_restart.call_deferred(session, probe, seed)
 	else:
-		_restart(session, probe)
+		_restart(session, probe, seed)
+		if go_round_broken:
+			# Before the first physics frame, so each replacement drives every tick its rival drives.
+			for rival in session.get("_rivals"):
+				var replacement := NoGoingRoundDriver.new(seed, int(rival["index"]))
+				replacement.mistakes_enabled = (rival["driver"] as AiDriver).get("mistakes_enabled") == true
+				rival["driver"] = replacement
 	var rivals: Array = session.get("_rivals")
 	await physics_frame
 	_check(root.world_2d != world_before, "FRESH WORLD: %s: the restart replaced the viewport's World2D (it shows the swap ran, not that nothing outside World came along)" % label)
 	var definition: TrackDefinition = session.get("_track_definition")
 	var surface := TrackSurfaceMap.new(definition)
 	var record := {
-		"label": label, "after_a_step": after_a_step, "order": [], "finished": 0, "worst_slow": 0, "strayed": 0,
+		"label": label, "after_a_step": after_a_step, "order": [], "finished": 0, "worst_slow": 0, "worst_slow_rival": 0, "strayed": 0,
+		"passes": 0, "reversals": 0, "turn_arounds": 0,
 		"touched": 0, "watched": 0, "contact_ticks": 0, "switched_on": 0, "planned": 0, "mistakes": 0, "ticks": 0,
 		"steps_before_first_sense": -1, "step_delta": 0.0,
 	}
@@ -395,7 +438,9 @@ func _race(after_a_step: bool) -> Dictionary:
 				var controls: VehicleInputState = car.get("_input_state")
 				streams[slot].append_array(PackedFloat64Array([controls.steer, controls.throttle, controls.brake, controls.handbrake]))
 			slow[slot] = slow[slot] + 1 if car.get_speed() < _tuning.auto_reset_stuck_speed else 0
-			record.worst_slow = maxi(record.worst_slow, slow[slot])
+			if slow[slot] > record.worst_slow:
+				record.worst_slow = slow[slot]
+				record.worst_slow_rival = slot + 1
 			if not definition.play_area.has_point(car.global_position) or surface.distance_to_centerline(car.global_position, _tuning.auto_reset_lost_distance * 2.0) > _tuning.auto_reset_lost_distance:
 				strayed[slot] = true
 			for body in car.get_colliding_bodies():
@@ -424,6 +469,9 @@ func _race(after_a_step: bool) -> Dictionary:
 		record.strayed += int(strayed[slot])
 		record.watched += int(streams[slot].size() > 0)
 		record.touched += int(first_contact[slot] >= 0)
+		record.passes += _driver_int(driver, "passes")
+		record.reversals += _driver_int(driver, "reversals")
+		record.turn_arounds += _driver_int(driver, "turn_arounds")
 		record.switched_on += int(driver.get("mistakes_enabled") == true)
 		record.planned += _driver_int(driver, "mistakes_planned")
 		record.mistakes += (driver.call("mistake_log") as Array).size() if driver.has_method("mistake_log") else 0
@@ -434,8 +482,8 @@ func _race(after_a_step: bool) -> Dictionary:
 
 
 ## The probe goes in after the restart, into the space the race is hosted in.
-func _restart(session: MainSession, probe: RigidBody2D) -> void:
-	session.restart_with_seed(RACE_SEED)
+func _restart(session: MainSession, probe: RigidBody2D, seed: int) -> void:
+	session.restart_with_seed(seed)
 	root.add_child(probe)
 
 
