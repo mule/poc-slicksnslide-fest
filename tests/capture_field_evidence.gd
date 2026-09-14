@@ -61,7 +61,7 @@ const TICK := 1.0 / 60.0
 const FULL_FIELD := 20
 const SHIPPED_FIELD := 10
 ## The seeds the stuck fix was tuned on -- 0, the suites' seed, and 41, where the field was first
-## found stuck -- and seeds it was not, first raced once the driver was frozen.
+## found stuck -- and seeds it was not: first raced at ba10ad0, re-raced on the final driver (e1aa53e).
 const TUNED_SEEDS := [0, 41]
 const HELD_OUT_SEEDS := [4, 58]
 const SWEEP_SEEDS := [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 41, 58]
