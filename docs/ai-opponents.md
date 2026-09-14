@@ -406,8 +406,9 @@ scan walks the whole field for every car, and at twenty it is not visible agains
 **At twenty, as measured, the mean and the 95th percentile fit the 16.6 ms budget and the worst frame does
 not.** A frame holding a physics tick averages 8.8 ms, 10.5-10.9 ms at the 95th percentile and 15.9-19.1 ms
 at worst: headroom 7.8 ms on the mean and 5.7-6.1 ms at the 95th percentile; the worst frame of one of these
-two runs overran. Whether that meets the epic's "twenty cars hold the frame budget" is the owner's call; this
-document does not call the budget held. Most of the field's cost is the sensing pass, about 210-280 us a
+two runs overran. **The owner judges the epic's "twenty cars hold the frame budget" at the 95th percentile**,
+so by that measure twenty rivals hold it; the rare overrunning worst frame is accepted, not fixed. Most of the
+field's cost is the sensing pass, about 210-280 us a
 rival; decisions are about 26-59 us. The maximum was not lowered.
 
 **How often a frame overran** (#61b fix round: two more runs of the same capture on `8d830f0`, whose driver is
