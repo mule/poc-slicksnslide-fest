@@ -775,8 +775,8 @@ play-area boundary in the physics space, the production surface and height maps,
   sitting there until the stuck rule trips.
 - **A field of twenty** on seed 0, every car a `ReactiveDriver` on the session's grid (restated in
   the suite, since the session's own method is private): all twenty lap, none meets the stuck rule
-  (longest slow spell 85 of 120 ticks), none strays, and no car touches another for more than 5% of
-  its lap (worst 3.3%). A baseline for #61, which owns the field. The 5% was set after the fact: the
+  (longest slow spell 45 of 120 ticks since #61's stuck fix, 85 before), none strays, and no car touches
+  another for more than 5% of its lap (worst 2.0%; 3.3% before). A baseline for #61, which owns the field. The 5% was set after the fact: the
   first exploratory fields spent 20-40% of their laps in contact, because the rival rule only acted
   while closing and a car that crept inside the gap at equal speed rode the bumper in front.
 - **Determinism**: two cars from the same pose on the same seed produce identical control streams, all
