@@ -1145,12 +1145,27 @@ godot --headless --path . --script res://tests/field_race_test.gd
 ```
 
 The first prints one deliberate `ERROR` line from its tuningless-car fixture; that error is the
-behaviour under test. The reactive driver suite takes about three minutes. Mutations, which must fail:
+behaviour under test. The reactive driver suite takes about four minutes, skill and mistakes about nine.
+
+The captures, windowed (a display, not `--headless`); each writes to `docs/evidence/ai-opponents/`:
+
+```sh
+godot --path . --script res://tests/capture_field_evidence.gd              # about 18 min; field-ledger.txt, stills
+godot --headless --path . --script res://tests/capture_field_evidence.gd -- --sweep   # 22 seeds, about 21 min
+godot --path . --script res://tests/capture_field_cost.gd                  # about 6-12 min; field-cost.txt
+```
+
+The sweep asserts without drawing, so it runs headless. The checked-in `field-cost-run-1.txt` and
+`-run-2.txt` are two runs of the cost capture renamed; `field-sweep-ledger-before-fix.txt` is the sweep on
+#61a's driver. Run nothing alongside the cost capture.
+
+Mutations, which must fail:
 
 ```sh
 godot --headless --path . --script res://tests/driver_senses_test.gd -- --break-sense-frame
 godot --headless --path . --script res://tests/reactive_driver_test.gd -- --break-steer-heading
 godot --headless --path . --script res://tests/reactive_driver_test.gd -- --break-brake-distance
+godot --headless --path . --script res://tests/reactive_driver_test.gd -- --break-go-round
 godot --headless --path . --script res://tests/skill_and_mistakes_test.gd -- --break-mistake-seed
 godot --headless --path . --script res://tests/skill_and_mistakes_test.gd -- --break-skill-spread
 godot --headless --path . --script res://tests/skill_and_mistakes_test.gd -- --leak-mistakes
@@ -1167,7 +1182,8 @@ godot --headless --path . --script res://tests/field_race_test.gd -- --break-con
 | `--break-mistake-seed` | skill and mistakes | Derives the mistake stream without the car index. Every different-cars assertion fails: 190 of 190 plan pairs the same on each seed, every comparable field pair the same, and the twins log the same mistakes and drive the same lap |
 | `--break-skill-spread` | skill and mistakes | Collapses every derived skill to 0.5. The lap-time spread fails on all three seeds at exactly 0.0%, as do the derived-skill range checks, and the repeat car -- no longer the least skilled -- commits too few mistakes for its guard |
 | `--leak-mistakes` | skill and mistakes | Evidence, not an issue flag: the switch hides the log and nothing else. The twins' suppression check fails (they part on the first mistake's tick) and so do the primed-but-off unit checks; the issue's literal "two identical cars" wording **passes** |
-| `--break-spawn-snap` | field race | Rivals spawn at the raw grid pose. `FIXED POSE` fails (114 of 400 poses on seeds 0-19), and so do the three `DETERMINISTIC` assertions: the finishing order changes, 13 of 20 finish on the same tick, 10 of 20 streams are identical |
+| `--break-go-round` | reactive driver | No stall counts as caused by a rival, so a car stuck behind a stopped one reverses as before #61. Seven of the going-round unit checks fail; the ordinary-stall and reversal-progress checks pass, as they should. The suite's own field then drives exactly #58's numbers (longest slow streak 85, worst contact 3.3%) |
+| `--break-spawn-snap` | field race | Rivals spawn at the raw grid pose. Both `FIXED POSE` checks fail (11,813 of 200,000 seedless; 128 of 440 on the swept seeds), and so do the stream and `COLLISION` checks (15 of 20). **Since the stuck fix the finishing order and ticks on seed 0 no longer change under it**, so those two `DETERMINISTIC` checks pass; at #61a they failed too |
 | `--break-fresh-world` | field race | A restart reuses the space it has (the old race is still freed first). Both `FRESH WORLD` checks fail, and every `DETERMINISTIC` one: 0 of 20 streams identical |
 | `--break-contact-replay` | field race | Evidence, not a production mutation: race 2 moves the first rival to touch another car 0.05 px on that tick. `COLLISION` fails (0 of 20), with the `DETERMINISTIC` assertions it depends on |
 
@@ -1177,3 +1193,61 @@ world position where it was and strips the rotation that turns a world vector in
 `_verify_senses_are_in_the_car_frame` places one layout twice — 15,000 px apart and 137 degrees
 rotated — and walks every declared field of `DriverSenses` comparing the two. If that check passed
 with the flag on, it would not be testing the frame.
+
+### The whole suite (#61)
+
+Every script under `tests/` that extends `SceneTree`, less the twelve graphical `capture_*` scripts and the
+two fixtures (`height_channel_test_height_provider.gd`, `issue_4_test_surface_provider.gd`): **33 suites,
+run one after another on the final driver, 33 exit 0.** `reactive_driver_test` now has 277 checks,
+`skill_and_mistakes_test` 362, `field_race_test` 37. The two captures this task added were run as
+described above (evidence twice, cost twice, the sweep once on each driver).
+
+### Every mutation flag in the project (#61)
+
+Enumerated from the code, not from a ledger: every `OS.get_cmdline_user_args()` flag under `tests/`
+that breaks production or the evidence -- thirty-one `--break-*`, `--leak-mistakes`, and
+`offtrack_object_collision_test`'s `--remove-solid-collider` and `--solid-decoration`. Exploration
+switches (`--seeds=`, `--laps-only`, `--recovery-only`, `--trace`, `--blind-to-road-ahead`, `--only=`,
+`--proof-seed-only`, the `issue_4` `--*-only` switches, the captures' `--sweep` and `--no-launched`)
+are not mutations and were not run as such. Each flag below was run once, sequentially, on the final
+driver (`e1aa53e`, whose later commits touch only docs and evidence): **34 run, 34 exit 1**, every one
+with the suite running to its end, named `FAIL` lines, and no `SCRIPT ERROR`. The first failing
+assertion is the first `FAIL` line the suite printed; for some flags the assertion the flag targets comes
+later in the same run.
+
+| Flag | Suite | Exit | FAIL lines | First failing assertion |
+| --- | --- | --- | --- | --- |
+| `--break-height-layers` | `airborne_obstacle_level_test` | 1 | 6 | the rock is a low collider |
+| `--break-sense-frame` | `driver_senses_test` | 1 | 38 | a car yawed +0 degrees off the road reads -1.570796 rad (expected +0.000000) |
+| `--break-spawn-snap` | `field_race_test` | 1 | 4 | DETERMINISTIC: every rival's control stream is non-empty and identical at 64 bits (15 of 20; diverged: car 16 at tick 1279 (first contact tick 94), car 17 at tick 27 (first contact tick 94), car 18 at tick 101 (first contact ti... |
+| `--break-fresh-world` | `field_race_test` | 1 | 6 | FRESH WORLD: race 1 (new session, spawned in an idle frame): the restart replaced the viewport's World2D (it shows the swap ran, not that nothing outside World came along) |
+| `--break-contact-replay` | `field_race_test` | 1 | 4 | DETERMINISTIC: the same seed and count finish, all twenty, in the same order in both races ([2, 1, 3, 4, 5, 7, 9, 6, 8, 10, 12, 11, 14, 13, 16, 15, 18, 17, 20, 19] against [2, 1, 3, 4, 5, 7, 9, 6, 8, 10, 11, 14, 12, 13, 16, 15,... |
+| `--break-proportional-steering` | `issue_4_vehicle_maneuvers` | 1 | 1 | half steering produces proportional rotation (half 1.10, full 1.10 rad) |
+| `--break-countersteer` | `issue_4_vehicle_maneuvers` | 1 | 1 | counter-steer meaningfully reduces slip (0.56 -> 0.99) |
+| `--break-surface-recovery` | `issue_4_vehicle_maneuvers` | 1 | 1 | reduced off-track grip takes at least 15 more ticks to recover (dirt 30, off-track 30) |
+| `--break-standings-order` | `issue_60_field_test` | 1 | 1 | MUTATION --break-standings-order: ranking without lap counts still puts the car a lap ahead (at an earlier checkpoint) first — expected order [3, 1, 0, 2], lap-blind order [1, 0, 2, 3] |
+| `--break-height-seed` | `jump_ramp_placement_test` | 1 | 60 | seed 0 height fingerprint repeats |
+| `--break-clearance` | `jump_ramp_placement_test` | 1 | 32 | seed 1 height fingerprint repeats |
+| `--break-density` | `jump_ramp_placement_test` | 1 | 3 | seed 0 places at least one ramp |
+| `--remove-solid-collider` | `offtrack_object_collision_test` | 1 | 6 | only tree and rock produce colliders |
+| `--solid-decoration` | `offtrack_object_collision_test` | 1 | 4 | v1:0:0:0 solid flag matches its catalog archetype |
+| `--break-runtime-integrity` | `offtrack_object_performance_test` | 1 | 100 | seed 0 runtime visual count matches generated placements |
+| `--break-seed` | `offtrack_object_placement_test` | 1 | 40 | seed 0 placement fingerprint repeats |
+| `--break-clearance` | `offtrack_object_placement_test` | 1 | 304 | seed 0 placement fingerprint repeats |
+| `--break-rock-corridor` | `offtrack_object_terrain_test` | 1 | 2 | no generated rock in seeds 0..19 is reachable from a flight above the clearance over that rock's own ground (21 reachable) |
+| `--break-steer-heading` | `reactive_driver_test` | 1 | 72 | on the centreline with the nose +0.2 rad off the road, it steers back (steer +0.000) |
+| `--break-brake-distance` | `reactive_driver_test` | 1 | 4 | at 150 px/s the same obstacle is not: it keeps driving (throttle 0.00, brake 1.00) |
+| `--break-go-round` | `reactive_driver_test` | 1 | 7 | stalled behind a stopped rival 52 px ahead and 10 px right of its line, it starts a pass rather than a reversal (reversals 1, passing false, passes 0) |
+| `--break-mistake-seed` | `skill_and_mistakes_test` | 1 | 6 | seed 0: no two of twenty rivals plan the same first three mistakes (190 of 190 pairs the same) |
+| `--break-skill-spread` | `skill_and_mistakes_test` | 1 | 10 | seed 0: twenty rivals draw twenty different skills (1 distinct) |
+| `--leak-mistakes` | `skill_and_mistakes_test` | 1 | 15 | primed for late brake but switched off, it drives 150 ticks exactly as a flawless driver |
+| `--break-terrain-version` | `terrain_field_contract_test` | 1 | 21 | two fields from the same seed and version agree bit for bit at every position |
+| `--break-terrain-seed` | `terrain_field_contract_test` | 1 | 21 | two fields from the same seed and version agree bit for bit at every position |
+| `--break-terrain-curvature` | `terrain_field_contract_test` | 1 | 2 | the catalog's curvature bound (0.0007500000) stays under the lift-off curvature at max_safe_speed (0.0002993774) |
+| `--break-side-wall` | `terrain_height_map_test` | 1 | 16 | on a flat base: the car's ride height tracks the map under it on every tick (worst gap 9.0000 px) |
+| `--break-flank-curvature` | `terrain_height_map_test` | 1 | 12 | terrain plus flank curvature (0.015289650) stays under the lift-off curvature at the off-track terminal speed (0.004883371) |
+| `--break-collision` | `track_collision_physics_test` | 1 | 24 | seed 0 probe driven right stays inside the play area (at 7024.9,2344.6) |
+| `--break-gravity` | `vehicle_height_channel_test` | 1 | 7 | slope 0.120: the car lands within 300 ticks |
+| `--break-landing` | `vehicle_height_channel_test` | 1 | 3 | slope 0.120: the landing is hard enough that the loss assertion is live |
+| `--break-terrain-lift-off` | `vehicle_terrain_test` | 1 | 2 | bare terrain never lifts the car off at max_safe_speed in the real integrator (44 airborne of 36709 ticks over 24 lines) |
+| `--break-speed-clamp` | `vehicle_terrain_test` | 1 | 1 | on the synthetic descent the car never exceeds the shipped max_safe_speed (peak 683.215 of 640.0 px/s) |
