@@ -13,12 +13,14 @@ extends SceneTree
 ## - **Sensing across the field** and **driver decisions**, per physics tick: MainSession._drive_field
 ##   timed in a subclass whose body is the production body with clock reads between its loops -- the
 ##   sense loop, then the perceive, drive and checkpoint loop.
-## - **Physics tick**: wall time from the tree's physics_frame signal to the process_frame that follows
-##   it, on frames holding exactly one physics tick. That spans every _physics_process -- the field's
-##   drive included -- and the physics server's step, where each car's _integrate_forces and its own
-##   surface and height queries run.
+## - **Physics tick span**: wall time from the tree's physics_frame signal to the process_frame that
+##   follows it, on frames holding exactly one physics tick. That spans every _physics_process -- the
+##   field's drive included -- and the physics server's step. It does not hold the cars'
+##   _integrate_forces, where each car's own surface and height queries run: the query pass measures
+##   those alone at more than the span leaves beyond the field's drive. The frame figure holds them.
 ## - **Frame**: wall time between consecutive process_frame signals, on frames holding one physics
 ##   tick, and on frames holding none; with the renderer's own CPU and GPU times for the root viewport.
+##   For both, the 99th percentile and how many frames took longer than BUDGET_MS.
 ## - **Height and surface queries across the field**: a second, sped-up pass with every query the cars
 ##   and the sensing pass make routed through timing wrappers, reported per tick and per query. The
 ##   wrapper's own cost per call is measured and reported beside them, not subtracted.
@@ -282,6 +284,13 @@ func _report_frames(results: Dictionary) -> void:
 		var r: Dictionary = results[count]
 		_lines.append("| %d | %s | %s | %s | %s | %s | %.3f | %.3f |" % [count, _triple(r.sense), _triple(r.decide), _triple(r.physics), _triple(r.frame_tick), _triple(r.frame_idle), r.render_cpu.mean, r.render_gpu.mean])
 	_lines.append("")
+	_lines.append("## Frames longer than %.1f ms, and the 99th percentile, microseconds" % BUDGET_MS)
+	_lines.append("| Rivals | Frames with a tick over budget | Their p99 | Frames without a tick over budget | Their p99 |")
+	_lines.append("| --- | --- | --- | --- | --- |")
+	for count: int in COUNTS:
+		var r: Dictionary = results[count]
+		_lines.append("| %d | %d of %d (%.3f%%) | %.0f | %d of %d (%.3f%%) | %.0f |" % [count, r.frame_tick.over, r.frame_tick.n, 100.0 * r.frame_tick.over / maxf(r.frame_tick.n, 1), r.frame_tick.p99, r.frame_idle.over, r.frame_idle.n, 100.0 * r.frame_idle.over / maxf(r.frame_idle.n, 1), r.frame_idle.p99])
+	_lines.append("")
 	_lines.append("## Per-car marginal cost of the mean, microseconds per added rival, between consecutive counts")
 	_lines.append("| From | To | Sensing | Decisions | Physics tick | Frame with a tick |")
 	_lines.append("| --- | --- | --- | --- | --- | --- |")
@@ -301,13 +310,16 @@ func _triple(s: Dictionary) -> String:
 
 func _stats(values: PackedInt64Array) -> Dictionary:
 	if values.is_empty():
-		return {"mean": 0.0, "p95": 0.0, "max": 0.0, "n": 0}
+		return {"mean": 0.0, "p95": 0.0, "p99": 0.0, "max": 0.0, "n": 0, "over": 0}
 	var sorted := values.duplicate()
 	sorted.sort()
 	var total := 0
 	for value in sorted:
 		total += value
-	return {"mean": float(total) / sorted.size(), "p95": float(sorted[mini(sorted.size() - 1, int(sorted.size() * 0.95))]), "max": float(sorted[sorted.size() - 1]), "n": sorted.size()}
+	var over := 0
+	for value in sorted:
+		over += int(value > BUDGET_MS * 1000.0)
+	return {"mean": float(total) / sorted.size(), "p95": float(sorted[mini(sorted.size() - 1, int(sorted.size() * 0.95))]), "p99": float(sorted[mini(sorted.size() - 1, int(sorted.size() * 0.99))]), "max": float(sorted[sorted.size() - 1]), "n": sorted.size(), "over": over}
 
 
 func _stats_ms(values: PackedFloat64Array) -> Dictionary:
