@@ -135,15 +135,18 @@ in its setter. `MainSession.restart_with_seed()` reads it into `_opponent_count`
 through `get_session_snapshot()`. Task #60 spawns the field from it.
 
 `SessionSettings.opponent_mistakes_enabled` (#61) is the field's one mistake switch: every rival the
-session spawns takes it. It is **false in code** -- the default `ReactiveDriver` has too, and every
-test builds its settings with `SessionSettings.new()`, so a test races a flawless field unless it
-asks -- and **true in the shipped `data/default_session_settings.tres`**, because opponents that make
-deliberate mistakes are the epic's design.
+session spawns takes it. It is **false in code** -- the default `ReactiveDriver` has too -- and **true
+in the shipped `data/default_session_settings.tres`**, because opponents that make deliberate mistakes
+are the epic's design.
 
 The shipped `data/default_session_settings.tres` sets `opponent_count = 10` (owner decision, #61 fix
-round 1); the code default stays 0, so a test that builds `SessionSettings.new()` spawns only what it
-asks for. Launched as the game, the main scene mounts eleven cars and all ten rivals drive off the grid.
-A suite that loads `main.tscn` with the shipped resource gets those ten rivals, mistakes on.
+round 1); the code default stays 0. Launched as the game, the main scene mounts eleven cars and all ten
+rivals drive off the grid.
+
+Which a test gets depends on how it builds its session. The suites that give theirs `SessionSettings.new()`
+-- `field_race_test`, `issue_60_field_test`, `ai_driver_contract_test`, `terrain_visuals_test` -- race only the
+rivals they ask for, flawless unless they ask for mistakes. A suite that loads `main.tscn` with the shipped resource --
+`issue_5_main_session_test` is one -- gets those ten rivals, mistakes on.
 
 ## The field (#60)
 
@@ -160,7 +163,10 @@ is additively extended with `field_size` and `player_position`, and the HUD disp
 Every car gets its own `CheckpointCrossingDetector` and its own `LapProgressTracker`. The player's
 tracker lives inside its `TimeTrialState` as before; the singularity that had to go was the
 session owning one of each, not the classes. Since #61 a player's reset no longer skips a tick of
-the rivals: the field drives before the player's reset handling returns early.
+the rivals: the field drives before the player's reset handling returns early. Each rival also takes the
+session's `auto_reset_enabled`. `issue_60_field_test` checks both: every rival drives on a tick the
+player's reset returns early from, and every rival's car has the setting on in a session that has it on
+and off in one that has it off.
 A rival's own automatic reset drains its notice, reseeds its detector at the safe destination,
 and skips sampling until the next tick to prevent teleport chords earning checkpoints.
 
@@ -198,10 +204,13 @@ shows `POS n/size` and the snapshot publishes `player_position` and `field_size`
 table was considered for this epic and deliberately left out.
 
 `tests/issue_60_field_test.gd` drives a scripted scenario through the session's own crossing
-sampling and asserts the exact order, including a car a lap ahead sitting at an earlier checkpoint.
-`-- --break-standings-order` re-ranks the session's entries without the lap term and must fail on
-exactly that case; deleting the lap comparison from `MainSession._is_ahead_of` fails the same
-assertion in a normal run.
+sampling and asserts the exact order, `[3, 1, 0, 2]`, including a car a lap ahead sitting at an earlier
+checkpoint. `-- --break-standings-order` runs every session in the suite as a `MainSession` subclass whose
+`_is_ahead_of` drops the lap term, and nothing else changes: the literal-order assertion fails by name
+(`[1, 0, 2, 3]`), with the position, snapshot and HUD checks that read the same order. Deleting the lap
+comparison from `MainSession._is_ahead_of` itself fails the same four in a normal run. (Until the PR #62
+fix round the flag computed a lap-blind order in the test and asserted both that it differed from the
+session's and that it equalled it, so it failed whatever the ranking was.)
 
 ### What #60 deferred
 
@@ -247,8 +256,19 @@ unchanged (nearest first, the higher angle first at equal distance), at the pose
 more than `SPAWN_ANGLE_MAX_STEPS` = 6 steps from a fixed one, so a rival's rotation moves at most
 6.5 x 2^-16 = 9.9e-5 rad from the grid's. The bound is exhaustive over the lattice, the C model found the
 same 24,478 and the same worst case (6 steps, at 0.0337 rad), and `field_race_test` re-proves it in the
-engine on every run, so it holds for whatever math library the suite runs on. Past it is a hard failure:
-an assertion (a SCRIPT ERROR that aborts the spawn in any debug build or test) plus an error in release.
+engine on every run, so it holds for whatever math library the suite runs on.
+
+*Past the bound the race is refused* (PR #62 fix round; before it, an assertion only logged and the rival
+was spawned unsnapped). `restart_with_seed` finds every rival's pose before it builds anything. If one is
+past the bound -- another libm could put it there -- it still frees the previous race and swaps in a fresh
+world, but it builds nothing of the new one: no track, no player's car, no rival, no sensing pass. It logs
+the pose with `push_error`, in every build; the status line reads "Race not started: no rival spawn pose
+within the proved bound" and stays up; the physics tick, HUD and pause input do nothing; the snapshot and
+standings are empty; and `get_spawn_failure()` returns the message. A later restart that finds every pose
+builds normally. A refused race is not a player's game that goes on with unsnapped rivals, and it is not
+a quit either: on a phone that would just close the app. `field_race_test` forces the bound to 0 on seed 0
+and asserts all of that, then restores the bound in the same session and asserts the race builds (it
+prints one deliberate `ERROR` line per rival past the forced bound).
 
 The player's pose is not snapped: it is `spawn_transform` exactly, which #60 pins, and on 6 of seeds
 0-19 (0, 4, 7, 15, 16, 19) that is not a fixed point either. On seed 0 it did not reach the race --
@@ -287,7 +307,7 @@ every race. In the game the session is the whole scene, so nothing is. `field_ra
 assertion checks that the `World2D` object changed across the restart. That shows the swap ran; it
 cannot tell a space holding nothing from before from one that carried an outside body in.
 
-**What is asserted** (`tests/field_race_test.gd`, 43 checks, about 3.5 minutes):
+**What is asserted** (`tests/field_race_test.gd`, 80 checks, about 6 minutes):
 
 - **A full-field race.** Twenty rivals on seed 0, mistakes off, the player idle at pole: every rival
   is watched driving and laps, none meets the stuck rule, none leaves the play area or gets lost. The
@@ -300,6 +320,25 @@ cannot tell a space holding nothing from before from one that carried an outside
   rival on the same finishing tick, every rival's control stream identical at 64 bits.
 - **Collision does not desync a run.** All twenty rivals touch another car before finishing (1,771
   contact ticks) and every one's stream is still identical.
+- **Deterministic with mistakes on** (PR #62 fix round). The same two histories on seed 0 with the switch
+  on: the same finishing order and ticks, every rival's control stream identical at 64 bits, and every
+  rival's whole mistake log identical -- plan number, kind, tick, amount, seconds and end. Both races finish on tick 5,523 in the mistakes-off order, with 1,771 contact ticks
+  and 31 mistakes logged, of all three kinds -- the capture's race C figures on the same seed.
+  Guarded by the logs holding at least two kinds, and by the mistakes-on streams differing from the
+  mistakes-off race's (19 of 20 rivals), so the logs compared are of mistakes that acted.
+  `-- --break-mistake-replay` swaps every rival's driver, before its first tick, for one whose draws are
+  offset by a count of every draw made in the process -- a stream consumed from shared state, the
+  global-random-number defect -- and fails `MISTAKES REPLAY` by name (3 of 20 rivals' logs identical), with the finishing-tick and stream checks (2 and 0 of 20).
+- **Each rival is its own driver, through the session** (PR #62 fix round). On seed 7, over the rivals the
+  session spawns and senses: each carries its slot's `car_index` and the `DomainSeed` derivation of its
+  seed, rival 2's seed and skill are the Python values `skill_and_mistakes_test` pins, the twenty skills
+  are twenty different ones, and after two ticks each rival was sensed at its own `sensing_horizon()`
+  (guarded: every rival drove, and the horizons are not all one). Every other assertion of per-car
+  identity builds its own drivers. Falsified in production on copies of the tree: every rival built as
+  `ReactiveDriver.new(seed, 1)` fails the index, seed, Python pin and distinct-skill checks
+  (1 of 20 indices and seeds, 1 distinct skill, rival 2 at another seed; the horizons guard fails with them, one horizon for all); the session sensing every rival at a fixed 48 m fails `HORIZON` (0 of 20: every rival sensed at 600 px, asking for 451-598).
+  Both left every session suite green before this section existed.
+- **Past the snap's bound the race is refused**, with the bound forced to 0 (see above).
 - **The mistake switch is total**: on, all twenty drivers have mistakes on and each has drawn a mistake
   within 25 s; off, none has, none planned one and none logged one over the race.
 - **Every rival spawns at a physics fixed point.** The lattice bound is re-proved over all 411,775
@@ -322,7 +361,8 @@ The test's probe body enters the race's space, so it is part of that space's his
 `capture_field_evidence`'s race A, which has no probe, finished in the same order, on the same last tick
 (5,514) and with the same 1,771 contact ticks as this suite's race 1; streams were not compared between
 the two files. What is asserted here is that one protocol reproduces itself across the two histories.
-Scope: one seed, twenty rivals, one Linux machine, two histories varied. Cross-machine determinism of
+Scope: one seed, twenty rivals, one Linux machine, two histories varied, each once with mistakes off and
+once on. Cross-machine determinism of
 Godot's 2D contact resolution is not established by anything here. `capture_field_evidence` repeats the
 two histories on three more seeds (see "The field at size (#61)").
 
@@ -366,11 +406,19 @@ on 6 of seeds 0-19 that is not a physics fixed point. Seeds 0 and 4 are two of t
 two spawn histories drove the identical race, streams included. That is two seeds' observation; the pin
 stands, and nothing guarantees it on the other four.
 
+**The world did not move.** `tests/capture_world_fingerprints.gd` (headless) prints, for seeds 0-99, the
+four world fingerprints -- geometry, off-track objects, height, terrain -- with the terrain seed and SHA-256
+digests of the centreline, poses, objects and ramps behind them. Its output is
+`docs/evidence/ai-opponents/world-fingerprints-seeds-0-99.txt`. Re-run in the PR #62 fix round, the dump on
+this branch and the same script run on a pristine tree of `447cadb`, the commit before the epic, were both
+byte-identical to that file: no fingerprint and no generated datum of the 100 seeds moved. The file was first
+written by a scratch copy of the script in #61b; the committed script adds only an `--out` switch.
+
 **Scope.** Four seeds reproduced across two histories, twenty-two raced once (the sweep above), one
 machine, one Godot build. That the same seed races the same way on another machine, or with another
 libm, is not shown by anything here.
 
-### Cost
+### Cost of the field
 
 `tests/capture_field_cost.gd`, run windowed: the production session in the game window on seed 0, the
 player idle, physics at 60 ticks a second in real time, vsync off and the frame rate uncapped so a frame
@@ -404,9 +452,10 @@ and five. Nothing proportional to the square of the field shows at this size: th
 scan walks the whole field for every car, and at twenty it is not visible against the queries.
 
 **At twenty, as measured, the mean and the 95th percentile fit the 16.6 ms budget and the worst frame does
-not.** A frame holding a physics tick averages 8.8 ms, 10.5-10.9 ms at the 95th percentile and 15.9-19.1 ms
-at worst: headroom 7.8 ms on the mean and 5.7-6.1 ms at the 95th percentile; the worst frame of one of these
-two runs overran. **The owner judges the epic's "twenty cars hold the frame budget" at the 95th percentile**,
+not.** A frame holding a physics tick averages 8.8 ms, 10.5-10.9 ms at the 95th percentile in these two runs
+(10.5-11.1 ms across all four cost runs of the final driver, with runs 3 and 4 below) and 15.9-19.1 ms at
+worst: headroom 7.8 ms on the mean and 5.7-6.1 ms at the 95th percentile (5.5 ms at the four runs' highest);
+the worst frame of one of these two runs overran. **The owner judges the epic's "twenty cars hold the frame budget" at the 95th percentile**,
 so by that measure twenty rivals hold it; the rare overrunning worst frame is accepted, not fixed. Most of the
 field's cost is the sensing pass, about 210-280 us a
 rival; decisions are about 26-59 us. The maximum was not lowered.
@@ -605,7 +654,7 @@ into a local before the ground ahead is asked for. The order of those lines is t
 `_verify_ground_ahead_survives_a_shared_sample` drives a provider that behaves the same way and
 would read a flat world if the order changed.
 
-### Cost
+### Cost of a sensing pass
 
 Measured on seed 0 with the track's real trees and rocks in the space, twenty cars spread around the
 lap and across the road's width, a 400 px look-ahead. **These are wall-clock numbers and they move
@@ -891,7 +940,9 @@ is a blocked stall, and the driver goes round rather than backing out:
   edge than 1.5 m, at no more than 8 m/s, judging rivals against the line it aims for rather than the
   one it is on (the rival it is passing is beside that line by construction);
 - it lets go once no rival has been within 12 m ahead for 1 s, or after 6 s; mistakes do not begin
-  while it is passing;
+  while it is passing (both unit-checked since the PR #62 fix round: `reactive_driver_test` holds a rival
+  close ahead and sees the pass end at 6 s; `skill_and_mistakes_test` primes a needless lift, offers it its
+  moment on every tick of a pass, and sees none begin);
 - a second blocked stall while passing reverses, the nose swinging toward the other side;
 - a reversal that is not rolling backwards at 0.25 m/s by 0.8 s ends -- a car backing into a queue it
   cannot see stands still or is pushed forwards.
@@ -931,8 +982,9 @@ lane starts a pass, not a reversal, and drives off to the roomier side without b
 both ways round; a second stall reverses toward the other side; a stall with the rival 100 px beside the
 path is an ordinary reversal; a rival in the lane for the stall's first ticks and beside the path by its
 last still starts a pass; a reversal not rolling back 0.8 s in ends, one rolling back at only 10 px/s
-does not. `-- --break-go-round` (no stall is ever caused by a rival) fails seven of them by name; the two it
-should not touch pass.
+does not; and a pass with a rival still close ahead ends at its 6 s timeout. `-- --break-go-round` (no stall
+is ever caused by a rival) fails eight of them by name, the timeout check among them because no pass
+ever starts; the two it should not touch pass.
 
 **Widened, tuned versus held out.** Tuned on seeds 0 and 41 only. `tests/capture_field_evidence.gd
 -- --sweep` raced one field of twenty on each of seeds 0-19, 41 and 58 -- the twenty held-out seeds first
@@ -975,8 +1027,9 @@ margin is not large everywhere: 16 ticks on seed 10. These are 22 seeds, one rac
 `ai/reactive_driver.gd` restored exits 1 with `FAIL: STUCK: seed 41 (tuned) A(mistakes off, new session,
 idle frame): all 20 rivals were watched driving and none meets the stuck rule (20 watched, longest slow
 streak 144 of 120 ticks, by rival 19)`, beside the same failure on seeds 5, 10, 11, 15 and 17 and a LAP
-failure on seed 10. On the committed tree the same seeds pass. Of the nine unit checks above, the restored driver fails
-eight; the ninth, the ordinary stall beside the path, passes as it should.
+failure on seed 10. On the committed tree the same seeds pass. Of the nine unit checks above at the time (the
+timeout check came later), the restored driver fails eight; the ninth, the ordinary stall beside the path,
+passes as it should.
 
 ## Skill and deliberate mistakes (#59)
 
@@ -1060,7 +1113,7 @@ against the real slack -- far beyond 12 m, or shrinking the beliefs -- and that 
 epic, not something #59 can make alone. Skill only ever makes the beliefs more pessimistic, so it
 never eats into that slack.
 
-### Proof
+### Proof of skill and mistakes
 
 `tests/skill_and_mistakes_test.gd`:
 
@@ -1142,9 +1195,11 @@ Said once, in one place, so nobody has to assemble it from the sections above.
 
 - **Other machines.** Every race, every reproduction and every cost here ran on one Linux laptop with one
   Godot build. Nothing shows the same seed racing the same way elsewhere: Godot's 2D contact resolution
-  across machines, and the spawn snap's bound under another libm (Android's, say), are unestablished.
+  across machines, and the spawn snap's bound under another libm (Android's, say), are unestablished. If
+  that bound does not hold there, the session refuses the race rather than racing rivals unsnapped.
 - **Reproduction, as far as it goes.** Four seeds (0, 4, 41, 58) raced the same way across two spawn
-  histories, with mistakes off and on; seed 0 also inside `field_race_test`. Twenty-two seeds were raced
+  histories, with mistakes off and on, in `capture_field_evidence`; on seed 0 `field_race_test` asserts both,
+  mistakes off and mistakes on, on every run. Twenty-two seeds were raced
   once each, **with mistakes off**; the shipped game runs mistakes on, and with mistakes on twenty rivals
   were raced on four seeds and the launched ten on seed 0 only. A race with the player driving -- a human's inputs -- is not reproducible by construction and
   is not what any of this compares.
@@ -1163,10 +1218,12 @@ Said once, in one place, so nobody has to assemble it from the sections above.
   `field_race_test` bounds turn-arounds or wrong-way ticks; a lap counts only forward, in-order checkpoint
   crossings, which rules out a lap driven backwards but not a wrong-way excursion within one. (The seed-41
   suite field prints its turn-arounds: 1.)
-- **The budget's tail.** At twenty rivals the worst frame overran 16.6 ms in five of six cost runs
-  (15.9-24.0 ms); counted in two of them, 1 of 3,586 frames each. Why that frame is long was not measured.
-  The mean and 95th percentile fit; the worst frame does not, and the budget is not described here as held.
-  Nothing was measured on a phone, a slower GPU, with a driving player, or on any track seed but 0.
+- **The budget's tail.** The owner judges the frame budget at the 95th percentile, and by that measure
+  twenty rivals hold it (10.5-11.1 ms of 16.6 ms across the four cost runs of the final driver). The rare
+  overrunning worst frame is the recorded, accepted exception: at twenty rivals the worst frame overran
+  16.6 ms in five of six cost runs (15.9-24.0 ms); counted in two of them, 1 of 3,586 frames each. Why that
+  frame is long was not measured. Nothing was measured on a phone, a slower GPU, with a driving player, or
+  on any track seed but 0.
 - **The late brake does not bite** (see "Skill and deliberate mistakes"), and the driver's beliefs about
   its car are constants a differently tuned session would leave stale.
 - **Rocks on raised ground** are invisible to a grounded car's ray and mask, as the terrain epic left them.
@@ -1182,7 +1239,9 @@ godot --headless --path . --script res://tests/field_race_test.gd
 ```
 
 The first prints one deliberate `ERROR` line from its tuningless-car fixture; that error is the
-behaviour under test. The reactive driver suite takes about four minutes, skill and mistakes about nine.
+behaviour under test. `field_race_test` prints deliberate `ERROR` lines too, one per rival past the snap's
+bound when its refusal check forces that bound to 0 (eight on seed 0). The reactive driver suite takes about
+four minutes, skill and mistakes about nine, the field race about six.
 
 The captures, windowed (a display, not `--headless`); each writes to `docs/evidence/ai-opponents/`:
 
@@ -1190,6 +1249,8 @@ The captures, windowed (a display, not `--headless`); each writes to `docs/evide
 godot --path . --script res://tests/capture_field_evidence.gd              # about 18 min; field-ledger.txt, stills
 godot --headless --path . --script res://tests/capture_field_evidence.gd -- --sweep   # 22 seeds, about 21 min
 godot --path . --script res://tests/capture_field_cost.gd                  # about 6-12 min; field-cost.txt
+godot --headless --path . --script res://tests/capture_world_fingerprints.gd -- --out=/tmp/fingerprints.txt
+diff /tmp/fingerprints.txt docs/evidence/ai-opponents/world-fingerprints-seeds-0-99.txt   # must print nothing
 ```
 
 The sweep asserts without drawing, so it runs headless. The checked-in `field-cost-run-1.txt` to
@@ -1210,6 +1271,8 @@ godot --headless --path . --script res://tests/field_race_test.gd -- --break-spa
 godot --headless --path . --script res://tests/field_race_test.gd -- --break-fresh-world
 godot --headless --path . --script res://tests/field_race_test.gd -- --break-contact-replay
 godot --headless --path . --script res://tests/field_race_test.gd -- --break-go-round
+godot --headless --path . --script res://tests/field_race_test.gd -- --break-mistake-replay
+godot --headless --path . --script res://tests/issue_60_field_test.gd -- --break-standings-order
 ```
 
 | Flag | Suite | What it does |
@@ -1220,11 +1283,13 @@ godot --headless --path . --script res://tests/field_race_test.gd -- --break-go-
 | `--break-mistake-seed` | skill and mistakes | Derives the mistake stream without the car index. Every different-cars assertion fails: 190 of 190 plan pairs the same on each seed, every comparable field pair the same, and the twins log the same mistakes and drive the same lap |
 | `--break-skill-spread` | skill and mistakes | Collapses every derived skill to 0.5. The lap-time spread fails on all three seeds at exactly 0.0%, as do the derived-skill range checks, and the repeat car -- no longer the least skilled -- commits too few mistakes for its guard |
 | `--leak-mistakes` | skill and mistakes | Evidence, not an issue flag: the switch hides the log and nothing else. The twins' suppression check fails (they part on the first mistake's tick) and so do the primed-but-off unit checks; the issue's literal "two identical cars" wording **passes** |
-| `--break-go-round` | reactive driver | No stall counts as caused by a rival, so a car stuck behind a stopped one reverses as before #61. Seven of the going-round unit checks fail; the ordinary-stall and reversal-progress checks pass, as they should. The suite's own field, on seed 0, passes under it -- exactly #58's numbers (longest slow streak 85, worst contact 3.3%) |
+| `--break-go-round` | reactive driver | No stall counts as caused by a rival, so a car stuck behind a stopped one reverses as before #61. Eight of the going-round unit checks fail, the pass timeout among them because no pass starts; the ordinary-stall and reversal-progress checks pass, as they should. The suite's own field, on seed 0, passes under it -- exactly #58's numbers (longest slow streak 85, worst contact 3.3%) |
 | `--break-go-round` | field race | The same substitution for every rival of the seed-41 field, before its first tick. `GO ROUND ... none meets the stuck rule` fails (126 of 120 ticks, by rival 7; 131 reversals) and so does its guard (0 passes); every other check passes. The field-level guard for the fix |
-| `--break-spawn-snap` | field race | Rivals spawn at the raw grid pose. Both `FIXED POSE` checks fail (11,813 of 200,000 seedless; 128 of 440 on the swept seeds), and so do the stream and `COLLISION` checks (15 of 20). **Since the stuck fix the finishing order and ticks on seed 0 no longer change under it**, so those two `DETERMINISTIC` checks pass; at #61a they failed too |
-| `--break-fresh-world` | field race | A restart reuses the space it has (the old race is still freed first). Both `FRESH WORLD` checks fail, and every `DETERMINISTIC` one: 0 of 20 streams identical |
-| `--break-contact-replay` | field race | Evidence, not a production mutation: race 2 moves the first rival to touch another car 0.05 px on that tick. `COLLISION` fails (0 of 20), with the `DETERMINISTIC` assertions it depends on |
+| `--break-spawn-snap` | field race | Rivals spawn at the raw grid pose. Both `FIXED POSE` checks fail (11,813 of 200,000 seedless; 128 of 440 on the swept seeds), and so do the stream and `COLLISION` checks (15 of 20), and with mistakes on the stream check (15 of 20) and `MISTAKES REPLAY` (19 of 20). **Since the stuck fix the finishing order and ticks on seed 0 no longer change under it**, so those `DETERMINISTIC` checks pass, with mistakes off and on; at #61a they failed too |
+| `--break-fresh-world` | field race | A restart reuses the space it has (the old race is still freed first). Every `FRESH WORLD` check fails, and every `DETERMINISTIC` one with mistakes off: 0 of 20 streams identical. With mistakes on the finishing ticks (11 of 20), streams (0 of 20) and `MISTAKES REPLAY` (10 of 20) fail; that pair's order happens to survive |
+| `--break-contact-replay` | field race | Evidence, not a production mutation: race 2 of each pair moves the first rival to touch another car 0.05 px on that tick. `COLLISION` fails (0 of 20), with the `DETERMINISTIC` assertions it depends on; with mistakes on, the three `DETERMINISTIC with mistakes on` checks and `MISTAKES REPLAY` (5 of 20) fail too |
+| `--break-mistake-replay` | field race | In the mistakes-on races, every rival's driver draws its mistakes offset by a process-wide count of draws, so race 2 draws different ones. `MISTAKES REPLAY` fails (3 of 20 logs identical), with `DETERMINISTIC with mistakes on` for finishing ticks (2 of 20) and streams (0 of 20); the mistakes-off races and everything else pass |
+| `--break-standings-order` | issue #60 field | Every session is a `MainSession` whose `_is_ahead_of` drops the lap term. The literal-order assertion fails (`[1, 0, 2, 3]` against `[3, 1, 0, 2]`), with the position, snapshot and HUD checks that read that order: 4 of 4,984 checks. Deleting the lap term from production instead fails the same four in a normal run |
 
 `--break-sense-frame` is the whole point of the frame assertion. The pass reads its car's pose
 exactly once, through `SensingPass._car_frame()`; substituting an identity basis there leaves every
@@ -1235,24 +1300,31 @@ with the flag on, it would not be testing the frame.
 
 ### The whole suite (#61)
 
-Every script under `tests/` that extends `SceneTree`, less the twelve graphical `capture_*` scripts and the
+Every script under `tests/` that extends `SceneTree`, less the thirteen `capture_*` scripts and the
 two fixtures (`height_channel_test_height_provider.gd`, `issue_4_test_surface_provider.gd`): **33 suites,
-run one after another on the final driver, 33 exit 0.** `reactive_driver_test` now has 277 checks,
-`skill_and_mistakes_test` 362, `field_race_test` 37 (43 since #61b's fix round, exit 0, re-run on `8d830f0`). The two captures this task added were run as
-described above (evidence twice, cost twice, the sweep once on each driver).
+run one after another on the final driver, 33 exit 0.** Last run in full, one after another, in the PR #62
+fix round on `a0c21ad`: 33 of 33 exit 0 with no `FAIL` line and no `SCRIPT ERROR` but
+`harness_contract_test`'s deliberate one. `reactive_driver_test` now has 278 checks, `skill_and_mistakes_test`
+365, `field_race_test` 80 and `issue_60_field_test` 4,984. The two field captures #61 added were run as
+described above (evidence twice, cost twice, the sweep once on each driver), and not re-run in the fix
+round, which changed no driver; `capture_world_fingerprints` was.
 
 ### Every mutation flag in the project (#61)
 
 Enumerated from the code, not from a ledger: every `OS.get_cmdline_user_args()` flag under `tests/`
-that breaks production or the evidence -- thirty `--break-*` names, `--break-clearance` read by two
-suites and `--break-go-round` by two, so thirty-two `--break-*` runs, `--leak-mistakes`, and
-`offtrack_object_collision_test`'s `--remove-solid-collider` and `--solid-decoration`. Exploration
+that breaks production or the evidence -- thirty-one `--break-*` names, `--break-clearance` read by two
+suites and `--break-go-round` by two, so thirty-three `--break-*` runs, `--leak-mistakes`, and
+`offtrack_object_collision_test`'s `--remove-solid-collider` and `--solid-decoration`: **36**. Exploration
 switches (`--seeds=`, `--laps-only`, `--recovery-only`, `--trace`, `--blind-to-road-ahead`, `--only=`,
-`--proof-seed-only`, the `issue_4` `--*-only` switches, the captures' `--sweep` and `--no-launched`)
-are not mutations and were not run as such. Each flag below was run once, sequentially, on the final
-driver (`e1aa53e`, whose later commits touch only docs and evidence): **35 run, 35 exit 1** (the 35th, `field_race_test -- --break-go-round`, added in #61b's fix round and run on
-`8d830f0`), every one
-with the suite running to its end, named `FAIL` lines, and no `SCRIPT ERROR`. The first failing
+`--proof-seed-only`, the `issue_4` `--*-only` switches, the captures' `--sweep`, `--no-launched` and
+`--out=`) are not mutations and were not run as such. Each flag below was run once, sequentially, on the
+final driver (`e1aa53e`, whose later commits touch only docs, evidence, tests and the session's spawn
+refusal): 35 run, 35 exit 1, the 35th (`field_race_test -- --break-go-round`) added in #61b's fix round and
+run on `8d830f0`. In the PR #62 fix round every flag of the four suites it changed -- `field_race_test`,
+`issue_60_field_test`, `reactive_driver_test`, `skill_and_mistakes_test` -- was re-run on `a0c21ad`, twelve
+flags including the new `--break-mistake-replay`, and those rows carry the new figures; the other 24 rows are
+from `e1aa53e` and `8d830f0`, and their suites were not changed since. Over the two runs, **36 flags, 36 exit
+1**, every one with the suite running to its end, named `FAIL` lines, and no `SCRIPT ERROR`. The first failing
 assertion is the first `FAIL` line the suite printed; for some flags the assertion the flag targets comes
 later in the same run.
 
@@ -1260,14 +1332,15 @@ later in the same run.
 | --- | --- | --- | --- | --- |
 | `--break-height-layers` | `airborne_obstacle_level_test` | 1 | 6 | the rock is a low collider |
 | `--break-sense-frame` | `driver_senses_test` | 1 | 38 | a car yawed +0 degrees off the road reads -1.570796 rad (expected +0.000000) |
-| `--break-spawn-snap` | `field_race_test` | 1 | 4 | DETERMINISTIC: every rival's control stream is non-empty and identical at 64 bits (15 of 20; diverged: car 16 at tick 1279 (first contact tick 94), car 17 at tick 27 (first contact tick 94), car 18 at tick 101 (first contact ti... |
-| `--break-fresh-world` | `field_race_test` | 1 | 6 | FRESH WORLD: race 1 (new session, spawned in an idle frame): the restart replaced the viewport's World2D (it shows the swap ran, not that nothing outside World came along) |
-| `--break-contact-replay` | `field_race_test` | 1 | 4 | DETERMINISTIC: the same seed and count finish, all twenty, in the same order in both races ([2, 1, 3, 4, 5, 7, 9, 6, 8, 10, 12, 11, 14, 13, 16, 15, 18, 17, 20, 19] against [2, 1, 3, 4, 5, 7, 9, 6, 8, 10, 11, 14, 12, 13, 16, 15,... |
+| `--break-spawn-snap` | `field_race_test` | 1 | 6 | DETERMINISTIC: every rival's control stream is non-empty and identical at 64 bits (15 of 20; diverged: car 16 at tick 1279 (first contact tick 94), car 17 at tick 27 (first contact tick 94), car 18 at tick 101 (first contact ti... |
+| `--break-fresh-world` | `field_race_test` | 1 | 12 | FRESH WORLD: race 1 (new session, spawned in an idle frame): the restart replaced the viewport's World2D (it shows the swap ran, not that nothing outside World came along) |
+| `--break-contact-replay` | `field_race_test` | 1 | 8 | DETERMINISTIC: the same seed and count finish, all twenty, in the same order in both races ([2, 1, 3, 4, 5, 7, 9, 6, 8, 10, 12, 11, 14, 13, 16, 15, 18, 17, 20, 19] against [2, 1, 3, 4, 5, 7, 9, 6, 8, 10, 11, 14, 12, 13, 16, 15,... |
 | `--break-go-round` | `field_race_test` | 1 | 2 | GO ROUND: seed 41, twenty rivals, the player idle at pole: all 20 rivals were watched driving and none meets the stuck rule (20 watched, longest slow streak 126 of 120 ticks, by rival 7) |
+| `--break-mistake-replay` | `field_race_test` | 1 | 3 | DETERMINISTIC with mistakes on: every rival finishes, on the same tick in both races (2 of 20); the targeted `MISTAKES REPLAY` fails third (3 of 20) |
 | `--break-proportional-steering` | `issue_4_vehicle_maneuvers` | 1 | 1 | half steering produces proportional rotation (half 1.10, full 1.10 rad) |
 | `--break-countersteer` | `issue_4_vehicle_maneuvers` | 1 | 1 | counter-steer meaningfully reduces slip (0.56 -> 0.99) |
 | `--break-surface-recovery` | `issue_4_vehicle_maneuvers` | 1 | 1 | reduced off-track grip takes at least 15 more ticks to recover (dirt 30, off-track 30) |
-| `--break-standings-order` | `issue_60_field_test` | 1 | 1 | MUTATION --break-standings-order: ranking without lap counts still puts the car a lap ahead (at an earlier checkpoint) first — expected order [3, 1, 0, 2], lap-blind order [1, 0, 2, 3] |
+| `--break-standings-order` | `issue_60_field_test` | 1 | 4 | standings rank lap count, then checkpoints passed, then progress: [1, 0, 2, 3] |
 | `--break-height-seed` | `jump_ramp_placement_test` | 1 | 60 | seed 0 height fingerprint repeats |
 | `--break-clearance` | `jump_ramp_placement_test` | 1 | 32 | seed 1 height fingerprint repeats |
 | `--break-density` | `jump_ramp_placement_test` | 1 | 3 | seed 0 places at least one ramp |
@@ -1279,7 +1352,7 @@ later in the same run.
 | `--break-rock-corridor` | `offtrack_object_terrain_test` | 1 | 2 | no generated rock in seeds 0..19 is reachable from a flight above the clearance over that rock's own ground (21 reachable) |
 | `--break-steer-heading` | `reactive_driver_test` | 1 | 72 | on the centreline with the nose +0.2 rad off the road, it steers back (steer +0.000) |
 | `--break-brake-distance` | `reactive_driver_test` | 1 | 4 | at 150 px/s the same obstacle is not: it keeps driving (throttle 0.00, brake 1.00) |
-| `--break-go-round` | `reactive_driver_test` | 1 | 7 | stalled behind a stopped rival 52 px ahead and 10 px right of its line, it starts a pass rather than a reversal (reversals 1, passing false, passes 0) |
+| `--break-go-round` | `reactive_driver_test` | 1 | 8 | stalled behind a stopped rival 52 px ahead and 10 px right of its line, it starts a pass rather than a reversal (reversals 1, passing false, passes 0) |
 | `--break-mistake-seed` | `skill_and_mistakes_test` | 1 | 6 | seed 0: no two of twenty rivals plan the same first three mistakes (190 of 190 pairs the same) |
 | `--break-skill-spread` | `skill_and_mistakes_test` | 1 | 10 | seed 0: twenty rivals draw twenty different skills (1 distinct) |
 | `--leak-mistakes` | `skill_and_mistakes_test` | 1 | 15 | primed for late brake but switched off, it drives 150 ticks exactly as a flawless driver |
