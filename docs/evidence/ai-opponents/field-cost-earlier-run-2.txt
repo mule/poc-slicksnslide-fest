@@ -1,0 +1,48 @@
+# Field cost, task #61 part B, on the commit before e1aa53e (the reversal bound), load average 2.3-3.5. Seed 0, the production session in the game window, player idle at pole.
+# Intel(R) Core(TM) i7-10510U CPU @ 1.80GHz; renderer Mesa Intel(R) UHD Graphics (CML GT2); load average at start 1.84 2.53 2.67 1/4000 2004656
+# physics 60 ticks/s at time scale 1.0; vsync 0 (0 = off); max_fps 0
+
+## Per physics tick and per frame, microseconds: mean / p95 / max
+| Rivals | Sensing | Decisions | Physics tick | Frame with a tick | Frame without | Render CPU ms | Render GPU ms |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | 0 / 0 / 0 | 0 / 0 / 0 | 62 / 83 / 190 | 2224 / 3101 / 10179 | 1993 / 2710 / 9550 | 0.673 | 1.039 |
+| 1 | 301 / 450 / 872 | 64 / 92 / 358 | 432 / 626 / 1178 | 2867 / 4068 / 14892 | 2085 / 2873 / 10198 | 0.659 | 1.136 |
+| 5 | 1271 / 1849 / 2911 | 199 / 278 / 721 | 1570 / 2237 / 3429 | 4401 / 6484 / 11810 | 2251 / 3079 / 13031 | 0.678 | 1.184 |
+| 10 | 2575 / 3621 / 8427 | 369 / 542 / 1326 | 3094 / 4318 / 9415 | 6550 / 9093 / 15314 | 2439 / 3265 / 8183 | 0.764 | 1.011 |
+| 20 | 4902 / 6435 / 10640 | 654 / 947 / 1815 | 5758 / 7521 / 12323 | 10031 / 13040 / 19821 | 2685 / 3531 / 13563 | 0.788 | 0.855 |
+
+## Per-car marginal cost of the mean, microseconds per added rival, between consecutive counts
+| From | To | Sensing | Decisions | Physics tick | Frame with a tick |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 1 | 301.2 | 63.6 | 370.1 | 642.9 |
+| 1 | 5 | 242.4 | 33.7 | 284.4 | 383.6 |
+| 5 | 10 | 260.9 | 34.0 | 304.8 | 429.8 |
+| 10 | 20 | 232.7 | 28.6 | 266.4 | 348.1 |
+
+## Budget at 20 rivals: frame with a tick mean 10.03 ms, p95 13.04 ms, max 19.82 ms against 16.6 ms: headroom at p95 3.56 ms
+
+## Height and surface queries across the field, sped up (600 ticks/s at time scale 10), over 1200 ticks from the start
+# a timing wrapper's own cost, measured around the base query's empty sample_at: 1.23 us per call, included in every figure below
+| Rivals | Asked by | Query | Calls per tick | us per tick | us per call |
+| --- | --- | --- | --- | --- | --- |
+| 1 | car | height.sample_at | 4.0 | 58 | 14.46 |
+| 1 | car | surface.sample_at | 2.0 | 77 | 38.74 |
+| 1 | sensing | height.sample_at | 2.0 | 23 | 11.73 |
+| 1 | sensing | surface.road_frame_at | 2.0 | 161 | 80.66 |
+| 1 | sensing | surface.sample_at | 1.0 | 26 | 26.05 |
+| 5 | car | height.sample_at | 12.0 | 122 | 10.20 |
+| 5 | car | surface.sample_at | 6.0 | 172 | 28.74 |
+| 5 | sensing | height.sample_at | 10.0 | 135 | 13.50 |
+| 5 | sensing | surface.road_frame_at | 10.0 | 722 | 72.26 |
+| 5 | sensing | surface.sample_at | 5.0 | 124 | 24.79 |
+| 10 | car | height.sample_at | 22.0 | 182 | 8.27 |
+| 10 | car | surface.sample_at | 11.0 | 273 | 24.84 |
+| 10 | sensing | height.sample_at | 20.0 | 230 | 11.52 |
+| 10 | sensing | surface.road_frame_at | 20.0 | 1249 | 62.51 |
+| 10 | sensing | surface.sample_at | 10.0 | 218 | 21.86 |
+| 20 | car | height.sample_at | 42.0 | 315 | 7.51 |
+| 20 | car | surface.sample_at | 21.0 | 491 | 23.41 |
+| 20 | sensing | height.sample_at | 40.0 | 439 | 10.99 |
+| 20 | sensing | surface.road_frame_at | 40.0 | 2444 | 61.16 |
+| 20 | sensing | surface.sample_at | 20.0 | 420 | 21.02 |
+# load average at end 3.41 3.09 2.85 1/3990 2022830

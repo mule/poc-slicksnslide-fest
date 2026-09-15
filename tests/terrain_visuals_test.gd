@@ -653,6 +653,25 @@ func _verify_rebuild_frees_shading() -> bool:
 	_check(second_shading != null and second_shading.get_child_count() == 1, "the restarted track carries exactly one ground polygon")
 	var second_definition: TrackDefinition = second_runtime.definition
 	_check(second_definition.seed == RESTART_SEED and second_shading != null and second_shading.ground_sample_count() == _walked_count(second_definition.play_area.position.x, second_definition.play_area.end.x, TerrainShading.GROUND_CELL) * _walked_count(second_definition.play_area.position.y, second_definition.play_area.end.y, TerrainShading.GROUND_CELL), "the restarted grid is sized to the new seed's play area")
+	# Task #60 extends the same teardown to a full field: a restart at twenty opponents must free
+	# all twenty-one cars on the next restart, not just the player's.
+	var field_settings := SessionSettings.new()
+	field_settings.opponent_count = 20
+	session.session_settings = field_settings
+	session.call("restart_with_seed", SESSION_SEED)
+	await process_frame
+	var field_mount := session.get_node("World/VehicleMount")
+	var field_cars: Array = []
+	for child in field_mount.get_children():
+		field_cars.append(child)
+	_check(field_cars.size() == 21, "a twenty-opponent restart mounts the full field of twenty-one cars")
+	session.call("restart_with_seed", RESTART_SEED)
+	await process_frame
+	var freed_cars := 0
+	for field_car in field_cars:
+		freed_cars += int(not is_instance_valid(field_car))
+	_check(freed_cars == 21, "the next restart frees every one of the twenty-one cars, not just the player's (%d of %d)" % [freed_cars, field_cars.size()])
+	_check(field_mount.get_child_count() == 21, "the restarted field mounts twenty-one fresh cars")
 	session.free()
 	return true
 
