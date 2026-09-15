@@ -8,4 +8,5 @@ extends AiDriver
 ## inherited one and no assertion could see it — deleting the whole body left the suite green.
 ## What earns this class its place is being a NAME the field and later fixtures can ask for, which
 ## tests/ai_driver_contract_test.gd checks through the seam assertion and the neutral-control loop.
-## When task 3 gives AiDriver real judgement, this class is where the neutral body moves to.
+## The neutral body stays in AiDriver: real judgement arrived as ReactiveDriver (#58), a subclass of
+## AiDriver beside this one, and ai_driver_contract_test pins AiDriver's own neutral controls.
