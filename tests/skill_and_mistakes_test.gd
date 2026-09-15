@@ -14,7 +14,8 @@ extends SceneTree
 ## - **Each kind does what its name says, because the driver chose it.** Against synthetic senses, a
 ##   driver primed to commit one kind is compared tick for tick with a flawless one fed the same
 ##   senses: they agree until the mistake is logged, and then differ in exactly the way the kind says.
-## - **Mistakes wait for clean racing**, end the moment it stops, and lapse if the road offers none.
+## - **Mistakes wait for clean racing**, end the moment it stops, and lapse if the road offers none;
+##   going round a stopped car is not clean racing, so none begins while passing.
 ## - **The same car repeats its mistakes**: the whole logged sequence, not a count, on a real lap --
 ##   with guards that the sequence is long and mixed, so equality is not the equality of two empties.
 ## - **Different cars make different mistakes**: every pair of twenty cars' plans differ, and in a real
@@ -218,6 +219,7 @@ func _run() -> void:
 		_check(_verify_a_wide_line_is_chosen(), "the wide line verification ran to completion")
 		_check(_verify_a_needless_lift_is_chosen(), "the needless lift verification ran to completion")
 		_check(_verify_mistakes_wait_for_clean_racing(), "the clean-racing verification ran to completion")
+		_check(_verify_no_mistake_begins_while_passing(), "the no-mistake-while-passing verification ran to completion")
 	if _wants("plans"):
 		_check(_verify_different_cars_plan_different_mistakes(), "the different-plans verification ran to completion")
 	# The field goes first among the sections that use physics, and that is load-bearing: which race a
@@ -586,6 +588,39 @@ func _verify_mistakes_wait_for_clean_racing() -> bool:
 	for tick in range(ticks):
 		_tick(waiting, _straight_road_senses(400.0))
 	_check(waiting.mistakes_lapsed == 1 and waiting.mistakes_planned == 2 and waiting.mistake_log().is_empty(), "a late brake armed on a straight for %d ticks lapses once, and the next is drawn (%d lapsed, %d planned)" % [ticks, waiting.mistakes_lapsed, waiting.mistakes_planned])
+	return true
+
+
+## Going round a stopped car is not racing cleanly (#61): no mistake begins while the car passes. A driver
+## primed for a needless lift stalls behind a rival 52 px ahead in its lane, which starts a pass, then
+## drives on at 400 px/s on a straight with that rival still close ahead, so the pass holds until its
+## timeout. Guards: it really is passing on every tick after the pass's 1 s of grace, and on each of those
+## ticks the road offers the lift its moment -- the rival is beside the line the pass aims for -- so only
+## the pass keeps the lift from beginning. Dropping the pass from _racing_cleanly fails it.
+func _verify_no_mistake_begins_while_passing() -> bool:
+	var driver := _forced(ReactiveDriver.Mistake.NEEDLESS_LIFT, true, 0.1)
+	var stalled := _straight_road_senses(0.0)
+	stalled.has_rival_ahead = true
+	stalled.rival_offset = Vector2(10.0, -52.0)
+	stalled.rival_distance = stalled.rival_offset.length()
+	var stall_ticks := ceili(ReactiveDriver.STALL_SECONDS / TICK) + 1
+	for tick in range(stall_ticks):
+		_tick(driver, stalled)
+	var alongside := _straight_road_senses(400.0)
+	alongside.has_rival_ahead = true
+	alongside.rival_offset = stalled.rival_offset
+	alongside.rival_distance = stalled.rival_distance
+	var grace_ticks := ceili(ReactiveDriver.RECOVERY_GRACE_SECONDS / TICK) + 1
+	var passing_ticks := roundi((ReactiveDriver.PASS_TIMEOUT_SECONDS - ReactiveDriver.RECOVERY_GRACE_SECONDS) / TICK) - 10
+	var passing := 0
+	var offered := 0
+	for tick in range(grace_ticks + passing_ticks):
+		_tick(driver, alongside)
+		if tick >= grace_ticks:
+			passing += int(driver.get("passing") == true)
+			offered += int(driver.call("_mistake_has_its_moment", ReactiveDriver.Mistake.NEEDLESS_LIFT, 400.0))
+	_check(passing == passing_ticks and offered == passing_ticks, "stalled behind a rival, it goes round it and is still passing %d ticks after the pass's grace, with the road offering a needless lift its moment on every one (%d passing, %d offered)" % [passing_ticks, passing, offered])
+	_check(driver.mistake_log().is_empty() and driver.mistakes_planned == 0, "primed for a needless lift, it begins none while passing (%d planned, %d logged)" % [driver.mistakes_planned, driver.mistake_log().size()])
 	return true
 
 

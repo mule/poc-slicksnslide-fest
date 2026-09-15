@@ -58,7 +58,8 @@ func _init(surface_query: SurfaceQuery = null, height_query: HeightQuery = null)
 ## `field` is every car racing, the sensing car included; `car_index` picks whose point of view this
 ## is. `look_ahead` is the sensing horizon in pixels -- a parameter and not a constant, because how
 ## far ahead a driver sees is the one dial that most changes how it behaves, and task #59 varies it
-## by skill. It bounds all three forward senses: the ground probe, the rival scan and the ray.
+## by skill. It bounds all four forward senses: the road ahead, the ground probe, the rival scan and the
+## ray.
 func sense(field: Array[TopDownCar], car_index: int, look_ahead: float) -> DriverSenses:
 	var senses := DriverSenses.new()
 	if car_index < 0 or car_index >= field.size():

@@ -15,6 +15,14 @@ extends SceneTree
 ##   origin -- what a physics step does to a resting body -- changes nothing. The snap's bound is proved
 ##   over its whole angle lattice in the engine; 200,000 random rotations and every rival on seeds 0-19,
 ##   41 and 58 are checked against it. See _verify_rivals_spawn_at_physics_fixed_points.
+## - **Each rival is its own driver, through the session**: on IDENTITY_SEED every rival the session
+##   spawns carries its slot's car index and the `DomainSeed` derivation of its seed -- rival 2's pinned
+##   to the value computed in Python -- the twenty skills are twenty different ones, and after a tick
+##   each was sensed at its own `sensing_horizon()`, which are not all one horizon. The only assertions
+##   of per-car identity that run on the rivals the game spawns rather than on hand-built drivers.
+## - **Overrunning the snap's bound refuses the race**: a session whose bound is forced to 0 builds no
+##   track, no car and no sensing pass on RACE_SEED, and says why; the same session back at the proved
+##   bound builds the race. Prints one deliberate ERROR line per pose past the bound.
 ## - **The mistake switch is total**: with `opponent_mistakes_enabled` on, every rival's driver has
 ##   mistakes on and plans one; off (the race below), every driver has them off, plans none and logs none.
 ## - **A full-field race** (#60, deferred): twenty rivals on RACE_SEED, mistakes off. Every rival laps,
@@ -26,6 +34,11 @@ extends SceneTree
 ##   runs between spawn and first sense (0 steps against 1, counted by a probe body, not assumed). The
 ##   finishing order, every car's finishing tick, and every car's whole control stream at the 64 bits
 ##   VehicleInputState holds, are identical.
+## - **Deterministic with mistakes on** (#61 criterion 3): the same two histories on RACE_SEED with
+##   `opponent_mistakes_enabled` on. The same order and finishing ticks, every control stream identical
+##   at 64 bits, and every rival's whole mistake log identical. Guarded by the field logging mistakes of at
+##   least two kinds and, when the mistakes-off races ran in the same process, by streams that differ
+##   from the mistakes-off race's.
 ## - **A field that has to go round** (#61): twenty rivals on PASS_SEED, mistakes off, the player idle at
 ##   pole. On #61a's driver this field met the stuck rule (144 of 120 ticks): the player's car, shoved into
 ##   the road, stopped with a queue behind it. Every rival laps, none meets the stuck rule, none strays.
@@ -38,8 +51,9 @@ extends SceneTree
 ##
 ## ## What is not asserted
 ##
-## One seed, twenty rivals, one machine. Two histories are varied, not every history there is; the
-## task #61 report measures more of them. Nothing here says anything across machines.
+## One seed, twenty rivals, one machine, each pair once with mistakes off and once on. Two histories are
+## varied, not every history there is; the task #61 report measures more of them. Nothing here says
+## anything across machines.
 ##
 ## ## Mutations, all must fail
 ##
@@ -56,8 +70,14 @@ extends SceneTree
 ##                               first rival to touch another car is moved 0.05 px on that tick. Must
 ##                               fail the COLLISION assertion, which shows the comparison can see a
 ##                               difference that starts at a contact.
+##   -- --break-mistake-replay   in the mistakes-on races only, every rival's driver is swapped, before
+##                               its first tick, for one whose mistake draws are offset by a count of
+##                               every draw made in the process -- a stream consumed from shared state,
+##                               the global-RNG defect -- so the second race draws different mistakes.
+##                               Must fail the MISTAKES REPLAY assertion.
 ##
-## Exploration: --only=a,b runs only the named sections (zero, poses, switch, race, pass).
+## Exploration: --only=a,b runs only the named sections (zero, poses, refuse, identity, switch, race,
+## mistakes, pass).
 
 const MAIN_SCENE_PATH := "res://session/main.tscn"
 const TUNING_PATH := "res://data/default_vehicle_tuning.tres"
@@ -69,6 +89,13 @@ const FULL_FIELD := 20
 const RACE_SEED := 0
 ## The field #61's stuck fix was diagnosed on.
 const PASS_SEED := 41
+## The seed tests/ai_driver_contract_test.gd and tests/skill_and_mistakes_test.gd pin identity on, and
+## what Python makes of rival 2 there: DomainSeed.child(DomainSeed.derive(1, 7, "ai_driver"), 2, 0), and
+## its skill, DomainSeed.child(domain, 2, 1) / 16^15. Restated here, not derived.
+const IDENTITY_SEED := 7
+const IDENTITY_PINNED_INDEX := 2
+const IDENTITY_PINNED_SEED := 54569277199214867
+const IDENTITY_PINNED_SKILL := 0.1027125029750845
 ## The track race 2's session races first, and for how long, before its restart onto RACE_SEED.
 const OTHER_SEED := 1
 const OTHER_TICKS := 600
@@ -96,13 +123,35 @@ var _break_spawn_snap := false
 var _break_contact_replay := false
 var _break_fresh_world := false
 var _break_go_round := false
+var _break_mistake_replay := false
 var _tuning: VehicleTuning
+## The mistakes-off race 1's control streams, kept for the mistakes-on section's guard when both run.
+var _mistakes_off_streams: Array = []
 
 
 ## --break-go-round: nothing ahead is ever what stopped the car, so every stall is an ordinary reversal.
 class NoGoingRoundDriver extends ReactiveDriver:
 	func _blocked_by_a_rival() -> bool:
 		return false
+
+
+## --break-mistake-replay: every draw is offset by how many draws any such driver in this process has
+## made before it, so a race's mistakes depend on what ran before it.
+class SharedDrawDriver extends ReactiveDriver:
+	static var draws_made := 0
+
+	func _draw(n: int, draw: int) -> float:
+		draws_made += 1
+		return super(n + draws_made, draw)
+
+
+## The refusal check: the snap's bound forced low, so real grid poses overrun it. `max_steps` is set back
+## to the production bound to show the same session then builds its race.
+class TightBoundSession extends MainSession:
+	var max_steps := 0
+
+	func _spawn_angle_max_steps() -> int:
+		return max_steps
 
 
 ## --break-spawn-snap: the pose as the grid built it.
@@ -127,6 +176,7 @@ func _initialize() -> void:
 	_break_contact_replay = arguments.has("--break-contact-replay")
 	_break_fresh_world = arguments.has("--break-fresh-world")
 	_break_go_round = arguments.has("--break-go-round")
+	_break_mistake_replay = arguments.has("--break-mistake-replay")
 	for argument in arguments:
 		if argument.begins_with("--only="):
 			for name in argument.trim_prefix("--only=").split(","):
@@ -148,14 +198,22 @@ func _run() -> void:
 		print("NOTE: --break-fresh-world is on; a restart reuses the physics space it already has.")
 	if _break_go_round:
 		print("NOTE: --break-go-round is on; in the seed %d race no rival goes round a car stopped in front of it." % PASS_SEED)
+	if _break_mistake_replay:
+		print("NOTE: --break-mistake-replay is on; in the mistakes-on races every rival draws its mistakes from shared state.")
 	if _wants("race"):
-		_check(await _verify_the_field_races_the_same_way_twice(), "the race verification ran to completion")
+		_check(await _verify_the_field_races_the_same_way_twice(false), "the race verification ran to completion")
+	if _wants("mistakes"):
+		_check(await _verify_the_field_races_the_same_way_twice(true), "the mistakes-on race verification ran to completion")
 	if _wants("pass"):
 		_check(await _verify_a_field_that_has_to_go_round(), "the go-round field verification ran to completion")
 	if _wants("zero"):
 		_check(await _verify_count_zero_runs_no_field(), "the count-zero verification ran to completion")
 	if _wants("poses"):
 		_check(await _verify_rivals_spawn_at_physics_fixed_points(), "the fixed-pose verification ran to completion")
+	if _wants("refuse"):
+		_check(await _verify_a_pose_past_the_bound_refuses_the_race(), "the refusal verification ran to completion")
+	if _wants("identity"):
+		_check(await _verify_each_rival_is_its_own_driver(), "the identity verification ran to completion")
 	if _wants("switch"):
 		_check(await _verify_the_mistake_switch_reaches_every_rival(), "the mistake switch verification ran to completion")
 	_finish()
@@ -294,6 +352,83 @@ func _is_snapped(pose: Transform2D, raw: Transform2D, bound: float) -> bool:
 	)
 
 
+## I3 of the PR #62 review: past the snap's bound a restart must not place a rival unsnapped. The bound is
+## forced to 0, which real seed-0 grid poses overrun, and the session must build nothing of the race.
+## Then the same session at the production bound restarts onto the same seed and builds it, which shows
+## the refusal is the bound's doing and not a session that cannot build a race at all.
+func _verify_a_pose_past_the_bound_refuses_the_race() -> bool:
+	var session := _new_session(FULL_FIELD, false, RACE_SEED, TightBoundSession)
+	print("NOTE: the refusal check forces the snap's bound to 0; the ERROR lines that follow are the behaviour under test.")
+	root.add_child(session)
+	await process_frame
+	var failure := str(session.call("get_spawn_failure")) if session.has_method("get_spawn_failure") else ""
+	var mounted := session.get_node("World/VehicleMount").get_child_count() + session.get_node("World/TrackMount").get_child_count()
+	_check(not failure.is_empty(), "REFUSED: with the bound forced to 0, seed %d's restart reports a rival pose past it (%s)" % [RACE_SEED, failure])
+	_check(mounted == 0 and (session.get("_rivals") as Array).is_empty() and session.get("_sensing") == null, "REFUSED: and builds nothing of the race: no track, no car, no rival, no sensing pass (%d nodes mounted, %d rivals)" % [mounted, (session.get("_rivals") as Array).size()])
+	_check(session.get_session_snapshot().is_empty() and session.get_race_order().is_empty(), "REFUSED: the snapshot and the standings are empty (%d keys, %d ranked)" % [session.get_session_snapshot().size(), session.get_race_order().size()])
+	var status := session.get_node("%StatusLabel") as Label
+	_check(status.text == MainSession.SPAWN_REFUSED_STATUS and (session.get_node("%StatusPanel") as Control).visible, "REFUSED: the status line says the race did not start (\"%s\")" % status.text)
+	for tick in range(30):
+		await physics_frame
+	await process_frame
+	mounted = session.get_node("World/VehicleMount").get_child_count() + session.get_node("World/TrackMount").get_child_count()
+	_check(mounted == 0 and (session.get_node("%StatusPanel") as Control).visible, "REFUSED: 30 physics ticks later nothing has been built and the status line is still up (%d mounted)" % mounted)
+	session.set("max_steps", MainSession.SPAWN_ANGLE_MAX_STEPS)
+	session.restart_with_seed(RACE_SEED)
+	_check(str(session.call("get_spawn_failure")).is_empty() and (session.get("_rivals") as Array).size() == FULL_FIELD and session.get_node("World/VehicleMount").get_child_count() == FULL_FIELD + 1, "the same session at the proved bound of %d restarts onto seed %d and builds all %d rivals (%d cars mounted)" % [MainSession.SPAWN_ANGLE_MAX_STEPS, RACE_SEED, FULL_FIELD, session.get_node("World/VehicleMount").get_child_count()])
+	session.free()
+	await process_frame
+	return true
+
+
+## I1 of the PR #62 review. What makes one rival differ from another -- its seed, and through it its skill,
+## its mistakes and its look-ahead -- asserted over the rivals the session itself spawns and senses.
+func _verify_each_rival_is_its_own_driver() -> bool:
+	var session := _new_session(FULL_FIELD, false, IDENTITY_SEED)
+	root.add_child(session)
+	await process_frame
+	await physics_frame
+	await physics_frame
+	var rivals: Array = session.get("_rivals")
+	var domain := DomainSeed.derive(1, IDENTITY_SEED, "ai_driver")
+	var own_index := 0
+	var own_seed := 0
+	var driven := 0
+	var skills := {}
+	var horizons := {}
+	var sensed_at_own := 0
+	var mismatched: Array[String] = []
+	var pinned: AiDriver = null
+	for slot in range(rivals.size()):
+		var index := int(rivals[slot]["index"])
+		var driver: AiDriver = rivals[slot]["driver"]
+		own_index += int(index == slot + 1 and driver.car_index == index)
+		own_seed += int(driver.driver_seed == DomainSeed.child(domain, index, 0))
+		driven += int(_driver_int(driver, "_tick") > 0)
+		skills[driver.get("skill")] = true
+		var horizon := driver.sensing_horizon()
+		horizons[horizon] = true
+		var sensed = driver.get("_look_ahead")
+		if sensed != null and float(sensed) == horizon:
+			sensed_at_own += 1
+		else:
+			mismatched.append("rival %d sensed at %s, asks for %.3f" % [index, sensed, horizon])
+		if index == IDENTITY_PINNED_INDEX:
+			pinned = driver
+	_check(rivals.size() == FULL_FIELD and own_index == FULL_FIELD, "IDENTITY: every one of the twenty rivals the session spawns on seed %d drives with its own slot's car index (%d of %d)" % [IDENTITY_SEED, own_index, rivals.size()])
+	_check(own_seed == FULL_FIELD, "IDENTITY: every rival's driver seed is DomainSeed.child(DomainSeed.derive(1, %d, \"ai_driver\"), index, 0) (%d of %d)" % [IDENTITY_SEED, own_seed, rivals.size()])
+	var pinned_seed: int = pinned.driver_seed if pinned != null else -1
+	var pinned_skill = pinned.get("skill") if pinned != null else null
+	_check(pinned_seed == IDENTITY_PINNED_SEED and pinned_skill != null and absf(float(pinned_skill) - IDENTITY_PINNED_SKILL) < 1e-12, "IDENTITY: rival %d's seed and skill are the values computed independently in Python (%d against %d, %s against %.16f)" % [IDENTITY_PINNED_INDEX, pinned_seed, IDENTITY_PINNED_SEED, pinned_skill, IDENTITY_PINNED_SKILL])
+	_check(skills.size() == FULL_FIELD, "IDENTITY: the twenty rivals drive with twenty different skills (%d distinct)" % skills.size())
+	_check(driven == FULL_FIELD, "every rival has sensed and driven at least one tick, so the horizons below were sensed (%d of %d)" % [driven, FULL_FIELD])
+	_check(horizons.size() > 1, "the rivals ask for more than one sensing horizon, so sensing each at its own is not sensing all at one (%d distinct)" % horizons.size())
+	_check(sensed_at_own == FULL_FIELD, "HORIZON: the session senses every rival at the horizon its own driver asks for (%d of %d; %s)" % [sensed_at_own, FULL_FIELD, ", ".join(mismatched)])
+	session.free()
+	await process_frame
+	return true
+
+
 func _verify_the_mistake_switch_reaches_every_rival() -> bool:
 	var session := _new_session(FULL_FIELD, true, RACE_SEED)
 	root.add_child(session)
@@ -312,9 +447,10 @@ func _verify_the_mistake_switch_reaches_every_rival() -> bool:
 	return true
 
 
-func _verify_the_field_races_the_same_way_twice() -> bool:
-	var first := await _race(false)
-	var second := await _race(true)
+func _verify_the_field_races_the_same_way_twice(mistakes: bool) -> bool:
+	var swap: GDScript = SharedDrawDriver if mistakes and _break_mistake_replay else null
+	var first := await _race(false, RACE_SEED, swap, mistakes)
+	var second := await _race(true, RACE_SEED, swap, mistakes)
 	for record in [first, second]:
 		var label: String = record.label
 		_check(record.steps_before_first_sense == (1 if record.after_a_step else 0), "%s: %d physics step(s) ran between spawn and the first sense" % [label, record.steps_before_first_sense])
@@ -324,11 +460,15 @@ func _verify_the_field_races_the_same_way_twice() -> bool:
 		var watched: int = record.watched
 		_check(watched == FULL_FIELD and record.worst_slow < _stuck_ticks(), "FULL FIELD: %s: all %d rivals were watched driving and none meets the stuck rule (%d watched, longest slow streak %d of %d ticks)" % [label, FULL_FIELD, watched, record.worst_slow, _stuck_ticks()])
 		_check(watched == FULL_FIELD and record.strayed == 0, "FULL FIELD: %s: all %d rivals were watched driving and none leaves the play area or gets lost (%d watched, %d strayed)" % [label, FULL_FIELD, watched, record.strayed])
-		_check(watched == FULL_FIELD and record.switched_on == 0 and record.mistakes == 0 and record.planned == 0, "SWITCH OFF: %s: all %d rivals were watched driving and none has mistakes on, plans one or logs one (%d watched, %d on, %d planned, %d logged)" % [label, FULL_FIELD, watched, record.switched_on, record.planned, record.mistakes])
+		if mistakes:
+			_check(watched == FULL_FIELD and record.switched_on == FULL_FIELD and record.mistakes > 0, "SWITCH ON: %s: all %d rivals were watched driving with mistakes on, and the field logged mistakes (%d watched, %d on, %d planned, %d logged)" % [label, FULL_FIELD, watched, record.switched_on, record.planned, record.mistakes])
+		else:
+			_check(watched == FULL_FIELD and record.switched_on == 0 and record.mistakes == 0 and record.planned == 0, "SWITCH OFF: %s: all %d rivals were watched driving and none has mistakes on, plans one or logs one (%d watched, %d on, %d planned, %d logged)" % [label, FULL_FIELD, watched, record.switched_on, record.planned, record.mistakes])
 		_check(is_equal_approx(record.step_delta, TICK), "%s: the session drove at the production step (%.6f s)" % [label, record.step_delta])
-		print("%s: finished %d in %d ticks, order %s, cars touching another before finishing %d, contact ticks %d" % [label, record.finished, record.ticks, record.order, record.touched, record.contact_ticks])
+		print("%s: finished %d in %d ticks, order %s, cars touching another before finishing %d, contact ticks %d, mistakes logged %d" % [label, record.finished, record.ticks, record.order, record.touched, record.contact_ticks, record.mistakes])
 
-	_check(first.order.size() == FULL_FIELD and first.order == second.order, "DETERMINISTIC: the same seed and count finish, all twenty, in the same order in both races (%s against %s)" % [first.order, second.order])
+	var tag := " with mistakes on" if mistakes else ""
+	_check(first.order.size() == FULL_FIELD and first.order == second.order, "DETERMINISTIC%s: the same seed and count finish, all twenty, in the same order in both races (%s against %s)" % [tag, first.order, second.order])
 	var same_finish := 0
 	var same_stream := 0
 	var diverged: Array[String] = []
@@ -339,8 +479,29 @@ func _verify_the_field_races_the_same_way_twice() -> bool:
 			same_stream += 1
 		else:
 			diverged.append("car %d at tick %d (first contact tick %d)" % [slot + 1, difference / 4, first.first_contact[slot]])
-	_check(same_finish == FULL_FIELD, "DETERMINISTIC: every rival finishes, on the same tick in both races (%d of %d)" % [same_finish, FULL_FIELD])
-	_check(same_stream == FULL_FIELD, "DETERMINISTIC: every rival's control stream is non-empty and identical at 64 bits (%d of %d; diverged: %s)" % [same_stream, FULL_FIELD, ", ".join(diverged)])
+	_check(same_finish == FULL_FIELD, "DETERMINISTIC%s: every rival finishes, on the same tick in both races (%d of %d)" % [tag, same_finish, FULL_FIELD])
+	_check(same_stream == FULL_FIELD, "DETERMINISTIC%s: every rival's control stream is non-empty and identical at 64 bits (%d of %d; diverged: %s)" % [tag, same_stream, FULL_FIELD, ", ".join(diverged)])
+
+	if mistakes:
+		var kinds := {}
+		var same_log := 0
+		var differing_logs: Array[String] = []
+		for slot in range(FULL_FIELD):
+			for entry in first.logs[slot]:
+				kinds[entry.kind] = true
+			if first.logs[slot] == second.logs[slot]:
+				same_log += 1
+			else:
+				differing_logs.append("rival %d (%d against %d logged)" % [slot + 1, first.logs[slot].size(), second.logs[slot].size()])
+		_check(first.mistakes > 0 and kinds.size() >= 2, "the mistakes-on race logs mistakes of at least two kinds, so identical logs are not two empty ones (%d logged, %d kinds)" % [first.mistakes, kinds.size()])
+		_check(same_log == FULL_FIELD, "MISTAKES REPLAY: every rival logs the identical mistakes in both races -- plan number, kind, tick, amount, seconds and end (%d of %d; differ: %s)" % [same_log, FULL_FIELD, ", ".join(differing_logs)])
+		if _mistakes_off_streams.size() == FULL_FIELD:
+			var acted := 0
+			for slot in range(FULL_FIELD):
+				acted += int(_first_difference(first.streams[slot], _mistakes_off_streams[slot]) >= 0)
+			_check(acted > 0, "the logged mistakes acted: rivals whose mistakes-on stream differs from the same race with mistakes off (%d of %d)" % [acted, FULL_FIELD])
+		return true
+	_mistakes_off_streams = first.streams
 
 	# Collision. Only a stream that went through contact can show contact did not desync it.
 	var through_contact := 0
@@ -357,7 +518,7 @@ func _verify_the_field_races_the_same_way_twice() -> bool:
 
 ## The seed-41 field: the race-1 protocol (a new session, restarted from an idle frame) on PASS_SEED.
 func _verify_a_field_that_has_to_go_round() -> bool:
-	var record := await _race(false, PASS_SEED, _break_go_round)
+	var record := await _race(false, PASS_SEED, NoGoingRoundDriver if _break_go_round else null)
 	var label := "seed %d, twenty rivals, the player idle at pole" % PASS_SEED
 	var watched: int = record.watched
 	_check(record.finished == FULL_FIELD, "GO ROUND: %s: every one of the twenty rivals laps (%d, in %d ticks)" % [label, record.finished, record.ticks])
@@ -372,13 +533,16 @@ func _verify_a_field_that_has_to_go_round() -> bool:
 # The race
 
 
-## A new session at RACE_SEED with twenty rivals, mistakes off, raced until every rival laps. Its spawn
+## A new session at `seed` with twenty rivals, mistakes as asked, raced until every rival laps. Its spawn
 ## is the session's own restart_with_seed, called either from an idle frame -- the next thing to run
 ## is the session's own sensing -- or from a call deferred out of a physics frame, which runs after the
-## session's _physics_process and before that frame's step, so one step comes first.
-func _race(after_a_step: bool, seed := RACE_SEED, go_round_broken := false) -> Dictionary:
+## session's _physics_process and before that frame's step, so one step comes first. `swap`, when set,
+## is a driver class every rival's driver is replaced by inside that restart, before its first tick.
+func _race(after_a_step: bool, seed := RACE_SEED, swap: GDScript = null, mistakes := false) -> Dictionary:
 	var label := "race 2 (in-session restart after seed %d, spawned before a physics step)" % OTHER_SEED if after_a_step else "race 1 (new session, spawned in an idle frame)"
-	var session := _new_session(FULL_FIELD, false, OTHER_SEED if after_a_step else seed)
+	if mistakes:
+		label += ", mistakes on"
+	var session := _new_session(FULL_FIELD, mistakes, OTHER_SEED if after_a_step else seed)
 	root.add_child(session)
 	await process_frame
 	var probe := _step_probe()
@@ -390,15 +554,9 @@ func _race(after_a_step: bool, seed := RACE_SEED, go_round_broken := false) -> D
 		_check(raced_other >= OTHER_TICKS - 2, "%s: the session raced seed %d first (%d ticks)" % [label, OTHER_SEED, raced_other])
 		world_before = root.world_2d
 		await physics_frame
-		_restart.call_deferred(session, probe, seed)
+		_restart.call_deferred(session, probe, seed, swap)
 	else:
-		_restart(session, probe, seed)
-		if go_round_broken:
-			# Before the first physics frame, so each replacement drives every tick its rival drives.
-			for rival in session.get("_rivals"):
-				var replacement := NoGoingRoundDriver.new(seed, int(rival["index"]))
-				replacement.mistakes_enabled = (rival["driver"] as AiDriver).get("mistakes_enabled") == true
-				rival["driver"] = replacement
+		_restart(session, probe, seed, swap)
 	var rivals: Array = session.get("_rivals")
 	await physics_frame
 	_check(root.world_2d != world_before, "FRESH WORLD: %s: the restart replaced the viewport's World2D (it shows the swap ran, not that nothing outside World came along)" % label)
@@ -408,7 +566,7 @@ func _race(after_a_step: bool, seed := RACE_SEED, go_round_broken := false) -> D
 		"label": label, "after_a_step": after_a_step, "order": [], "finished": 0, "worst_slow": 0, "worst_slow_rival": 0, "strayed": 0,
 		"passes": 0, "reversals": 0, "turn_arounds": 0,
 		"touched": 0, "watched": 0, "contact_ticks": 0, "switched_on": 0, "planned": 0, "mistakes": 0, "ticks": 0,
-		"steps_before_first_sense": -1, "step_delta": 0.0,
+		"steps_before_first_sense": -1, "step_delta": 0.0, "logs": [],
 	}
 	var finish: Array[int] = []
 	var streams: Array[PackedFloat64Array] = []
@@ -474,17 +632,26 @@ func _race(after_a_step: bool, seed := RACE_SEED, go_round_broken := false) -> D
 		record.turn_arounds += _driver_int(driver, "turn_arounds")
 		record.switched_on += int(driver.get("mistakes_enabled") == true)
 		record.planned += _driver_int(driver, "mistakes_planned")
-		record.mistakes += (driver.call("mistake_log") as Array).size() if driver.has_method("mistake_log") else 0
+		var log: Array = driver.call("mistake_log") if driver.has_method("mistake_log") else []
+		record.mistakes += log.size()
+		record.logs.append(log)
 	probe.free()
 	session.free()
 	await process_frame
 	return record
 
 
-## The probe goes in after the restart, into the space the race is hosted in.
-func _restart(session: MainSession, probe: RigidBody2D, seed: int) -> void:
+## The probe goes in after the restart, into the space the race is hosted in. A swap happens here, before
+## the first physics frame, so each replacement drives every tick its rival drives.
+func _restart(session: MainSession, probe: RigidBody2D, seed: int, swap: GDScript) -> void:
 	session.restart_with_seed(seed)
 	root.add_child(probe)
+	if swap == null:
+		return
+	for rival in session.get("_rivals"):
+		var replacement: AiDriver = swap.new(seed, int(rival["index"]))
+		replacement.set("mistakes_enabled", (rival["driver"] as AiDriver).get("mistakes_enabled") == true)
+		rival["driver"] = replacement
 
 
 ## A body that moves exactly one pixel per physics step and touches nothing, so its x counts steps.
@@ -506,10 +673,12 @@ func _step_probe() -> RigidBody2D:
 # Helpers
 
 
-func _new_session(count: int, mistakes: bool, seed: int) -> MainSession:
+func _new_session(count: int, mistakes: bool, seed: int, script: GDScript = null) -> MainSession:
 	var session := (load(MAIN_SCENE_PATH) as PackedScene).instantiate()
-	if _break_spawn_snap or _break_fresh_world:
-		session.set_script(UnsnappedSession if _break_spawn_snap else ReusedSpaceSession)
+	if script == null and (_break_spawn_snap or _break_fresh_world):
+		script = UnsnappedSession if _break_spawn_snap else ReusedSpaceSession
+	if script != null:
+		session.set_script(script)
 		session.vehicle_tuning = _tuning
 	var settings := SessionSettings.new()
 	settings.seed = seed

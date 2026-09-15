@@ -164,11 +164,11 @@ const REVERSE_PROGRESS_SPEED_M := 0.25
 ## Going round a car stopped in the path (#61). A stall with a rival in the lane no further than
 ## PASS_BLOCKED_GAP_M ahead is a blocked stall: nothing in front of the car will ever move it on, and
 ## backing out only to drive up to the same car again cycles for as long as that car stays put. So the
-## reversal swings the nose to the side of the rival with more road, and then the car aims
-## PASS_CLEARANCE_M to that side of whatever rival is nearest ahead within PASS_TRACK_M, never nearer
-## an edge than PASS_EDGE_KEEP_M, at no more than PASS_SPEED_M. The pass ends once no rival has been
-## that close ahead for PASS_CLEAR_SECONDS, or after PASS_TIMEOUT_SECONDS of racing; a stall while
-## passing tries the other side.
+## car goes round it forwards, without reversing: it aims PASS_CLEARANCE_M to the side of the rival with
+## more road -- beside whatever rival is nearest ahead within PASS_TRACK_M -- never nearer an edge than
+## PASS_EDGE_KEEP_M, at no more than PASS_SPEED_M. The pass ends once no rival has been that close ahead
+## for PASS_CLEAR_SECONDS, or after PASS_TIMEOUT_SECONDS of racing. Only a second blocked stall while
+## passing reverses, the nose swinging toward the other side, and passes on that side.
 const PASS_BLOCKED_GAP_M := 8.0
 const PASS_CLEARANCE_M := 4.0
 const PASS_TRACK_M := 12.0

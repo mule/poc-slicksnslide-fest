@@ -33,7 +33,8 @@ extends RefCounted
 ##
 ## ## Reading the fields
 ##
-## The three `*_found` / `has_*` booleans gate the fields around them. When one is false, its
+## The four `road_found` / `road_ahead_found` / `has_rival_ahead` / `has_obstacle_ahead` booleans gate
+## the fields around them. When one is false, its
 ## fields are zero and mean nothing; a driver that ignores the flag and reads the zeros will act as
 ## if it were on the centerline with a clear road ahead. Nothing in this class enforces that -- the
 ## flags are the contract.

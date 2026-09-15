@@ -601,6 +601,7 @@ func _verify_the_recovery_rules() -> bool:
 ## - What stopped it is remembered across the stall: a rival in the lane for the stall's first ticks
 ##   that is beside the path by its last still starts a pass.
 ## - A reversal that is not rolling backwards 0.8 s in ends; one that is keeps going.
+## - A pass ends at its 6 s timeout even with a rival still close ahead.
 ##
 ## Read through get(), so a driver without the pass fails these by name rather than aborting the suite.
 func _verify_it_goes_round_a_stopped_car() -> bool:
@@ -650,6 +651,22 @@ func _verify_it_goes_round_a_stopped_car() -> bool:
 		_one_tick(nothing_ahead, pinned)
 		_one_tick(backing_off, slowly)
 	_check(pinned.mode == ReactiveDriver.Mode.RACE and slowly.mode == ReactiveDriver.Mode.REVERSE, "%d ticks into a reversal, one that has not rolled back ends and one rolling back at only 10 px/s goes on (modes %d and %d)" % [progress_ticks, pinned.mode, slowly.mode])
+
+	# The pass's timeout. After the stall starts a pass, the car moves on at 100 px/s -- no stall -- with
+	# the rival held 52 px ahead, inside the 12 m that keeps a pass going, so only the timeout can end it:
+	# still passing 10 ticks before 6 s, not passing 10 ticks after.
+	var timed := _make_driver(0)
+	for tick in range(stall_ticks):
+		_one_tick(_stalled_behind(10.0), timed)
+	var creeping := _stalled_behind(10.0)
+	creeping.local_velocity = Vector2(0.0, -100.0)
+	var timeout_ticks := roundi(ReactiveDriver.PASS_TIMEOUT_SECONDS / TICK)
+	for tick in range(timeout_ticks - 10):
+		_one_tick(creeping, timed)
+	var before_timeout = timed.get("passing")
+	for tick in range(20):
+		_one_tick(creeping, timed)
+	_check(before_timeout == true and timed.get("passing") == false and timed.reversals == 0, "a pass that still has a rival close ahead ends at its %.0f s timeout: passing %d ticks in, not %d ticks in (%s, then %s; reversals %d)" % [ReactiveDriver.PASS_TIMEOUT_SECONDS, timeout_ticks - 10, timeout_ticks + 10, before_timeout, timed.get("passing"), timed.reversals])
 	return true
 
 
