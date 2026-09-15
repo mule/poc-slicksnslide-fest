@@ -12,11 +12,14 @@ extends SceneTree
 ## still run. Normal invocations sweep seeds 0–19.
 ##
 ## Mutation flag:
-##   -- --break-standings-order  re-ranks the session's own entries with a lap-blind comparator
-##      (checkpoints passed, then distance, then index) and asserts production agrees, so the run
-##      fails on the case a naive comparison gets wrong: the car a lap ahead sits at an earlier
-##      checkpoint. A guard first asserts the lap-blind order differs, so the failing case below
-##      can never pass vacuously.
+##   -- --break-standings-order  every session in this file is a LapBlindSession: MainSession with a
+##      `_is_ahead_of` that drops the lap term (checkpoints passed, then distance, then index). The
+##      scenario is unchanged, so the flag must fail the literal-order assertion ("standings rank lap
+##      count, then checkpoints passed, then progress") on the case a lap-blind ranking gets wrong: the
+##      car a lap ahead sits at an earlier checkpoint. Nothing in the test computes an order of its own.
+##
+## Two rules of the session's tick are pinned here too (PR #62 review, M1): the rivals drive on a tick
+## the player's reset returns early from, and each rival takes the session's `auto_reset_enabled`.
 ##
 ## Deferred to #61 and asserted there, in tests/field_race_test.gd: two runs at the same seed and
 ## count producing identical final standings, a full-field race, and contact not desyncing a run.
@@ -35,18 +38,32 @@ var _checks := 0
 var _break_standings := false
 
 
+## --break-standings-order. The production ranking with its lap term deleted, and nothing else changed.
+class LapBlindSession extends MainSession:
+	func _is_ahead_of(a: Dictionary, b: Dictionary) -> bool:
+		if int(a["checkpoints_passed"]) != int(b["checkpoints_passed"]):
+			return int(a["checkpoints_passed"]) > int(b["checkpoints_passed"])
+		if float(a["next_checkpoint_distance"]) != float(b["next_checkpoint_distance"]):
+			return float(a["next_checkpoint_distance"]) < float(b["next_checkpoint_distance"])
+		return int(a["index"]) < int(b["index"])
+
+
 func _initialize() -> void:
 	_break_standings = OS.get_cmdline_user_args().has("--break-standings-order")
 	call_deferred("_run")
 
 
 func _run() -> void:
+	if _break_standings:
+		print("NOTE: --break-standings-order is on; every session in this run ranks without the lap term.")
 	_check(await _verify_counts_build_playable_sessions(), "counts verification ran to completion")
 	_check(await _verify_zero_opponents_is_today(), "zero-opponent verification ran to completion")
 	_check(await _verify_grid_layout(), "grid layout verification ran to completion")
 	_check(await _verify_car_to_car_collision(), "car-to-car collision verification ran to completion")
 	_check(await _verify_standings(), "standings verification ran to completion")
 	_check(await _verify_rival_reset(), "rival reset verification ran to completion")
+	_check(await _verify_the_field_drives_through_a_player_reset(), "player-reset tick verification ran to completion")
+	_check(await _verify_rivals_take_the_session_auto_reset(), "rival auto-reset setting verification ran to completion")
 	_finish()
 
 
@@ -268,11 +285,6 @@ func _verify_standings() -> bool:
 	session.call("_refresh_hud")
 	_check((session.get_node("%PosLabel") as Label).text == "POS  3/4", "the HUD shows the mid-race position")
 
-	if _break_standings:
-		var naive := _rank_without_laps(session.get_race_entries())
-		_check(naive != session.get_race_order(), "the lap-blind order differs from the real one, so the case below cannot pass vacuously")
-		_check(session.get_race_order() == naive, "MUTATION --break-standings-order: ranking without lap counts still puts the car a lap ahead (at an earlier checkpoint) first — expected order %s, lap-blind order %s" % [str(expected), str(naive)])
-
 	# The tie-break. A fresh field has identical lap and checkpoint progress everywhere; the
 	# distances differ slot by slot because the grid sits on the curve behind the start line, so
 	# the exact first-tick tie is manufactured here rather than assumed.
@@ -350,16 +362,60 @@ func _verify_rival_reset() -> bool:
 	return true
 
 
+## The rivals drive before the player's reset handling, which returns early on a reset tick: a player's
+## reset must not cost the field a tick. The player's own automatic-reset notice is raised -- the same
+## early return a pressed reset takes -- and the session ticked once; every rival's driver must have
+## driven that tick. Moving _drive_field below the early return fails it.
+func _verify_the_field_drives_through_a_player_reset() -> bool:
+	var session := await _open_session(2, SEED)
+	var player := session.get_node("World/VehicleMount/PlayerCar") as TopDownCar
+	var rivals: Array = session.get("_rivals")
+	session.call("_physics_process", TICK)
+	var before: Array[int] = []
+	for rival in rivals:
+		before.append(int((rival["driver"] as AiDriver).get("_tick")))
+	player.set("_auto_reset_notice", true)
+	session.call("_physics_process", TICK)
+	_check(not player.consume_auto_reset_notice(), "the player's reset notice was consumed, so that tick took the reset early return")
+	var drove := 0
+	for slot in range(rivals.size()):
+		drove += int(int((rivals[slot]["driver"] as AiDriver).get("_tick")) == before[slot] + 1)
+	_check(before.size() == 2 and before[0] >= 1 and drove == rivals.size(), "on a tick the player's reset returns early from, every rival still drives (%d of %d; ticks before %s)" % [drove, rivals.size(), str(before)])
+	session.free()
+	await process_frame
+	return true
+
+
+## Each rival takes the session's automatic-reset setting, both ways. The car's own default is off, so it
+## is the "on" session that fails if the session stops passing the setting on.
+func _verify_rivals_take_the_session_auto_reset() -> bool:
+	for enabled: bool in [true, false]:
+		var session := await _open_session(3, SEED, enabled)
+		var matching := 0
+		var rivals: Array = session.get("_rivals")
+		for rival in rivals:
+			matching += int((rival["car"] as TopDownCar).get("_auto_reset_enabled") == enabled)
+		_check(rivals.size() == 3 and matching == 3, "with the session's auto_reset_enabled %s, every rival's car has it %s (%d of %d)" % [enabled, enabled, matching, rivals.size()])
+		session.free()
+		await process_frame
+	return true
+
+
 # --- helpers -----------------------------------------------------------------
 
 
-func _open_session(count: int, seed: int) -> MainSession:
+func _open_session(count: int, seed: int, auto_reset := false) -> MainSession:
 	var scene := load(MAIN_SCENE_PATH) as PackedScene
 	var session := scene.instantiate() as MainSession
+	var tuning: VehicleTuning = session.vehicle_tuning.duplicate()
+	if _break_standings:
+		# set_script drops the scene's exported values; the tuning is carried across by hand.
+		session.set_script(LapBlindSession)
 	var settings := SessionSettings.new()
 	settings.opponent_count = count
+	settings.auto_reset_enabled = auto_reset
 	session.session_settings = settings
-	session.vehicle_tuning = session.vehicle_tuning.duplicate()
+	session.vehicle_tuning = tuning
 	session.vehicle_tuning.mass_kg = 1234.0
 	root.add_child(session)
 	await process_frame
@@ -439,21 +495,6 @@ func _drive_full_lap(session: MainSession, car: TopDownCar, definition: TrackDef
 	for index in range(unique):
 		car.global_position = points[(index + 1) % unique]
 		session.call("_physics_process", TICK)
-
-
-## The comparator a naive implementation writes: everything but the lap count.
-func _rank_without_laps(entries: Array[Dictionary]) -> Array[int]:
-	var sorted_entries := entries.duplicate()
-	sorted_entries.sort_custom(func(a, b):
-		if int(a["checkpoints_passed"]) != int(b["checkpoints_passed"]):
-			return int(a["checkpoints_passed"]) > int(b["checkpoints_passed"])
-		if float(a["next_checkpoint_distance"]) != float(b["next_checkpoint_distance"]):
-			return float(a["next_checkpoint_distance"]) < float(b["next_checkpoint_distance"])
-		return int(a["index"]) < int(b["index"]))
-	var order: Array[int] = []
-	for entry in sorted_entries:
-		order.append(int(entry["index"]))
-	return order
 
 
 func _capsule_clearance(a: TopDownCar, b: TopDownCar) -> float:
