@@ -15,6 +15,7 @@ const GRID_COLUMN_FRACTION := 0.25
 ## _physics_fixed_pose.
 const SPAWN_ANGLE_LATTICE := 65536.0
 const SPAWN_ANGLE_MAX_STEPS := 6
+const SPAWN_REFUSED_STATUS := "Race not started: no rival spawn pose within the proved bound"
 
 @export var session_settings: Resource
 @export var vehicle_tuning: Resource
@@ -35,6 +36,8 @@ var _rivals: Array[Dictionary] = []
 var _field_surface_map: TrackSurfaceMap
 ## The field's one sensing pass (#57): the session owns the field, so it senses for every driver.
 var _sensing: SensingPass
+## Why the last restart refused to build its race, or empty when it built one. See _refuse_the_race.
+var _spawn_failure := ""
 
 @onready var _diagnostics_overlay: CanvasLayer = %DiagnosticsOverlay
 @onready var _seed_label: Label = %SeedLabel
@@ -173,6 +176,8 @@ func _field_cars() -> Array[TopDownCar]:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _trial == null:
+		return
 	if event.is_action_pressed("pause_back") and not _event_is_echo(event):
 		set_session_paused(not _trial.paused)
 		get_viewport().set_input_as_handled()
@@ -200,8 +205,17 @@ func restart_with_seed(seed: int) -> void:
 	_rivals.clear()
 	_field_surface_map = null
 	_sensing = null
+	_spawn_failure = ""
 	_host_race_in_a_fresh_world()
 	_track_definition = TrackGenerator.new().generate(seed)
+	# Every rival's pose is found before anything of the race is built, so a pose past the proved bound
+	# refuses the whole race rather than placing one car unsnapped.
+	var rival_poses: Array[Transform2D] = []
+	for index in range(1, _opponent_count + 1):
+		rival_poses.append(_physics_fixed_pose(_grid_slot_transform(index)))
+	if not _spawn_failure.is_empty():
+		_refuse_the_race()
+		return
 	var runtime := TrackRuntime.new(_track_definition)
 	runtime.name = "GeneratedTrack"
 	install_track(runtime)
@@ -229,7 +243,7 @@ func restart_with_seed(seed: int) -> void:
 	if _opponent_count > 0:
 		_sensing = SensingPass.new(_field_surface_map, runtime.height_query())
 		for index in range(1, _opponent_count + 1):
-			_spawn_rival(index)
+			_spawn_rival(index, rival_poses[index - 1])
 	_controller_input.suppress_until_controls_released()
 	_refresh_hud()
 	_show_status("Seed %d ready" % _current_seed)
@@ -289,29 +303,60 @@ func _centerline_pose_behind(arc_length: float) -> Transform2D:
 ## can round to, 24,478 are moved by a step, and none is more than SPAWN_ANGLE_MAX_STEPS = 6 steps from
 ## a fixed one -- at most 9.9e-5 rad of rotation. That bound is exhaustive over the lattice and
 ## tests/field_race_test.gd re-proves it in the engine, so it holds for the math library the suite runs
-## on. Past it is a hard failure: an assertion in a debug build and in every test run, and an error in a
-## release build.
+## on. Past it -- another libm could put it there -- there is no pose to return: this records the failure
+## in _spawn_failure, logs it with push_error in every build, and returns the raw pose, which
+## restart_with_seed never places, because it refuses the race (_refuse_the_race).
 func _physics_fixed_pose(pose: Transform2D) -> Transform2D:
+	var max_steps := _spawn_angle_max_steps()
 	var nearest := roundi(pose.get_rotation() * SPAWN_ANGLE_LATTICE)
-	for distance in range(SPAWN_ANGLE_MAX_STEPS + 1):
+	for distance in range(max_steps + 1):
 		for index in [nearest + distance, nearest - distance]:
 			var candidate := Transform2D(index / SPAWN_ANGLE_LATTICE, pose.origin)
 			if Transform2D(candidate.get_rotation(), candidate.origin) == candidate:
 				return candidate
-	var message := "MainSession: no physics fixed spawn rotation within %d lattice steps of %s" % [SPAWN_ANGLE_MAX_STEPS, pose]
+	var message := "MainSession: no physics fixed spawn rotation within %d lattice steps of %s" % [max_steps, pose]
 	push_error(message)
-	assert(false, message)
+	if _spawn_failure.is_empty():
+		_spawn_failure = message
 	return pose
 
 
-func _spawn_rival(index: int) -> void:
+## SPAWN_ANGLE_MAX_STEPS, behind a method so tests/field_race_test.gd can force the bound low and watch
+## the race be refused. Nothing in the game overrides it.
+func _spawn_angle_max_steps() -> int:
+	return SPAWN_ANGLE_MAX_STEPS
+
+
+## A rival pose past the proved bound: the restart has already freed the previous race and swapped in a
+## fresh world, and it builds nothing of this one -- no track, no player's car, no rival, no sensing
+## pass. With no trial the session's physics tick, HUD and pause input do nothing, the snapshot and
+## standings are empty, and the status line says why and stays up (_show_status writes nothing over it). get_spawn_failure() names the pose.
+## A new restart (another seed, or this one on a math library the bound holds for) builds normally.
+func _refuse_the_race() -> void:
+	_trial = null
+	_vehicle = null
+	_checkpoint_detector = null
+	_track_runtime = null
+	_pause_overlay.visible = false
+	_status_label.text = SPAWN_REFUSED_STATUS
+	_status_panel.visible = true
+	_status_hide_at_msec = 0
+
+
+## Why the last restart refused to build its race, or empty when it built one.
+func get_spawn_failure() -> String:
+	return _spawn_failure
+
+
+## `pose` is the slot's physics fixed pose, found by restart_with_seed before anything was built.
+func _spawn_rival(index: int, pose: Transform2D) -> void:
 	var car := VEHICLE_SCENE.instantiate() as TopDownCar
 	car.name = "RivalCar%d" % index
 	# _ready() reads the session tuning for mass and captures the grid pose for safe resets.
 	# The scene has default tuning, but it must not override a session's custom tuning.
 	# The camera stays disabled through the scene default.
 	car.tuning = vehicle_tuning
-	car.global_transform = _physics_fixed_pose(_grid_slot_transform(index))
+	car.global_transform = pose
 	%VehicleMount.add_child(car)
 	car.set_surface_query(_field_surface_map)
 	car.set_height_query(_track_runtime.height_query())
@@ -497,6 +542,10 @@ func _show_input_status() -> void:
 
 
 func _show_status(message: String, seconds := 3.0) -> void:
+	# A refused race's status line stays up: nothing else the session reports matters until a restart
+	# builds a race.
+	if not _spawn_failure.is_empty():
+		return
 	_status_label.text = message
 	_status_panel.visible = true
 	_status_hide_at_msec = Time.get_ticks_msec() + roundi(seconds * 1000.0)
